@@ -2,7 +2,7 @@ import {test,expect} from '@playwright/test';
 
 test('desktop screener, chart, backtest, optimization and CSV import',async ({page})=>{
   const errors=[];page.on('pageerror',e=>errors.push(e.message));
-  await page.goto('/');
+  await page.goto('./');
   await expect(page.getByRole('heading',{name:'Screener'})).toBeVisible();
   await expect(page.locator('tr[data-symbol]')).toHaveCount(4);
   await page.locator('.sidebar [data-tab="charts"]').click();
@@ -29,7 +29,7 @@ test('desktop screener, chart, backtest, optimization and CSV import',async ({pa
 test('mobile navigation and candlestick canvas',async ({page})=>{
   const errors=[];page.on('pageerror',e=>errors.push(e.message));
   await page.setViewportSize({width:390,height:844});
-  await page.goto('/');
+  await page.goto('./');
   await expect(page.locator('.mobile-nav')).toBeVisible();
   await page.locator('.mobile-nav [data-tab="charts"]').click();
   await expect(page.locator('#price-chart canvas').first()).toBeVisible();
