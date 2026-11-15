@@ -1,2 +1,2 @@
 import { defineConfig } from 'vite';
-export default defineConfig({ base: '/Repository-12/', build:{target:'es2022'} });
+export default defineConfig({ base: '/market-lens-pro/', build:{target:'es2022'} });
