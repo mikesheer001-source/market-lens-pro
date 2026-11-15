@@ -150,43 +150,52 @@ function signalSets(bars,o={}){
 
 function backtest(bars,opts={}){
   const valid=normalizeBars(bars||[]),start=Math.max(1,Math.floor(opts.startIndex||1)),end=Math.min(valid.length-1,opts.endIndex===undefined?valid.length-1:Math.floor(opts.endIndex));
-  const initial=Math.max(1,Number(opts.capital||10000)),allocation=Math.max(.01,Math.min(100,Number(opts.allocation??100)))/100,fee=Math.max(0,Number(opts.feeBps??1))/10000,slip=Math.max(0,Number(opts.slipBps??2))/10000,stop=Math.max(0,Number(opts.stopPct||0))/100,target=Math.max(0,Number(opts.targetPct||0))/100;
+  const initial=Math.max(1,Number(opts.capital||10000)),allocation=Math.max(.01,Math.min(100,Number(opts.allocation??100)))/100;
+  const fee=Math.max(0,Number(opts.feeBps??1))/10000,slip=Math.max(0,Number(opts.slipBps??2))/10000,stop=Math.max(0,Number(opts.stopPct||0))/100,target=Math.max(0,Number(opts.targetPct||0))/100;
+  const side=opts.side==='short'?'short':'long',annualPeriods=opts.timeframe==='W'?52:opts.timeframe==='M'?12:252,borrowRate=side==='short'?Math.max(0,Number(opts.borrowAnnualPct||0))/100/annualPeriods:0;
   if(valid.length<3||start>end)return {metrics:{trades:0,returnPct:0,maxDD:0,profitFactor:null,sharpe:null,winPct:null},curve:[],trades:[],notice:'Not enough price bars'};
   const signals=signalSets(valid,opts);let cash=initial,pos=null,peak=initial,maxDD=0,exposed=0;const curve=[],trades=[];
   function close(i,raw,reason){
     if(!pos)return;
-    const price=raw*(1-slip),proceeds=pos.qty*price*(1-fee),pnl=proceeds-pos.cost;
-    cash+=proceeds;
-    trades.push({entry:valid[pos.index].time,exit:valid[i].time,buy:pos.price,sell:price,qty:pos.qty,pnl,pnlPct:100*pnl/pos.cost,reason,barsHeld:i-pos.index});
+    const price=raw*(side==='short'?1+slip:1-slip);
+    const exitFee=pos.qty*price*fee;
+    const pnl=side==='long'?pos.qty*price-exitFee-pos.cost:pos.qty*(pos.price-price)-pos.entryFee-exitFee-pos.borrow;
+    if(side==='long')cash+=pos.qty*price-exitFee;
+    else cash+=pos.reserved+pos.qty*(pos.price-price)-exitFee;
+    trades.push({entry:valid[pos.index].time,exit:valid[i].time,buy:pos.price,sell:price,qty:pos.qty,pnl,pnlPct:100*pnl/pos.cost,reason,barsHeld:i-pos.index,side});
     pos=null;
   }
   for(let i=start;i<=end;i++){
     const b=valid[i];
-    if(pos&&signals.sell[i-1])close(i,b.open,'Signal');
-    if(!pos&&signals.buy[i-1]&&cash>0){
-      const price=b.open*(1+slip),budget=cash*allocation,qty=Math.min(budget,cash)/(price*(1+fee));
-      if(qty>0){const cost=qty*price*(1+fee);cash-=cost;pos={qty,price,cost,index:i};}
+    const shouldExit=side==='long'?signals.sell[i-1]:signals.buy[i-1];
+    const shouldEnter=side==='long'?signals.buy[i-1]:signals.sell[i-1];
+    if(pos&&shouldExit)close(i,b.open,'Signal');
+    if(!pos&&shouldEnter&&cash>0){
+      const price=b.open*(side==='short'?1-slip:1+slip),budget=cash*allocation;
+      const qty=Math.min(budget,cash)/(price*(1+fee));
+      if(qty>0){const entryFee=qty*price*fee,reserved=qty*price,cost=reserved+entryFee;cash-=cost;pos={qty,price,cost,index:i,reserved,entryFee,borrow:0};}
     }
     if(pos&&(stop||target)){
-      const stopLevel=pos.price*(1-stop),targetLevel=pos.price*(1+target);
-      // Stop wins ties: a conservative rule when both levels trade within the same bar.
-      if(stop&&b.low<=stopLevel)close(i,Math.min(b.open,stopLevel),'Stop');
-      else if(target&&b.high>=targetLevel)close(i,Math.max(b.open,targetLevel),'Target');
+      const stopLevel=side==='short'?pos.price*(1+stop):pos.price*(1-stop);
+      const targetLevel=side==='short'?pos.price*(1-target):pos.price*(1+target);
+      // If both intrabar stop and target trigger, assume stop hits first.
+      if(stop&&(side==='short'?b.high>=stopLevel:b.low<=stopLevel))close(i,side==='short'?Math.max(b.open,stopLevel):Math.min(b.open,stopLevel),'Stop');
+      else if(target&&(side==='short'?b.low<=targetLevel:b.high>=targetLevel))close(i,side==='short'?Math.min(b.open,targetLevel):Math.max(b.open,targetLevel),'Target');
     }
+    if(pos&&borrowRate){const interest=pos.qty*b.close*borrowRate;cash-=interest;pos.borrow+=interest;}
     if(pos)exposed++;
-    let equity=cash+(pos?pos.qty*b.close:0);
+    let equity=cash+(pos?(side==='short'?pos.reserved+pos.qty*(pos.price-b.close):pos.qty*b.close):0);
     if(i===end&&pos){close(i,b.close,'End of data');equity=cash;}
     peak=Math.max(peak,equity);maxDD=Math.max(maxDD,peak?100*(peak-equity)/peak:0);
     curve.push({time:b.time,value:equity});
   }
   const gain=trades.filter(t=>t.pnl>0).reduce((x,t)=>x+t.pnl,0),loss=-trades.filter(t=>t.pnl<0).reduce((x,t)=>x+t.pnl,0);
-  const returns=curve.slice(1).map((p,i)=>p.value/curve[i].value-1);
+  const returns=curve.slice(1).map((p,i)=>curve[i].value>0?p.value/curve[i].value-1:0);
   const mean=returns.reduce((a,b)=>a+b,0)/Math.max(1,returns.length),variance=returns.reduce((v,x)=>v+(x-mean)**2,0)/Math.max(1,returns.length-1);
-  const period=opts.timeframe==='W'?52:opts.timeframe==='M'?12:252,sharpe=variance>0?mean/Math.sqrt(variance)*Math.sqrt(period):null;
+  const sharpe=variance>0?mean/Math.sqrt(variance)*Math.sqrt(annualPeriods):null;
   const years=(stamp(valid[end].time)-stamp(valid[start].time))/(86400*365.25),final=curve.at(-1).value,total=final/initial-1;
-  return {metrics:{startEquity:initial,endEquity:final,returnPct:total*100,cagrPct:years>0?((final/initial)**(1/years)-1)*100:null,maxDD,trades:trades.length,winPct:trades.length?100*trades.filter(t=>t.pnl>0).length/trades.length:null,profitFactor:loss>0?gain/loss:null,sharpe,exposurePct:100*exposed/curve.length,buyHoldPct:100*(valid[end].close/valid[start].open-1)},curve,trades,notice:valid.some(b=>b.approximateOhlc)?'Close-only input: OHLC values were approximated; stop/target fills are not realistic.':null};
+  return {metrics:{startEquity:initial,endEquity:final,returnPct:total*100,cagrPct:years>0&&final>0?((final/initial)**(1/years)-1)*100:null,maxDD,trades:trades.length,winPct:trades.length?100*trades.filter(t=>t.pnl>0).length/trades.length:null,profitFactor:loss>0?gain/loss:null,sharpe,exposurePct:100*exposed/curve.length,buyHoldPct:100*(valid[end].close/valid[start].open-1)},curve,trades,notice:valid.some(b=>b.approximateOhlc)?'Close-only input: OHLC values were approximated; stop/target fills are not realistic.':null};
 }
-
 function parameterSweep(bars,options={}){
   const strategy=options.strategy||'ema-cross',sets=[];
   if(strategy==='ema-cross'){for(const fast of [8,15,25])for(const slow of [50,100,200])if(fast<slow)sets.push({fast,slow});}
