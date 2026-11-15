@@ -20,6 +20,6 @@ npm run build
 
 ## Deployment
 
-Settings > Pages > Build and deployment > Source: **GitHub Actions**. The included workflow deploys on pushes to main. Expected URL once GitHub Pages is enabled: https://mikesheer001-source.github.io/Repository-12/
+Settings > Pages > Build and deployment > Source: **GitHub Actions**. The included workflow deploys on pushes to main. Expected URL once GitHub Pages is enabled: https://mikesheer001-source.github.io/market-lens-pro/
 
 The original source is https://github.com/mikesheer001-source/market-lens. This is a separate application, not a byte-for-byte copy. No private API key or hosted service was copied.
