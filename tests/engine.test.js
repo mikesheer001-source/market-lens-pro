@@ -59,3 +59,22 @@ test('sample observations are deterministic',()=>{
  const a=sampleData(),b=sampleData();
  assert.equal(a['DEMO-VXX'][120].close,b['DEMO-VXX'][120].close);
 });
+
+
+test('short-selling enters on bearish breakout and covers after target',()=>{
+ const b=Array.from({length:45},(_,i)=>bar(i));
+ b[25]=bar(25,100,101,83,85);
+ b[26]=bar(26,80,85,68,74);
+ const run=backtest(b,{strategy:'breakout',side:'short',period:20,targetPct:10,feeBps:0,slipBps:0});
+ assert.ok(run.trades.length>=1);assert.equal(run.trades[0].entry,day(26));
+ assert.equal(run.trades[0].buy,80);assert.equal(run.trades[0].sell,72);
+ assert.equal(run.trades[0].reason,'Target');assert.ok(run.trades[0].pnl>0);
+});
+test('borrow fees reduce short strategy equity',()=>{
+ const b=Array.from({length:55},(_,i)=>bar(i));
+ b[25]=bar(25,100,101,83,85);
+ for(let i=26;i<55;i++)b[i]=bar(i,80,83,79,81);
+ const base={strategy:'breakout',side:'short',period:20,feeBps:0,slipBps:0};
+ const free=backtest(b,{...base,borrowAnnualPct:0}),charged=backtest(b,{...base,borrowAnnualPct:50});
+ assert.ok(charged.metrics.endEquity<free.metrics.endEquity);
+});
