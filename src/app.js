@@ -20,10 +20,10 @@ async function initApp(){
     momentum:[{metric:'ret20',tf:'D',op:'>',value:10},{metric:'emaDist',tf:'D',op:'>',value:0}],
     all:[]
   };
-  const defaultSettings={tf:'D',style:'candles',log:false,ema20:true,ema50:false,ema200:true,sma20:false,bollinger:false,volume:true,rsi:true,macd:false,rsiPeriod:14,bollPeriod:20,lines:{}};
+  const defaultSettings={tf:'D',style:'candles',log:false,ema20:true,ema50:false,ema200:true,sma20:false,bollinger:false,volume:true,rsi:true,macd:false,rsiPeriod:14,bollPeriod:20,ema20Len:20,ema50Len:50,ema200Len:200,sma20Len:20,lines:{}};
   const defaultBacktest={strategy:'ema-cross',fast:20,slow:100,rsiPeriod:14,buyLevel:30,sellLevel:65,period:20,multiplier:2,capital:10000,allocation:100,feeBps:1,slipBps:2,stopPct:0,targetPct:0};
   let saved={};try{saved=JSON.parse(localStorage.getItem('market-lens-pro-settings')||'{}')||{};}catch{}
-  const S={tab:'screener',data:new Map(Object.entries(sampleData())),sources:new Map(),symbol:'DEMO-SPY',query:'',watch:new Set(saved.watch||[]),rules:saved.rules||preset.trend.map(x=>({...x})),sort:'symbol',ascending:true,showOnlyMatches:false,chart:{...defaultSettings,...saved.chart},bt:{...defaultBacktest,...saved.bt},result:null,sweep:null,drawLine:false};
+  const S={tab:'screener',data:new Map(Object.entries(sampleData())),sources:new Map(),symbol:'DEMO-SPY',query:'',watch:new Set(saved.watch||[]),rules:saved.rules||preset.trend.map(x=>({...x})),sort:'symbol',ascending:true,showOnlyMatches:false,showWatch:false,chart:{...defaultSettings,...saved.chart},bt:{...defaultBacktest,...saved.bt},result:null,sweep:null,drawLine:false};
   for(const symbol of S.data.keys())S.sources.set(symbol,'SIMULATED');
   let chart=null,equityChart=null;
   const saveSettings=()=>{try{localStorage.setItem('market-lens-pro-settings',JSON.stringify({watch:[...S.watch],rules:S.rules,chart:S.chart,bt:S.bt}));}catch{}};
@@ -51,7 +51,7 @@ async function initApp(){
   function screenerRows(){
     const list=[];
     for(const [symbol,history] of S.data){const evalResult=screenSymbol(history,S.rules),d=statsFor(aggregate(history,'D')),w=statsFor(aggregate(history,'W')),h=statsFor(aggregate(history,'2H'));
-      if(S.showOnlyMatches&&!evalResult.pass)continue;if(S.query&&!symbol.toLowerCase().includes(S.query.toLowerCase()))continue;
+      if(S.showOnlyMatches&&!evalResult.pass)continue;if(S.showWatch&&!S.watch.has(symbol))continue;if(S.query&&!symbol.toLowerCase().includes(S.query.toLowerCase()))continue;
       list.push({symbol,evalResult,d,w,h,source:S.sources.get(symbol)});}
     const value=r=>S.sort==='symbol'?r.symbol:S.sort==='rsi'?r.d.rsi:S.sort==='ret20'?r.d.ret20:S.sort==='price'?r.d.price:S.sort==='ema'?r.w.ema200===null?null:100*(r.w.price/r.w.ema200-1):r.d.drawdown;
     list.sort((a,b)=>{const x=value(a),y=value(b);if(x==null)return 1;if(y==null)return -1;return (typeof x==='string'?x.localeCompare(y):x-y)*(S.ascending?1:-1);});
@@ -65,17 +65,17 @@ async function initApp(){
     }).join('');
     return head('Screener','Custom filters across multiple timeframes. Missing history never counts as a match.',button('Open Chart Lab','view-charts','primary'))+
       '<div class="metrics">'+metric('Symbols loaded',S.data.size,'Imported and simulated')+metric('Matching filters',matched,'All loaded symbols')+metric('Visible results',rows.length,'Search and match filter')+metric('Active conditions',S.rules.length,'AND logic; all must pass')+'</div>'+
-      '<div class="panel"><div class="panel-header"><h2>Screen rules</h2><div class="flex"><label class="control">Preset '+select([['trend','Trend pullback'],['original','Original strict W/D/2H'],['oversold','RSI oversold'],['momentum','Momentum'],['all','Show all']],S.rules.length?'custom':'all','data-option="preset"')+'</label>'+button('+ Add rule','add-rule')+'</div></div><div class="panel-body"><div class="filters">'+(rules||'<span class="muted">No filters — showing all instruments.</span>')+'</div><div class="section-note" style="margin-top:12px">“Original strict” reproduces the weekly EMA200 and weekly/daily/two-hour RSI screen logic. Two-hour rules require intraday bars. Data shorter than a metric’s lookback is not eligible.</div></div></div>'+
-      '<div class="panel"><div class="panel-header"><h2>Market results</h2><div class="flex"><input class="textinput" data-input="search" placeholder="Search symbol…" value="'+esc(S.query)+'"/><label class="inline-check"><input type="checkbox" data-option="matches" '+(S.showOnlyMatches?'checked':'')+'/>Matches only</label><label class="control">Sort '+select([['symbol','Symbol'],['price','Price'],['rsi','RSI'],['ret20','20D return'],['ema','Weekly % EMA'],['drawdown','Drawdown']],S.sort,'data-option="sort"')+'</label>'+button(S.ascending?'↑':'↓','sort-order','small')+'</div></div><div class="table-wrap"><table class="data-table"><thead><tr><th>Symbol</th><th>Close</th><th>RSI D</th><th>RSI W</th><th>RSI 2H</th><th>% vs W EMA200</th><th>20D return</th><th>DD</th><th>Bars</th><th>Result</th></tr></thead><tbody>'+table+'</tbody></table>'+(rows.length?'':'<div class="empty">No matching symbols. Change a filter or import more price history.</div>')+'</div></div>';
+      '<div class="panel"><div class="panel-header"><h2>Screen rules</h2><div class="flex"><label class="control">Preset '+select([['custom','Custom rules'],['trend','Trend pullback'],['original','Original strict W/D/2H'],['oversold','RSI oversold'],['momentum','Momentum'],['all','Show all']],Object.entries(preset).find(([key,r])=>JSON.stringify(r)===JSON.stringify(S.rules))?.[0]||'custom','data-option="preset"')+'</label>'+button('+ Add rule','add-rule')+'</div></div><div class="panel-body"><div class="filters">'+(rules||'<span class="muted">No filters — showing all instruments.</span>')+'</div><div class="section-note" style="margin-top:12px">“Original strict” reproduces the weekly EMA200 and weekly/daily/two-hour RSI screen logic. Two-hour rules require intraday bars. Data shorter than a metric’s lookback is not eligible.</div></div></div>'+
+      '<div class="panel"><div class="panel-header"><h2>Market results</h2><div class="flex"><input class="textinput" data-input="search" placeholder="Search symbol…" value="'+esc(S.query)+'"/><label class="inline-check"><input type="checkbox" data-option="matches" '+(S.showOnlyMatches?'checked':'')+'/>Matches only</label><label class="inline-check"><input type="checkbox" data-option="watchonly" '+(S.showWatch?'checked':'')+'/>Watchlist</label><label class="control">Sort '+select([['symbol','Symbol'],['price','Price'],['rsi','RSI'],['ret20','20D return'],['ema','Weekly % EMA'],['drawdown','Drawdown']],S.sort,'data-option="sort"')+'</label>'+button(S.ascending?'↑':'↓','sort-order','small')+'</div></div><div class="table-wrap"><table class="data-table"><thead><tr><th>Symbol</th><th>Close</th><th>RSI D</th><th>RSI W</th><th>RSI 2H</th><th>% vs W EMA200</th><th>20D return</th><th>DD</th><th>Bars</th><th>Result</th></tr></thead><tbody>'+table+'</tbody></table>'+(rows.length?'':'<div class="empty">No matching symbols. Change a filter or import more price history.</div>')+'</div></div>';
   }
   function chartControls(){
     const styles=[['candles','Candlesticks'],['bars','OHLC bars'],['line','Line'],['area','Area']];
     const box=(k,label)=>'<label><input type="checkbox" data-chart="'+k+'" '+(S.chart[k]?'checked':'')+'/>'+label+'</label>';
-    return '<div class="chart-toolbar">'+symbolSelect()+tfSelect()+'<label class="control">Style '+select(styles,S.chart.style,'data-option="style"')+'</label><label class="control">Scale '+select([['false','Linear'],['true','Log']],String(S.chart.log),'data-option="log"')+'</label><div class="flex chart-actions">'+button('1M','range-1m','small')+button('3M','range-3m','small')+button('1Y','range-1y','small')+button('All','range-all','small')+button('Fit','range-fit','small')+'</div></div><div class="chart-readout" id="readout">Move over the chart to inspect OHLCV and indicators.</div><div class="chart-area" id="price-chart"></div><div class="chart-footer"><div class="indicator-options">'+box('ema20','EMA 20')+box('ema50','EMA 50')+box('ema200','EMA 200')+box('sma20','SMA 20')+box('bollinger','Bollinger')+box('volume','Volume')+box('rsi','RSI')+box('macd','MACD')+'<label>RSI period <input type="number" data-chart="rsiPeriod" min="2" max="100" value="'+S.chart.rsiPeriod+'"/></label></div><div class="flex">'+button(S.drawLine?'Click price to draw…':'Horizontal line','draw-line',S.drawLine?'selected small':'small')+button('Clear lines','clear-lines','small')+button('PNG','chart-png','small')+'</div></div>';
+    return '<div class="chart-toolbar">'+symbolSelect()+tfSelect()+'<label class="control">Style '+select(styles,S.chart.style,'data-option="style"')+'</label><label class="control">Scale '+select([['false','Linear'],['true','Log']],String(S.chart.log),'data-option="log"')+'</label><div class="flex chart-actions">'+button('1M','range-1m','small')+button('3M','range-3m','small')+button('1Y','range-1y','small')+button('All','range-all','small')+button('Fit','range-fit','small')+'</div></div><div class="chart-readout" id="readout">Move over the chart to inspect OHLCV and indicators.</div><div class="chart-area" id="price-chart"></div><div class="chart-footer"><div class="indicator-options">'+box('ema20','EMA 20')+box('ema50','EMA 50')+box('ema200','EMA 200')+box('sma20','SMA 20')+box('bollinger','Bollinger')+box('volume','Volume')+box('rsi','RSI')+box('macd','MACD')+'<label>EMA A <input type="number" data-chart="ema20Len" min="2" max="500" value="'+S.chart.ema20Len+'"/></label><label>EMA B <input type="number" data-chart="ema50Len" min="2" max="500" value="'+S.chart.ema50Len+'"/></label><label>EMA C <input type="number" data-chart="ema200Len" min="2" max="500" value="'+S.chart.ema200Len+'"/></label><label>SMA <input type="number" data-chart="sma20Len" min="2" max="500" value="'+S.chart.sma20Len+'"/></label><label>Boll <input type="number" data-chart="bollPeriod" min="2" max="500" value="'+S.chart.bollPeriod+'"/></label><label>RSI period <input type="number" data-chart="rsiPeriod" min="2" max="100" value="'+S.chart.rsiPeriod+'"/></label></div><div class="flex">'+button(S.drawLine?'Click price to draw…':'Horizontal line','draw-line',S.drawLine?'selected small':'small')+button('Clear lines','clear-lines','small')+button('PNG','chart-png','small')+'</div></div>';
   }
   function chartsView(){
     const b=bars(),source=S.sources.get(S.symbol);
-    return head('Chart Lab','Drag to pan, wheel/pinch to zoom, or drag the price and time axes. Click legends to configure indicators.',button('Backtest this symbol','view-backtest','primary'))+
+    return head('Chart Lab','Drag to pan, wheel/pinch to zoom, and drag the price or time axes. Customize indicators below.',button('Backtest this symbol','view-backtest','primary'))+
       '<div class="panel">'+chartControls()+'</div>'+sourceStrip()+
       '<div class="info-strip">Data: <strong>'+esc(S.symbol)+'</strong> · '+(source==='SIMULATED'?'simulated':'imported')+' · '+b.length+' '+S.chart.tf+' bars. Price scaling, crosshair, volume, indicator panes, and annotations are interactive. Charts use TradingView Lightweight Charts, not the full TradingView platform.</div>';
   }
@@ -132,9 +132,9 @@ async function initApp(){
     const datapoints=b.map(x=>S.chart.style==='line'||S.chart.style==='area'?{time:x.time,value:x.close}:{time:x.time,open:x.open,high:x.high,low:x.low,close:x.close});
     base.setData(datapoints);
     const c=b.map(x=>x.close),ind=indicators(b,{rsiPeriod:S.chart.rsiPeriod,period:S.chart.bollPeriod});
-    for(const [name,vals,color] of [['ema20',ind.ema20,colors.yellow],['ema50',ind.ema50,colors.blue],['ema200',ind.ema200,colors.violet],['sma20',ind.sma20,'#f7a75c']]){
+    for(const [name,vals,color] of [['ema20',ema(c,S.chart.ema20Len),colors.yellow],['ema50',ema(c,S.chart.ema50Len),colors.blue],['ema200',ema(c,S.chart.ema200Len),colors.violet],['sma20',sma(c,S.chart.sma20Len),'#f7a75c']]){
       if(!S.chart[name])continue;
-      const series=chart.addSeries(LineSeries,{color,lineWidth:2,priceLineVisible:false,lastValueVisible:true,title:name.toUpperCase()});
+      const series=chart.addSeries(LineSeries,{color,lineWidth:2,priceLineVisible:false,lastValueVisible:true,title:name.toUpperCase()+'('+S.chart[name+'Len']+')'});
       series.setData(vals.flatMap((v,i)=>v==null?[]:[{time:b[i].time,value:v}]));
     }
     if(S.chart.bollinger){
@@ -237,12 +237,13 @@ async function initApp(){
     if(el.id==='csv-file'){if(el.files?.length)await importFiles(el.files);el.value='';return;}
     if(el.dataset.option){
       const opt=el.dataset.option,val=el.value;
-      if(opt==='preset'){S.rules=(preset[val]||[]).map(x=>({...x}));}
+      if(opt==='preset'){if(val==='custom')return;S.rules=(preset[val]||[]).map(x=>({...x}));}
       else if(opt==='symbol'){S.symbol=val;S.result=null;S.sweep=null;}
       else if(opt==='tf'){S.chart.tf=val;S.result=null;S.sweep=null;}
       else if(opt==='style')S.chart.style=val;
       else if(opt==='log')S.chart.log=val==='true';
       else if(opt==='matches')S.showOnlyMatches=el.checked;
+      else if(opt==='watchonly')S.showWatch=el.checked;
       else if(opt==='sort')S.sort=val;
       render();return;
     }
