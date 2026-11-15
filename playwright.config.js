@@ -5,10 +5,10 @@ export default defineConfig({
   timeout: 45000,
   retries: 0,
   reporter: 'list',
-  use: {baseURL:'http://127.0.0.1:5173/Repository-12/',headless:true,trace:'retain-on-failure',screenshot:'only-on-failure'},
+  use: {baseURL:'http://127.0.0.1:5173/market-lens-pro/',headless:true,trace:'retain-on-failure',screenshot:'only-on-failure'},
   webServer: {
     command:'npm run dev -- --port 5173',
-    url:'http://127.0.0.1:5173/Repository-12/',
+    url:'http://127.0.0.1:5173/market-lens-pro/',
     reuseExistingServer: !process.env.CI,
     timeout: 30000
   }
