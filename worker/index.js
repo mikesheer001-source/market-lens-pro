@@ -86,7 +86,8 @@ export default {
 
     const isScan = url.pathname === "/api/stocks/scan";
     const isBars = url.pathname === "/api/stocks/bars";
-    if (!isScan && !isBars) {
+    const isIntraday = url.pathname === "/api/stocks/intraday";
+    if (!isScan && !isBars && !isIntraday) {
       return json({ error: "Not found." }, 404, origin, env);
     }
 
@@ -97,6 +98,60 @@ export default {
 
     if (!env.ALPACA_API_KEY || !env.ALPACA_API_SECRET) {
       return json({ error: "Alpaca credentials are not configured on the Worker." }, 503, origin, env);
+    }
+
+    if (isIntraday) {
+      const symbol=String(url.searchParams.get("symbol")||"").trim().toUpperCase();
+      const feed=String(url.searchParams.get("feed")||env.ALPACA_DATA_FEED||"iex").toLowerCase();
+      if(!LIVE_UNIVERSE.includes(symbol))
+        return json({error:"Choose a symbol from the 133-symbol live universe."},400,origin,env);
+      if(!FEEDS.has(feed))return json({error:"Unsupported Alpaca feed."},400,origin,env);
+      const cacheUrl=new URL("/api/stocks/intraday",url.origin);
+      cacheUrl.searchParams.set("symbol",symbol);
+      cacheUrl.searchParams.set("feed",feed);
+      cacheUrl.searchParams.set("origin",origin||"none");
+      cacheUrl.searchParams.set("revision","2026-11-17-intraday-v1");
+      const key=new Request(cacheUrl.toString(),{method:"GET"});
+      const edge=globalThis.caches?.default;
+      if(edge)try{
+        const hit=await edge.match(key);
+        if(hit){const headers=new Headers(hit.headers);headers.set("X-Intraday-Cache","HIT");
+          return new Response(hit.body,{status:hit.status,headers});}
+      }catch{}
+      const lookbackDays=120,start=new Date(Date.now()-lookbackDays*86400000).toISOString();
+      const end=new Date().toISOString();
+      const bars=[];let token=null,pages=0;
+      try {
+        do {
+          const upstreamUrl=new URL("https://data.alpaca.markets/v2/stocks/"+encodeURIComponent(symbol)+"/bars");
+          for(const [k,v] of Object.entries({timeframe:"15Min",start,end,limit:"10000",adjustment:"all",feed,sort:"asc"}))
+            upstreamUrl.searchParams.set(k,v);
+          if(token)upstreamUrl.searchParams.set("page_token",token);
+          const upstream=await fetch(upstreamUrl,{headers:{
+            "APCA-API-KEY-ID":env.ALPACA_API_KEY,
+            "APCA-API-SECRET-KEY":env.ALPACA_API_SECRET,
+            Accept:"application/json"
+          }});
+          const payload=await upstream.json().catch(()=>null);
+          if(!upstream.ok){
+            const err=new Error(typeof payload?.message==="string"?payload.message:"Alpaca rejected the 15-minute bar request.");
+            err.status=upstream.status;throw err;
+          }
+          if(Array.isArray(payload?.bars))bars.push(...payload.bars);
+          token=payload?.next_page_token||null;
+          pages++;
+          if(token&&pages>=10)throw Error("Intraday pagination exceeded the safety limit.");
+        }while(token);
+      }catch(error){
+        return json({error:"Real Alpaca intraday bars unavailable.",detail:error.message||"Upstream error"},
+          error.status===429?429:502,origin,env,error.status===429?{"Retry-After":"60"}:{});
+      }
+      const response=json({source:"alpaca",symbol,feed,timeframe:"15Min",start,end,
+        lookback_days:lookbackDays,returned:bars.length,bars},
+        200,origin,env,{"Cache-Control":"public, max-age=300",
+          "CDN-Cache-Control":"public, max-age=300","X-Intraday-Cache":"MISS"});
+      if(edge)try{await edge.put(key,response.clone());}catch{}
+      return response;
     }
 
     if (isScan) {
