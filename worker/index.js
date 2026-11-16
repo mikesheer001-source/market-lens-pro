@@ -131,7 +131,7 @@ export default {
         return json({error:"Provide 1 to 5 valid ticker symbols."},400,origin,env);
       const feed=String(url.searchParams.get("feed")||env.ALPACA_DATA_FEED||"iex").toLowerCase();
       if(!FEEDS.has(feed))return json({error:"Unsupported Alpaca feed."},400,origin,env);
-      const start=new Date(Date.now()-400*86400000).toISOString(),end=new Date().toISOString();
+      const start=new Date(Date.now()-ALPACA_SCAN_LOOKBACK_DAYS*86400000).toISOString(),end=new Date().toISOString();
       const details={};
       for(const symbol of symbols){
         const asset=await alpacaAsset(symbol,env);
@@ -211,13 +211,14 @@ export default {
     }
 
     if (isScan) {
+      const scanStartedAt=Date.now();
       const feed = String(url.searchParams.get("feed") || env.ALPACA_DATA_FEED || "iex").toLowerCase();
       if (!FEEDS.has(feed)) return json({ error: "Unsupported Alpaca feed." }, 400, origin, env);
 
       const expectedTradingDay=expectedNyseBarDate(new Date());
       const cacheUrl = new URL("/api/stocks/scan", url.origin);
       cacheUrl.searchParams.set("feed", feed);
-      cacheUrl.searchParams.set("universe_revision", "2026-11-17-round14-modal-freshness");
+      cacheUrl.searchParams.set("universe_revision", "2026-11-17-round19-five-year-history");
       cacheUrl.searchParams.set("expected_trading_day",expectedTradingDay);
       cacheUrl.searchParams.set("origin", origin || "none");
       const cacheKey = new Request(cacheUrl.toString(), { method: "GET" });
@@ -359,6 +360,7 @@ export default {
         batch_size: ALPACA_BATCH_SIZE,
         batches: batches.length,
         lookback_days: ALPACA_SCAN_LOOKBACK_DAYS,
+        scan_duration_ms: Date.now()-scanStartedAt,
         start,
         end,
         bars: barsBySymbol
@@ -390,7 +392,8 @@ export default {
 
     const now = new Date();
     const end = url.searchParams.get("end") || now.toISOString();
-    const start = url.searchParams.get("start") || new Date(now.getTime() - 365 * 86_400_000).toISOString();
+    const start = url.searchParams.get("start") || new Date(now.getTime() -
+      (timeframe==="1Day"?ALPACA_SCAN_LOOKBACK_DAYS:365) * 86_400_000).toISOString();
     if (!validDate(start) || !validDate(end) || Date.parse(start) >= Date.parse(end)) {
       return json({ error: "Provide valid start and end dates; start must precede end." }, 400, origin, env);
     }
@@ -398,7 +401,7 @@ export default {
       return json({ error: "Date range is limited to ten years per request." }, 400, origin, env);
     }
 
-    const limitRaw = Number(url.searchParams.get("limit") || 1_000);
+    const limitRaw = Number(url.searchParams.get("limit") || (timeframe==="1Day"?10_000:1_000));
     if (!Number.isInteger(limitRaw) || limitRaw < 1) {
       return json({ error: "Limit must be a positive integer." }, 400, origin, env);
     }
@@ -423,37 +426,44 @@ export default {
       upstreamUrl.searchParams.set("page_token", pageToken);
     }
 
-    let upstream;
-    try {
-      upstream = await fetch(upstreamUrl, {
-        headers: {
-          "APCA-API-KEY-ID": env.ALPACA_API_KEY,
-          "APCA-API-SECRET-KEY": env.ALPACA_API_SECRET,
-          "Accept": "application/json"
-        }
-      });
-    } catch {
-      return json({ error: "Could not reach Alpaca market data." }, 502, origin, env);
-    }
-
-    const payload = await upstream.json().catch(() => null);
-    if (!upstream.ok) {
-      const detail = typeof payload?.message === "string" ? payload.message : "Alpaca rejected the request.";
-      return json({
-        error: "Alpaca market-data request failed.",
-        detail,
-        upstream_status: upstream.status
-      }, upstream.status === 429 ? 429 : 502, origin, env);
-    }
-
-    const bars = Array.isArray(payload?.bars) ? payload.bars : [];
+    // Preserve explicit paging when the caller supplies limit/page_token.
+    // For the default 5-year daily request, fetch all pages automatically.
+    const aggregateDaily=timeframe==="1Day"&&!url.searchParams.has("limit")&&!pageToken;
+    const bars=[];
+    let nextToken=null,pages=0;
+    do{
+      let upstream;
+      try{
+        if(nextToken)upstreamUrl.searchParams.set("page_token",nextToken);
+        upstream=await fetch(upstreamUrl,{headers:{
+          "APCA-API-KEY-ID":env.ALPACA_API_KEY,
+          "APCA-API-SECRET-KEY":env.ALPACA_API_SECRET,
+          "Accept":"application/json"
+        }});
+      }catch{
+        return json({error:"Could not reach Alpaca market data."},502,origin,env);
+      }
+      const payload=await upstream.json().catch(()=>null);
+      if(!upstream.ok){
+        const detail=typeof payload?.message==="string"?payload.message:"Alpaca rejected the request.";
+        return json({error:"Alpaca market-data request failed.",detail,
+          upstream_status:upstream.status},upstream.status===429?429:502,origin,env);
+      }
+      if(Array.isArray(payload?.bars))bars.push(...payload.bars);
+      nextToken=payload?.next_page_token||null;
+      pages++;
+      if(aggregateDaily&&nextToken&&pages>=20)
+        return json({error:"Daily Alpaca pagination exceeded 20 pages; refusing incomplete history."},502,origin,env);
+    }while(aggregateDaily&&nextToken);
     return json({
-      source: "alpaca",
+      source:"alpaca",
       symbol,
       timeframe,
       feed,
+      lookback_days:timeframe==="1Day"&&!url.searchParams.has("start")?ALPACA_SCAN_LOOKBACK_DAYS:null,
       bars,
-      next_page_token: payload?.next_page_token || null
-    }, 200, origin, env);
+      pages,
+      next_page_token:aggregateDaily?null:nextToken
+    },200,origin,env);
   }
 };
