@@ -943,7 +943,7 @@ async function initApp(){
       'data-option="fit-validated-only" '+(validated?'checked':'')+'/> Validated only</label>';
     const status=S.fitStatus?'<div id="fit-status" role="status" class="info-strip">'+esc(S.fitStatus)+'</div>':
       S.fitError?'<div id="fit-status" role="alert" class="info-strip warning">'+esc(S.fitError)+'</div>':'';
-    const header='<div class="panel-header"><h2>Fit across universe · '+mode+'</h2><div class="flex">'+
+    const header='<div class="panel-header"><h2>Fit across universe · '+mode+' · '+esc(count)+'</h2><div class="flex">'+
       controls+(report&&(!validated||report.rows.length)?
         button(validated?'Load best validated symbol':'Load best symbol','load-fit-best','primary')+
         button('Export fit CSV','export-fit','small'):'')+'</div></div>';
