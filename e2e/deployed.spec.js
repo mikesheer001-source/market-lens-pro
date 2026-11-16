@@ -98,3 +98,23 @@ test('published Screener strategy signal picker sorts LONG states with real date
   await expect(page.locator('tbody tr[data-symbol]')).toHaveCount(longCount);
   expect(errors).toEqual([]);
 });
+
+
+test('published Round 15 best-fit portfolio and date-range controls work on deployed Pages',async ({page})=>{
+  test.setTimeout(90000);
+  const errors=[];page.on('pageerror',e=>errors.push(e.message));
+  await page.goto('./');
+  await page.locator('[data-option="preset"]').selectOption('volatility');
+  await page.locator('.sidebar [data-tab="backtest"]').click();
+  await page.locator('[data-option="portfolio-mode"]').selectOption('best-fit');
+  await expect(page.locator('[data-action="run-best-fit"]')).toBeVisible();
+  await expect(page.locator('[data-bt-range="startDate"]')).toHaveValue('');
+  await expect(page.locator('[data-bt-range="endDate"]')).toHaveValue('');
+  await page.locator('[data-action="run-best-fit"]').click();
+  await expect(page.locator('#portfolio-source')).toContainText('Saved best-fit portfolio',{timeout:80000});
+  await expect(page.locator('#portfolio-source')).toContainText('Full available range');
+  await expect(page.locator('#portfolio-breakdown tr[data-portfolio-symbol="DEMO-VXX"]')).toContainText('Fit Sharpe:');
+  await expect(page.locator('#portfolio-methodology')).toContainText('selection bias');
+  await expect(page.locator('#equity-chart canvas').first()).toBeVisible();
+  expect(errors).toEqual([]);
+});
