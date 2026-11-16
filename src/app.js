@@ -11,6 +11,7 @@ import {compareStrategies,sortLeaderboard,leaderboardBest,updateSymbolMemory,pru
 import {runPortfolio,runPortfolioSweep,portfolioUniverse} from './portfolio.js';
 import {windowBacktestBars,windowPortfolioData,validateBacktestRange,actualPortfolioRange,displayBacktestRange} from './date-window.js';
 import {runBestFitPortfolio} from './best-fit-portfolio.js';
+import {holdoutSummary} from './validation.js';
 import {VOL_TICKERS,volatilityRow,contangoPriceProxies} from './volatility.js';
 import {restoreWatchlists,watchlistChange,validateAlert,checkAlerts,makeScanSnapshot,analysisSnapshot,restoreAnalysis,WATCHLIST_LIMIT,SCAN_LIMIT,ALERT_LIMIT} from './workspace.js';
 import { LIVE_UNIVERSE, DEMO_UNIVERSE, VOLATILITY_UNIVERSE, LIVE_EQUITY_COUNT, LIVE_ETF_COUNT, LIVE_VOLATILITY_COUNT, ALPACA_BATCH_SIZE } from './universe.js';
@@ -586,10 +587,19 @@ async function initApp(){
     '<label class="control">End date <input aria-label="Backtest end date" type="date" data-bt-range="endDate" value="'+esc(S.btRange.endDate)+'"/></label>'+
     button('Full range','clear-bt-dates','small')+
     '<span class="section-note">Inclusive dates. Both blank = all available bars. No data outside this window is traded.</span></div>';
+  // Round 16: Never confer a Validated label on a short or unmeasurable holdout.
+  function holdoutLabel(row){
+    if(row?.validation?.validated)return '<span class="oos-validated" title="Positive out-of-sample Sharpe on at least 30 held-out bars">Validated</span>';
+    if(row?.validation?.note)return '<small class="oos-note">'+esc(row.validation.note)+'</small>';
+    return '<span class="muted">Not validated</span>';
+  }
+  function holdoutSharpe(row){
+    return row?.validation?.enoughTestBars?format(row.testMetrics?.sharpe,2):'—';
+  }
   const portfolioModeControl=()=>'<div class="portfolio-mode"><label class="control">Backtest mode '+
     select([['single','Single symbol'],['portfolio','Equal-weight portfolio'],['best-fit','Best-fit portfolio']],
       S.portfolioMode?(S.bestFitMode?'best-fit':'portfolio'):'single','data-option="portfolio-mode"')+
-    '</label><span class="muted">Portfolios use daily aligned OHLCV, equal initial allocations and independent next-open trades. Best-fit uses each symbol\'s highest in-sample Sharpe strategy (not a holdout result).</span></div>';
+    '</label><span class="muted">Portfolios use daily aligned OHLCV, equal initial allocations and independent next-open trades. Best-fit selects each symbol from the first 70% training bars only; the final 30% is untouched holdout data.</span></div>';
   function activePortfolioResult(){
     return S.portfolioResult&&((S.bestFitMode&&S.portfolioResult.mode==='best-fit')||
       (!S.bestFitMode&&S.portfolioResult.mode!=='best-fit'))?S.portfolioResult:null;
@@ -621,7 +631,7 @@ async function initApp(){
         '<p class="section-note">Currently loaded symbols on the chosen named watchlist; unavailable or insufficient-history symbols are reported as omitted.</p>')+
       '<div class="info-strip">Data source: '+esc(sourceName)+
       '. Each included symbol receives the same initial capital fraction. Costs, stops and fills use the existing engine.</div>'+
-      (isBest?'<p class="section-note"><strong>Strategy selection:</strong> For each selected symbol, compare executable preset, saved Pine and built-in example strategies on the common aligned daily dates and select the highest finite in-sample Sharpe. All strategies share the portfolio trade assumptions. This is in-sample optimization with selection bias, <strong>not out-of-sample validation</strong>. If no strategy has a finite Sharpe, the symbol is excluded and listed below.</p>':
+      (isBest?'<p class="section-note"><strong>Strategy selection:</strong> Evaluate each executable preset, saved Pine and built-in example strategy on the first 70% of aligned daily bars. Choose the highest training Sharpe for each symbol without inspecting test performance. The remaining 30% is scored separately. A positive holdout Sharpe earns a descriptive Validated label, not proof of predictive ability. Ranking is strictly in-sample; symbols without a finite training Sharpe are excluded.</p>':
         btOptions())+
       backtestDateControls()+'</div></div>';
     const summary=result?'<div class="metrics">'+
@@ -633,13 +643,19 @@ async function initApp(){
     const rows=result?.breakdown||[];
     const table='<div class="table-wrap"><table class="data-table" id="portfolio-breakdown"><thead><tr>'+
       '<th>Symbol</th><th>Strategy</th><th>Source</th><th>Bar date</th><th>Weight</th>'+
-      '<th>Return</th><th>Trades</th><th>Win rate</th><th>Max DD</th><th>Sharpe</th></tr></thead><tbody>'+
+      (isBest?'<th>Train return</th><th>Train Sharpe</th><th>OOS return</th><th>OOS Sharpe</th><th>Validation</th>':'')+
+      '<th>Full return</th><th>Trades</th><th>Win rate</th><th>Max DD</th><th>Full Sharpe</th></tr></thead><tbody>'+
       rows.map(r=>'<tr data-portfolio-symbol="'+esc(r.symbol)+'"><td>'+esc(r.symbol)+'</td>'+
         '<td>'+esc(r.strategyName||r.strategy||'—')+
         (isBest?'<small class="fit-stale">Fit Sharpe: '+format(r.fitSharpe,2)+'</small>':'')+'</td>'+
         '<td>'+esc(r.source==='ALPACA'?'ALPACA '+String(S.liveFeed).toUpperCase()+' 1Day':r.source)+'</td>'+
         '<td>'+esc(String(r.barDate||'—').slice(0,10))+'</td>'+
-        '<td>'+pct(result.weights[r.symbol]*100)+'</td><td class="'+priceColor(r.returnPct)+'">'+pct(r.returnPct)+'</td>'+
+        '<td>'+pct(result.weights[r.symbol]*100)+'</td>'+
+        (isBest?'<td>'+pct(r.trainMetrics?.returnPct)+'</td>'+
+          '<td>'+format(r.trainMetrics?.sharpe,2)+'</td>'+
+          '<td>'+pct(r.testMetrics?.returnPct)+'</td>'+
+          '<td>'+holdoutSharpe(r)+'</td><td>'+holdoutLabel(r)+'</td>':'')+
+        '<td class="'+priceColor(r.returnPct)+'">'+pct(r.returnPct)+'</td>'+
         '<td>'+format(r.trades,0)+'</td><td>'+pct(r.winPct)+'</td>'+
         '<td>'+pct(-r.maxDD)+'</td><td>'+format(r.sharpe,2)+'</td></tr>').join('')+
       '</tbody></table></div>';
@@ -662,7 +678,8 @@ async function initApp(){
         '<div id="equity-chart" class="equity-plot"></div>':
         '<div class="empty">Run the portfolio to see the combined curve.</div>')+'</div>'+
       '<div class="panel"><div class="panel-header"><h2>Per-symbol breakdown</h2><span class="muted">'+rows.length+' symbols</span></div>'+
-      (rows.length?table:'<div class="empty">No portfolio results yet.</div>')+'</div>'+
+      (rows.length?table:'<div class="empty">No portfolio results yet.</div>')+
+      (isBest?'<p class="section-note">Train = first 70%; OOS = untouched final 30%. Full portfolio return and equity curve cover both periods. OOS runs reset capital at the split, with prior bars used only for indicator warmup; minimum 30 holdout bars to judge Sharpe. Per-symbol dates and sources appear in the rows.</p>':'')+'</div>'+
       (result?.unranked?.length?'<div class="info-strip warning" id="best-fit-unranked">No finite-Sharpe candidate for: '+
         esc(result.unranked.map(x=>x.symbol+' ('+x.reason+')').join('; '))+'</div>':'')+
       (result?.methodology?'<p class="section-note" id="portfolio-methodology">'+esc(result.methodology)+'</p>':'');
@@ -1334,7 +1351,11 @@ async function initApp(){
       const p=activePortfolioResult();
       exportFile((S.bestFitMode?'best-fit':'equal-weight')+'-portfolio-breakdown.csv',
         csvDownload(p.breakdown.map(r=>({symbol:r.symbol,strategy:r.strategyName||r.strategy,
-          fitSharpe:r.fitSharpe??'',source:r.source,barDate:String(r.barDate||'').slice(0,10),
+          fitSharpe:r.fitSharpe??'',trainReturnPct:r.trainMetrics?.returnPct??'',
+          trainSharpe:r.trainMetrics?.sharpe??'',oosReturnPct:r.testMetrics?.returnPct??'',
+          oosSharpe:r.validation?.enoughTestBars?r.testMetrics?.sharpe??'':'',
+          validated:r.validation?.validated??false,holdoutNote:r.validation?.note??'',
+          source:r.source,barDate:String(r.barDate||'').slice(0,10),
           weight:p.weights[r.symbol],returnPct:r.returnPct,trades:r.trades,winRatePct:r.winPct,
           maxDrawdownPct:r.maxDD,sharpe:r.sharpe,rangeStart:p.range?.startDate||'',
           rangeEnd:p.range?.endDate||'',actualStart:p.range?.actualStart||'',
