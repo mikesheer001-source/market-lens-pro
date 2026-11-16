@@ -96,12 +96,17 @@ async function initApp(){
   const button=(label,action,variant='')=>'<button type="button" class="btn '+variant+'" data-action="'+action+'">'+label+'</button>';
   const select=(items,value,attr)=>'<select '+attr+'>'+items.map(([v,t])=>'<option value="'+esc(v)+'"'+(v===value?' selected':'')+'>'+esc(t)+'</option>').join('')+'</select>';
   const timeframes=[['D','1 Day'],['W','1 Week'],['M','1 Month'],['2H','2 Hours']];
-  const symbolSelect=()=>'<label class="control">Symbol '+select([...S.data.keys()].filter(isVisibleSymbol).sort().map(s=>[s,s]),S.symbol,'data-option="symbol"')+'</label>';
+  const symbolSelect=()=>{
+    const options=[...S.data.keys()].filter(modeSymbol).sort(),selected=options.includes(S.symbol)?S.symbol:options[0]||'';
+    return '<div class="symbol-picker"><label class="control">Find symbol <input type="search" class="symbol-search" data-input="symbol-search" aria-label="Find symbol" placeholder="Search all '+options.length+' loaded tickers" value="'+esc(S.symbolQuery)+'"/></label>'+
+      '<label class="control">Symbol '+select(options.map(symbol=>[symbol,symbol]),selected,'data-option="symbol"')+'</label></div>';
+  };
   const tfSelect=()=>'<label class="control">Timeframe '+select(timeframes,S.chart.tf,'data-option="tf"')+'</label>';
   const field=(name,key,type='number',min='',max='',step='any')=>'<label class="field">'+name+'<input type="'+type+'" data-bt="'+key+'" value="'+esc(S.bt[key])+'" '+(min!==''?'min="'+min+'"':'')+' '+(max!==''?'max="'+max+'"':'')+' step="'+step+'"/></label>';
   function metric(label,value,foot='',type=''){return '<div class="metric"><label>'+label+'</label><strong class="'+type+'">'+value+'</strong><small>'+foot+'</small></div>';}
   const sourceStrip=()=>S.sources.get(S.symbol)==='ALPACA'?'<div class="info-strip">Alpaca market data · '+esc(String(S.liveFeed||'IEX').toUpperCase())+' feed · REST refresh on demand. This is not a tick-by-tick WebSocket stream.</div>':S.sources.get(S.symbol)==='SIMULATED'?'<div class="info-strip warning"><strong>Simulated prices.</strong> These are generated examples for testing the interface; no price, return, or trading result represents a real ticker.</div>':(S.data.get(S.symbol)||[]).some(b=>b.approximateOhlc)?'<div class="info-strip warning">The imported CSV has Close-only bars. Open/high/low are approximated. Stop, target, and next-open fills are unreliable until full OHLCV data is imported.</div>':'';
   function screenerRows(){
+    if(S.savedScanView)return S.savedScanView.rows;
     const list=[];
     for(const [symbol,history] of S.data){if(!isVisibleSymbol(symbol))continue;const evalResult=screenSymbol(history,S.rules),d=statsFor(aggregate(history,'D')),w=statsFor(aggregate(history,'W'));
       if(S.showOnlyMatches&&!evalResult.pass)continue;if(S.showWatch&&!S.watch.has(symbol))continue;if(S.query&&!symbol.toLowerCase().includes(S.query.toLowerCase()))continue;
@@ -491,6 +496,15 @@ async function initApp(){
     if(el.id==='pine-editor'){S.scriptCode=el.value;S.scriptOutput=null;persistPineDraft();return;}
     if(el.id==='pine-name'){S.scriptName=el.value;persistPineDraft();return;}
     if(el.dataset.setting){S[el.dataset.setting]=el.value;saveSettings();return;}
+    if(el.dataset.input==='symbol-search'){
+      S.symbolQuery=el.value;
+      const dropdown=$('[data-option="symbol"]');
+      if(dropdown){
+        const options=[...S.data.keys()].filter(modeSymbol).filter(s=>s.toLowerCase().includes(el.value.trim().toLowerCase())||s===S.symbol).sort();
+        dropdown.innerHTML=options.map(s=>'<option value="'+esc(s)+'"'+(s===S.symbol?' selected':'')+'>'+esc(s)+'</option>').join('');
+      }
+      return;
+    }
     if(el.dataset.input==='search'){S.query=el.value;const focus=el.selectionStart;render();const input=$('[data-input="search"]');if(input){input.focus();input.setSelectionRange(focus,focus);}}
   });
   document.addEventListener('change',async ev=>{
@@ -500,8 +514,8 @@ async function initApp(){
     if(el.dataset.pineInput){S.scriptSettings[el.dataset.pineInput]=el.type==='checkbox'?el.checked:Number(el.value);persistPineDraft();return;}
     if(el.dataset.option){
       const opt=el.dataset.option,val=el.value;
-      if(opt==='preset'){if(val==='custom')return;S.rules=(preset[val]||[]).map(x=>({...x}));S.universeFilter=val==='volatility'?'volatility':'all';S.scan={status:'idle'};}
-      else if(opt==='symbol'){S.symbol=val;S.result=null;S.sweep=null;}
+      if(opt==='preset'){if(val==='custom')return;clearSavedScanView();S.rules=(preset[val]||[]).map(x=>({...x}));S.universeFilter=val==='volatility'?'volatility':'all';S.scan={status:'idle'};}
+      else if(opt==='symbol'){S.symbol=val;S.result=null;S.sweep=null;S.symbolQuery='';}
       else if(opt==='tf'){S.chart.tf=val;S.result=null;S.sweep=null;}
       else if(opt==='style')S.chart.style=val;
       else if(opt==='log')S.chart.log=val==='true';
@@ -510,7 +524,7 @@ async function initApp(){
       else if(opt==='sort')S.sort=val;
       render();return;
     }
-    if(el.dataset.rule!==undefined){const r=S.rules[Number(el.dataset.rule)];if(r){r[el.dataset.key]=el.dataset.key==='value'?Number(el.value):el.value;render();}return;}
+    if(el.dataset.rule!==undefined){clearSavedScanView();const r=S.rules[Number(el.dataset.rule)];if(r){r[el.dataset.key]=el.dataset.key==='value'?Number(el.value):el.value;render();}return;}
     if(el.dataset.chart){const key=el.dataset.chart;S.chart[key]=el.type==='checkbox'?el.checked:el.type==='number'?Math.max(2,Math.round(Number(el.value)||14)):el.value;render();return;}
     if(el.dataset.bt){const key=el.dataset.bt;S.bt[key]=el.type==='number'?Number(el.value):el.value;S.result=null;S.sweep=null;saveSettings();return;}
   });
