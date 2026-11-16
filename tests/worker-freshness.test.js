@@ -80,6 +80,7 @@ test('Worker labels still-stale symbols amber after unsuccessful one-time Alpaca
     assert.equal(result.freshness.allFresh,false);
     assert.deepEqual(result.freshness.stale,[{symbol:'VXZ',latest:old}]);
     assert.deepEqual(result.retry.attempted,['VXZ']);
+    assert.deepEqual(result.retry.updated,[],'same-date retry should not be reported as a refreshed bar');
     assert.deepEqual(result.retry.stillStale,['VXZ']);
     assert.equal(result.bars.VXZ.at(-1).t.slice(0,10),old);
   }finally{
