@@ -1,7 +1,7 @@
 // Round 17: make every leaderboard metric and its walk-forward holdout
 // refer to the exact same inclusive Backtester date window.
 // No window means full history, preserving the original comparison engine.
-import {windowBacktestBars,validateBacktestRange} from './date-window.js';
+import {windowBacktestBars} from './date-window.js';
 import {barDate} from './freshness.js';
 import {compareStrategies} from './leaderboard.js';
 
@@ -46,9 +46,11 @@ export function leaderboardRangeStatus(report,{bars,range={},symbol,timeframe,so
     range:selectedRange};
 }
 
-export function rangeLabel(range){
-  const dates=validateBacktestRange(range);
-  return dates.startDate||dates.endDate?
-    'Selected range: '+(dates.startDate||'First available')+' to '+(dates.endDate||'Last available'):
+export function rangeLabel(range={}){
+  // Presentation must NOT throw when the user is in the middle of editing
+  // invalid/reversed dates: the warning itself must remain renderable.
+  const start=String(range?.startDate||''),end=String(range?.endDate||'');
+  return start||end?
+    'Selected range: '+(start||'First available')+' to '+(end||'Last available'):
     'Full range';
 }
