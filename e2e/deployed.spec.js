@@ -171,3 +171,29 @@ test('published Round 18 shows five rolling test windows, median/mean and positi
   await expect(page.locator('#leaderboard-chart canvas').first()).toBeVisible();
   expect(errors).toEqual([]);
 });
+
+
+test('published Round 20 fullscreen Chart Lab, indicator gear, and right-axis reset work in deployed website',async ({page})=>{
+  const errors=[];page.on('pageerror',e=>errors.push(e.message));
+  await page.goto('./');
+  await page.locator('.sidebar [data-tab="charts"]').click();
+  await expect(page.locator('#price-chart canvas').first()).toBeVisible();
+  await expect(page.locator('#chart-indicator-legend')).toBeVisible();
+  await expect(page.getByRole('button',{name:'Settings for EMA 20'})).toBeVisible();
+  await page.locator('[data-action="chart-fullscreen"]').click();
+  await expect(page.locator('#chart-lab-panel')).toHaveAttribute('data-fullscreen','true');
+  await expect(page.locator('#price-chart canvas').first()).toBeVisible();
+  await page.getByRole('button',{name:'Settings for EMA 20'}).click();
+  await expect(page.locator('#indicator-settings-ema20')).toBeVisible();
+  await page.locator('[data-indicator-field="ema20Len"]').fill('32');
+  await page.locator('[data-indicator-field="ema20Len"]').press('Tab');
+  await expect(page.locator('[data-chart="ema20Len"]')).toHaveValue('32');
+  await expect(page.locator('[data-indicator-row="ema20"]')).toContainText('EMA 32');
+  await page.locator('[data-action="reset-price-scale"]').click();
+  await expect(page.locator('#chart-axis-hint')).toContainText('Price scale reset');
+  await page.locator('[data-action="chart-exit-fullscreen"]').click();
+  await expect(page.locator('#chart-lab-panel')).toHaveAttribute('data-fullscreen','false');
+  await expect(page.getByRole('heading',{name:'Chart Lab'})).toBeVisible();
+  await expect(page.locator('#price-chart canvas').first()).toBeVisible();
+  expect(errors).toEqual([]);
+});
