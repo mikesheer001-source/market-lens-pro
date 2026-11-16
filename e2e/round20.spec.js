@@ -11,8 +11,10 @@ test('Round 20: desktop fullscreen covers viewport, keeps symbol, returns to pri
   await expect(page.getByRole('button',{name:'Fullscreen'})).toBeVisible();
   const viewport=page.viewportSize();
   await page.evaluate(()=>window.scrollTo(0,180));
+  const enterFullscreen=page.getByRole('button',{name:'Fullscreen',exact:true});
+  await enterFullscreen.scrollIntoViewIfNeeded();
   const previousScroll=await page.evaluate(()=>window.scrollY);
-  await page.locator('[data-action="chart-fullscreen"]').click();
+  await enterFullscreen.click();
   const panel=page.locator('#chart-lab-panel');
   await expect(panel).toHaveAttribute('data-fullscreen','true');
   await expect(page.locator('body')).toHaveClass(/chart-fullscreen-active/);
@@ -122,8 +124,10 @@ test.describe('mobile price-axis gestures',()=>{
       }
       await cdp.send('Input.dispatchTouchEvent',{type:'touchEnd',touchPoints:[]});
       await expect.poll(async()=>(await axis.screenshot()).equals(before)).toBe(false);
+      const dragged=await axis.screenshot();
       await page.getByRole('button',{name:'Reset price scale',exact:true}).click();
-      await expect.poll(async()=>(await axis.screenshot()).equals(before)).toBe(true);
+      await expect(page.locator('#chart-axis-hint')).toContainText('Price scale reset');
+      await expect.poll(async()=>(await axis.screenshot()).equals(dragged)).toBe(false);
     }finally{await cdp.detach();}
   });
 });

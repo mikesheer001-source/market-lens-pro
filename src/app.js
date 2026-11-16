@@ -603,8 +603,8 @@ async function initApp(){
     render();
     if(!next){
       window.scrollTo(0,S.fullscreenScrollY);
-      document.querySelector('[data-action="chart-fullscreen"]')?.focus();
-    }else document.querySelector('[data-action="chart-exit-fullscreen"]')?.focus();
+      $('[data-action="chart-fullscreen"]')?.focus({preventScroll:true});
+    }else $('[data-action="chart-exit-fullscreen"]')?.focus({preventScroll:true});
   }
   const chartIcon=path=>'<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.65" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">'+path+'</svg>';
   const gearIcon=chartIcon('<circle cx="12" cy="12" r="3"/><path d="M9 3h6l.6 3 2.6 1.5 2.8-1 3 5-2.2 2.1v3L24 19l-3 5-2.8-1-2.6 1.5-.6 3H9l-.6-3-2.6-1.5-2.8 1-3-5 2.2-2.4v-3L0 11.5l3-5 2.8 1L8.4 6z" transform="translate(2 0) scale(.83)"/>');
