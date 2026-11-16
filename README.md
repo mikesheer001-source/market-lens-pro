@@ -14,6 +14,25 @@ The VXX / Volatility preset has 11 entries: 10 live tickers (VXX, UVXY, SVXY, VI
 
 The screener's **RSI 5D** column is a five-period RSI calculated from daily closes. Daily OHLC cannot be expanded into genuine two-hour bars. A 2H filter still requires timestamped intraday data.
 
+## Round 8: equal-weight multi-symbol research, volatility and real intraday candles
+
+**Portfolio Backtest:** In Backtest choose **Equal-weight portfolio**, then select **all current Screener matches** or a **named watchlist**. The selected universe is fixed at run time. All members are joined on their shared daily trading dates; symbols lacking 40 common bars cause an explicit error rather than made-up performance. Initial capital is divided equally across symbols, and the existing backtest engine executes each symbol independently with its configured slippage, commissions, protective stops, targets, long/short and Pine strategy signals. **There is no periodic rebalancing or shared-margin/capital netting.** Portfolio return, CAGR, Sharpe (252 daily sessions, risk-free rate zero), max drawdown, combined equity against equal-weight buy-and-hold, and per-symbol return/trades/win rate/drawdown are reported with each OHLCV data source. Portfolio results and sweeps save to browser localStorage. The matching screener rules are evaluated on current loaded bars, not stale saved-scan snapshots.
+
+**Portfolio Optimize:** Preset and Pine input variants run on the same selected symbols, with the first 70% of common daily dates used as training and the final 30% used as a chronological holdout. Results are *not* valid out-of-sample evidence after using the holdout to select the winning variant.
+
+**Volatility dashboard:** Shows exactly ten live volatility products: VXX, SVXY, UVXY, SVIX, ZVOL, VIXM, VIXY, VXZ, UVIX and SVOL (the source universe retains the same ten and one Demo proxy). Daily OHLCV drives Close, 20-session total return, realized vol 20D and 60D (annualized sample standard deviation of daily log returns × sqrt(252)), and current close relative to the highest **daily high** in the last 252 sessions. Metrics show missing when insufficient data is available.
+
+**Contango/roll proxies:** The two *price-only* inputs are (1) VXZ 20D return minus VXX 20D return, in percentage points, and (2) the 20D percent change in the SVXY/VXX close-price ratio, aligned on common daily sessions. A "steep contango" price-proxy label requires spread ≥ +5 pp and ratio trend ≥ +10%; "backwardation" price-proxy requires ≤ −5 pp and ≤ −10%; otherwise "flat/mixed". **Neither is an observed VIX futures curve, an actual futures roll yield, or options data.** ETF share prices themselves are not compared as levels.
+
+**Genuine 15m/2H:** In Alpaca Live mode Chart Lab fetches 120 calendar days of real **15Min** OHLCV for the selected live symbol from the Worker endpoint `/api/stocks/intraday?symbol=VXX&feed=iex`. The Worker keeps encrypted Alpaca credentials, follows pagination, applies the selected market-data feed and caches successful results for **five minutes**. The 15-minute chart uses real timestamped bars, and 2H groups these into NYSE 09:30–11:30, 11:30–13:30, 13:30–15:30 and 15:30–16:00 New York time buckets (the final bar is only 30 minutes). Daily/weekly/monthly charts continue to use daily historical data. If Alpaca returns no eligible intraday bars or rejects a feed, the UI states the error and **never constructs intraday bars from daily OHLCV**. The original 133-symbol scanner remains daily; cross-universe 2H screener rules still require timestamped intraday input rather than magically using an on-demand selected-symbol chart.
+
+### Actual backend
+
+- Cloudflare Worker: https://market-lens-pro-api.mikesheer001.workers.dev
+- Public frontend: https://mikesheer001-source.github.io/market-lens-pro/
+- Real-market (non-mocked) browser tests run from GitHub Actions *after* publishing.
+- Alpaca IEX is a real exchange-specific feed, not full US consolidated SIP coverage. No site component places orders.
+
 ## Script Lab: browser-only Pine Script v5 subset
 
 Open **Script Lab** to edit, check, and run custom Pine scripts. Scripts and inputs can be saved, loaded, renamed and deleted in your browser's `localStorage`. No source code is transmitted to a server. The editor runs through `src/pine.js`, a bounded parser/interpreter without JavaScript `eval` or dynamic code execution.
