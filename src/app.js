@@ -115,6 +115,16 @@ async function initApp(){
     list.sort((a,b)=>{const x=value(a),y=value(b);if(x==null)return 1;if(y==null)return -1;return (typeof x==='string'?x.localeCompare(y):x-y)*(S.ascending?1:-1);});
     return list;
   }
+  function activeAlertBanner(){
+    const unread=S.alerts.filter(a=>a.unread);
+    const alertsBanner=unread.length?'<div class="alert-banner" role="alert"><strong>'+unread.length+' in-app alert'+(unread.length===1?'':'s')+' triggered</strong>'+
+      unread.map(a=>'<div>'+esc(a.symbol)+' · '+esc(a.metric.toUpperCase())+' '+(a.op==='>'?'above':'below')+' '+format(a.threshold,2)+' · latest '+format(a.lastValue,2)+' · bar '+esc(a.lastHitBarDate||'')+' '+button('Dismiss alert','alert-ack','small').replace('data-action="alert-ack"','data-action="alert-ack" data-alert-id="'+esc(a.id)+'"')+'</div>').join('')+'</div>':'';
+    return alertsBanner;
+  }
+  function activeSnapshotBanner(){
+    const snapshotNote=loaded?'<div class="info-strip warning" role="status">Showing saved scan snapshot: '+esc(loaded.name)+' from '+esc(loaded.savedAt)+' ('+esc(loaded.source)+'). These are archived values, not live quotes. Select Scan/Refresh to replace the snapshot.</div>':'';
+    return snapshotNote;
+  }
   function screenerView(){
     const symbols=[...S.data.keys()].filter(isVisibleSymbol),all=symbols.map(symbol=>screenSymbol(S.data.get(symbol),S.rules)),rows=screenerRows();
     const matched=S.savedScanView?rows.filter(x=>x.evalResult.pass).length:all.filter(x=>x.pass).length;
@@ -128,7 +138,7 @@ async function initApp(){
     const factBar=(S.mode==='demo'||S.sources.get('VXX')==='ALPACA')?S.data.get(factSymbol)?.at(-1):null;
     const factLabel=S.mode==='live'?'ALPACA VXX DAILY CLOSE':'SIMULATED DAILY CLOSE';
     const fact=factBar?'<div class="market-fact" role="status"><span class="market-fact-label">'+factLabel+'</span><strong>'+esc(factSymbol)+' &nbsp; $'+format(factBar.close)+'</strong><small>Bar date: '+esc(String(factBar.time))+(S.mode==='live'?' · '+esc(String(S.liveFeed).toUpperCase())+' feed · Alpaca daily close, not a last-trade quote':' · simulated, not a market quote')+'</small></div>':S.mode==='live'?'<div class="market-fact warning" role="status">Alpaca VXX daily close unavailable — VXX was not returned by the connected feed.</div>':'';
-    return head('Screener','Filter '+symbols.length+' '+(S.mode==='live'?'Alpaca instruments':'demo or imported instruments')+' with explicit technical conditions.',button('Open Chart Lab','view-charts','primary'))+fact+
+    return head('Screener','Filter '+symbols.length+' '+(S.mode==='live'?'Alpaca instruments':'demo or imported instruments')+' with explicit technical conditions.',button('Open Chart Lab','view-charts','primary'))+fact+activeAlertBanner()+activeSnapshotBanner()+
       '<div class="metrics">'+metric(S.savedScanView?'Saved rows':'Symbols loaded',S.savedScanView?rows.length:all.length,S.savedScanView?'Historical snapshot':S.mode==='live'?'Alpaca universe':'Demo and imported data')+metric('Matching filters',matched,'All visible symbols')+metric('Visible results',rows.length,'Search and match filter')+metric('Active conditions',S.rules.length,'AND logic; all must pass')+'</div>'+scanStatus+
       '<div class="panel"><div class="panel-header"><h2>Screen rules</h2><div class="flex"><label class="control">Preset '+select([['custom','Custom rules'],['trend','Trend pullback'],['original','Original strict W/D/2H'],['oversold','RSI oversold'],['momentum','Momentum'],['volatility','VXX / Volatility'],['all','Show all']],presetKey,'data-option="preset"')+'</label>'+button('+ Add rule','add-rule')+'</div></div><div class="panel-body"><div class="filters">'+(rules||'<span class="muted">No filters — showing all instruments.</span>')+'</div><div class="section-note" style="margin-top:12px">“Original strict” reproduces the weekly EMA200 and weekly/daily/two-hour RSI filter logic. RSI 5D is calculated from daily closes; daily bars cannot reconstruct true two-hour data. The VXX / Volatility preset narrows the universe to VXX, UVXY, SVXY, VIXY, VIXM, VXZ, SVIX, UVIX, SVOL and ZVOL, using daily RSI, 252-session drawdown and % versus daily EMA200. Demo mode uses the clearly labeled synthetic DEMO-VXX proxy.</div></div></div>'+
       '<div class="panel"><div class="panel-header"><h2>Market results</h2><div class="flex">'+button(S.mode==='live'?'Refresh live scan':'Scan demo universe','scan-universe','small primary')+button('Export screener CSV','export-screener','small')+'<input class="textinput" aria-label="Search symbols" data-input="search" placeholder="Search symbol…" value="'+esc(S.query)+'"/><label class="inline-check"><input type="checkbox" data-option="matches" '+(S.showOnlyMatches?'checked':'')+'/>Matches only</label><label class="inline-check"><input type="checkbox" data-option="watchonly" '+(S.showWatch?'checked':'')+'/>Watchlist</label><label class="control">Sort '+select([['symbol','Symbol'],['price','Price'],['rsi','RSI'],['ret20','20D return'],['ema','Daily % EMA'],['drawdown','Drawdown']],S.sort,'data-option="sort"')+'</label>'+button(S.ascending?'↑':'↓','sort-order','small')+'</div></div><div class="table-wrap"><table class="data-table"><thead><tr><th>Symbol</th><th>Close</th><th>RSI D</th><th>RSI W</th><th title="5-period RSI calculated from daily closes; daily OHLC cannot reconstruct true 2-hour bars">RSI 5D</th><th title="Price as percentage difference from 200-period EMA of DAILY closes">% vs D EMA200</th><th>20D return</th><th>DD</th><th>Bars</th><th>Result</th></tr></thead><tbody>'+table+'</tbody></table>'+(rows.length?'':'<div class="empty">No matching symbols. Change a filter or import more price history.</div>')+'</div></div>'+workspaceControls();
@@ -138,14 +148,10 @@ async function initApp(){
     const listOptions=S.watchlists.map(x=>[x.id,x.name+' ('+x.symbols.length+')']);
     const alertSymbols=[...S.data.keys()].filter(modeSymbol).sort();
     const alertSymbol=alertSymbols.includes(S.alertDraft.symbol)?S.alertDraft.symbol:alertSymbols[0]||'';
-    const unread=S.alerts.filter(a=>a.unread);
-    const alertsBanner=unread.length?'<div class="alert-banner" role="alert"><strong>'+unread.length+' in-app alert'+(unread.length===1?'':'s')+' triggered</strong>'+
-      unread.map(a=>'<div>'+esc(a.symbol)+' · '+esc(a.metric.toUpperCase())+' '+(a.op==='>'?'above':'below')+' '+format(a.threshold,2)+' · latest '+format(a.lastValue,2)+' · bar '+esc(a.lastHitBarDate||'')+' '+button('Dismiss alert','alert-ack','small').replace('data-action="alert-ack"','data-action="alert-ack" data-alert-id="'+esc(a.id)+'"')+'</div>').join('')+'</div>':'';
     const alertRows=S.alerts.length?S.alerts.map(a=>'<div class="data-item"><span>'+esc(a.symbol)+' '+esc(a.metric.toUpperCase())+' '+(a.op==='>'?'above':'below')+' '+format(a.threshold,2)+' <small>'+(a.active?'Condition met':'Not triggered')+'</small></span>'+button('Remove alert','alert-delete','small').replace('data-action="alert-delete"','data-action="alert-delete" data-alert-id="'+esc(a.id)+'"')+'</div>').join(''):'<p class="section-note">No local alerts. They check only when you scan or refresh while this page is running.</p>';
     const savedChoices=S.savedScans.map(x=>[x.id,x.name+' · '+x.rows.length+' rows']);
     const loaded=S.savedScanView;
-    const snapshotNote=loaded?'<div class="info-strip warning" role="status">Showing saved scan snapshot: '+esc(loaded.name)+' from '+esc(loaded.savedAt)+' ('+esc(loaded.source)+'). These are archived values, not live quotes. Select Scan/Refresh to replace the snapshot.</div>':'';
-    return snapshotNote+alertsBanner+
+    return ''+
       '<div class="panel"><div class="panel-header"><h2>Named watchlists</h2><span class="muted">Stars add symbols to the selected list</span></div><div class="panel-body"><div class="workspace-actions">'+
         '<label class="control">Current list '+select(listOptions,S.watchlistId,'data-option="watchlist-select"')+'</label>'+
         '<label class="control">Watchlist name <input class="textinput" data-input="watchlist-name" value="'+esc(S.watchlistDraft)+'" placeholder="e.g. Volatility setups"/></label>'+
