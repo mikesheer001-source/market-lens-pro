@@ -1463,6 +1463,12 @@ async function initApp(){
     'export-fit':()=>{if(!S.fitReport)return;exportFile('market-lens-universe-fit.csv',
       csvDownload(S.fitReport.rows.map(r=>({symbol:r.symbol,returnPct:r.metrics?.returnPct??'',
         cagrPct:r.metrics?.cagrPct??'',sharpe:r.metrics?.sharpe??'',
+        trainReturnPct:r.trainMetrics?.returnPct??'',trainSharpe:r.trainMetrics?.sharpe??'',
+        oosReturnPct:r.testMetrics?.returnPct??'',
+        oosSharpe:r.validation?.enoughTestBars?r.testMetrics?.sharpe??'':'',
+        validated:r.validation?.validated??false,holdoutNote:r.validation?.note??'',
+        trainStart:r.validation?.trainStart||'',trainEnd:r.validation?.trainEnd||'',
+        testStart:r.validation?.testStart||'',testEnd:r.validation?.testEnd||'',
         maxDD:r.metrics?.maxDD??'',winPct:r.metrics?.winPct??'',trades:r.metrics?.trades??'',
         source:r.source,barDate:r.barDate||'',error:r.error||''}))));},
     'compare-strategies':async ()=>{
