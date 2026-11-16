@@ -31,7 +31,7 @@ export function leaderboardBest(rows){
 export function buildEquityOverlay(leaderboard,bars){
   if(!leaderboard?.rows?.length)return {series:[],benchmark:[],labels:[]};
   const ranked=sortLeaderboard(leaderboard.rows,'sharpe',true);
-  const top=ranked.slice(0,3);
+  const top=ranked.filter(entry=>entry.curve?.length).slice(0,3);
   const curves=top.map((entry,index)=>({
     id:entry.id,name:entry.name,rank:index+1,
     points:entry.curve.map(p=>({time:p.time,value:p.value}))
@@ -49,7 +49,7 @@ export function buildEquityOverlay(leaderboard,bars){
   });
   return {series:curves,benchmark,labels:[...curves.map(x=>x.name),'Buy & hold']};
 }
-export function compareStrategies({symbol,bars,options,source,backtest,compilePine,executePine,savedScripts=[]}){
+export function compareStrategies({symbol,bars,options,source,backtest,compilePine,executePine,savedScripts=[],builtInExamples=[]}){
   if(typeof symbol!=='string'||!symbol.trim())throw Error('Choose a symbol.');
   if(!Array.isArray(bars)||bars.length<40)throw Error('At least 40 real or labeled Demo price bars are required.');
   const timeframe=options.timeframe||'D',base={...options,timeframe};
@@ -76,10 +76,40 @@ export function compareStrategies({symbol,bars,options,source,backtest,compilePi
       skipped.push({name:saved.name,reason:String(error.message||error)});
     }
   }
+  for(const example of builtInExamples){
+    if(!example||typeof example.id!=='string'||typeof example.code!=='string')continue;
+    const name=(example.label||example.id)+' · built-in example';
+    try{
+      const program=compilePine(example.code);
+      if(program.mode!=='strategy'){
+        // Indicator examples are visible and explicitly not rankable as trading
+        // strategies; do not manufacture entries or a zero-return "backtest".
+        rows.push({id:'example:'+example.id,kind:'example-indicator',name,
+          strategy:null,settings:null,script:null,metrics:{returnPct:null,cagrPct:null,
+            sharpe:null,maxDD:null,winPct:null,trades:null,profitFactor:null},
+          curve:[],trades:[],notice:'Indicator only — no entries or exits'});
+        continue;
+      }
+      const settings={};
+      const signals=executePine(program,bars,settings).signals;
+      const result=backtest(bars,{...base,strategy:'pine-custom',customSignals:signals});
+      rows.push({id:'example:'+example.id,kind:'example',name,strategy:'pine-custom',
+        settings,script:{id:example.id,name,code:example.code,settings,origin:'built-in'},
+        metrics:result.metrics,curve:result.curve,trades:result.trades});
+    }catch(error){
+      skipped.push({name,reason:String(error.message||error)});
+      rows.push({id:'example:'+example.id,kind:'example-indicator',
+        name:name+' · cannot execute',strategy:null,script:null,settings:null,
+        metrics:{returnPct:null,cagrPct:null,sharpe:null,maxDD:null,winPct:null,
+          trades:null,profitFactor:null},curve:[],trades:[],notice:String(error.message||error)});
+    }
+  }
   const sorted=sortLeaderboard(rows),best=leaderboardBest(rows);
   const run={version:1,symbol,timeframe,source:source||'UNKNOWN',
     asOf:bars.at(-1)?.time||null,runAt:new Date().toISOString(),capital:Number(base.capital||10000),
     compared:sorted.length,savedPineStrategies:sorted.filter(x=>x.kind==='pine').length,
+    builtInExamples:sorted.filter(x=>x.id.startsWith('example:')).length,
+    executableExamples:sorted.filter(x=>x.kind==='example').length,
     settings:{...base},rows:sorted,bestId:best?.id||null,skipped};
   run.overlay=buildEquityOverlay(run,bars);
   return run;
