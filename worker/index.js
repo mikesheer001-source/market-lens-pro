@@ -1,4 +1,5 @@
 import { LIVE_UNIVERSE, ALPACA_BATCH_SIZE, ALPACA_SCAN_LOOKBACK_DAYS, ALPACA_SCAN_CACHE_SECONDS } from "../src/universe.js";
+import { expectedNyseBarDate, freshnessWithUniverse } from "../src/freshness.js";
 
 const DEFAULT_ORIGINS = [
   "https://mikesheer001-source.github.io",
@@ -158,9 +159,11 @@ export default {
       const feed = String(url.searchParams.get("feed") || env.ALPACA_DATA_FEED || "iex").toLowerCase();
       if (!FEEDS.has(feed)) return json({ error: "Unsupported Alpaca feed." }, 400, origin, env);
 
+      const expectedTradingDay=expectedNyseBarDate(new Date());
       const cacheUrl = new URL("/api/stocks/scan", url.origin);
       cacheUrl.searchParams.set("feed", feed);
-      cacheUrl.searchParams.set("universe_revision", "2026-11-17-svol-133");
+      cacheUrl.searchParams.set("universe_revision", "2026-11-17-scan-freshness-retry");
+      cacheUrl.searchParams.set("expected_trading_day",expectedTradingDay);
       cacheUrl.searchParams.set("origin", origin || "none");
       const cacheKey = new Request(cacheUrl.toString(), { method: "GET" });
       const edgeCache = globalThis.caches?.default;
@@ -229,6 +232,48 @@ export default {
         }, status, origin, env, status === 429 ? { "Retry-After": "60" } : {});
       }
 
+      // One fresh-data retry per stale symbol, grouped in the same 15-symbol batches
+      // as the original scan to stay within Cloudflare's subrequest budget.
+      const firstFreshness=freshnessWithUniverse(barsBySymbol,LIVE_UNIVERSE,expectedTradingDay);
+      const retryAttempted=firstFreshness.stale.map(x=>x.symbol),retryUpdated=[],retryErrors=[];
+      if(retryAttempted.length){
+        const recentStart=new Date(Date.parse(expectedTradingDay+'T00:00:00Z')-7*86400000).toISOString();
+        for(let i=0;i<retryAttempted.length;i+=ALPACA_BATCH_SIZE){
+          const symbols=retryAttempted.slice(i,i+ALPACA_BATCH_SIZE);
+          try{
+            const retryUrl=new URL("https://data.alpaca.markets/v2/stocks/bars");
+            for(const [key,value] of Object.entries({
+              symbols:symbols.join(","),timeframe:"1Day",start:recentStart,end,
+              limit:"10000",adjustment:"all",feed,sort:"asc"
+            }))retryUrl.searchParams.set(key,value);
+            const response=await fetch(retryUrl,{
+              headers:{"APCA-API-KEY-ID":env.ALPACA_API_KEY,"APCA-API-SECRET-KEY":env.ALPACA_API_SECRET,
+                "Accept":"application/json"}
+            });
+            const payload=await response.json().catch(()=>null);
+            if(!response.ok)throw Error(payload?.message||"Alpaca stale-bar retry failed (HTTP "+response.status+").");
+            const returned=payload?.bars||{};
+            for(const symbol of symbols){
+              const recent=Array.isArray(returned[symbol])?returned[symbol]:[];
+              if(!recent.length)continue;
+              const existing=barsBySymbol[symbol]||[];
+              const merged=new Map(existing.map(bar=>[bar.t,bar]));
+              for(const bar of recent)if(bar?.t)merged.set(bar.t,bar);
+              barsBySymbol[symbol]=[...merged.values()].sort((a,b)=>String(a.t).localeCompare(String(b.t)));
+              retryUpdated.push(symbol);
+            }
+          }catch(err){
+            retryErrors.push({symbols,reason:String(err.message||err)});
+          }
+        }
+        console.info("[market-lens] stale-bar retry",JSON.stringify({
+          expected:expectedTradingDay,attempted:retryAttempted,receivedNewBars:retryUpdated,
+          errors:retryErrors.map(x=>({symbols:x.symbols,reason:x.reason}))
+        }));
+      }
+      const freshness=freshnessWithUniverse(barsBySymbol,LIVE_UNIVERSE,expectedTradingDay);
+      const retryInfo={attempted:retryAttempted,updated:retryUpdated,
+        stillStale:freshness.stale.map(x=>x.symbol),errors:retryErrors};
       const returnedSymbols = Object.keys(barsBySymbol).filter(symbol => barsBySymbol[symbol]?.length);
       const missing = LIVE_UNIVERSE.filter(symbol => !barsBySymbol[symbol]?.length);
       const response = json({
@@ -238,6 +283,9 @@ export default {
         requested: LIVE_UNIVERSE.length,
         returned: returnedSymbols.length,
         missing,
+        freshness:{expected:freshness.expected,allFresh:freshness.allFresh,stale:freshness.stale,
+          checked:freshness.checked,latestBySymbol:freshness.dates,verifiedAt:new Date().toISOString()},
+        retry:retryInfo,
         batch_size: ALPACA_BATCH_SIZE,
         batches: batches.length,
         lookback_days: ALPACA_SCAN_LOOKBACK_DAYS,
