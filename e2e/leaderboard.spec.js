@@ -6,7 +6,7 @@ test('all five presets compare on one symbol, sort by all columns and load best 
   await page.locator('.sidebar [data-tab="backtest"]').click();
   await expect(page.getByRole('button',{name:'Compare all strategies'})).toBeVisible();
   await page.locator('[data-action="compare-strategies"]').first().click();
-  await expect(page.locator('.leaderboard-table tbody tr')).toHaveCount(5);
+  await expect(page.locator('.leaderboard-table tbody tr')).toHaveCount(12);
   await expect(page.locator('.leaderboard-table tr.leaderboard-best')).toHaveCount(1);
   await expect(page.locator('.leaderboard-table th[aria-sort="descending"]')).toContainText('Sharpe');
   await expect(page.locator('#leaderboard-chart canvas').first()).toBeVisible();
@@ -20,7 +20,7 @@ test('all five presets compare on one symbol, sort by all columns and load best 
   await expect(page.locator('.leaderboard-table th[aria-sort="ascending"]')).toContainText('Strategy');
   await page.locator('[data-action="load-best-strategy"]').click();
   await expect(page.locator('#equity-chart canvas').first()).toBeVisible();
-  await expect(page.locator('.leaderboard-table tbody tr')).toHaveCount(5);
+  await expect(page.locator('.leaderboard-table tbody tr')).toHaveCount(12);
   const metrics=await page.locator('.leaderboard-best td').allTextContents();
   expect(metrics.join(' ')).toContain('Best Sharpe');
   await expect(page.locator('.panel').filter({has:page.getByRole('heading',{name:'Trade log'})})).toBeVisible();
@@ -39,16 +39,16 @@ test('saved Pine strategy is included, indicator-only script is disclosed and ov
   await page.locator('[data-action="pine-save"]').click();
   await page.locator('.sidebar [data-tab="backtest"]').click();
   await page.locator('[data-action="compare-strategies"]').first().click();
-  await expect(page.locator('.leaderboard-table tbody tr')).toHaveCount(6);
+  await expect(page.locator('.leaderboard-table tbody tr')).toHaveCount(13);
   await expect(page.locator('.leaderboard-table')).toContainText('Saved crossover comparison');
   await expect(page.getByText(/saved scripts not compared:/)).toContainText('Saved RSI indicator');
   await expect(page.locator('#leaderboard-chart canvas').first()).toBeVisible();
   await page.locator('.sidebar [data-tab="charts"]').click();
   await page.locator('.sidebar [data-tab="backtest"]').click();
-  await expect(page.locator('.leaderboard-table tbody tr')).toHaveCount(6);
+  await expect(page.locator('.leaderboard-table tbody tr')).toHaveCount(13);
   await page.reload();
   await page.locator('.sidebar [data-tab="backtest"]').click();
-  await expect(page.locator('.leaderboard-table tbody tr')).toHaveCount(6);
+  await expect(page.locator('.leaderboard-table tbody tr')).toHaveCount(13);
   await expect(page.locator('#leaderboard-chart canvas').first()).toBeVisible();
   await page.locator('[data-action="load-best-strategy"]').click();
   await expect(page.locator('#equity-chart canvas').first()).toBeVisible();
