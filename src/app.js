@@ -12,6 +12,7 @@ import {runPortfolio,runPortfolioSweep,portfolioUniverse} from './portfolio.js';
 import {windowBacktestBars,windowPortfolioData,validateBacktestRange,actualPortfolioRange,displayBacktestRange} from './date-window.js';
 import {runBestFitPortfolio} from './best-fit-portfolio.js';
 import {holdoutSummary} from './validation.js';
+import {compareStrategiesInRange,leaderboardRangeStatus,rangeLabel} from './leaderboard-range.js';
 import {VOL_TICKERS,volatilityRow,contangoPriceProxies} from './volatility.js';
 import {restoreWatchlists,watchlistChange,validateAlert,checkAlerts,makeScanSnapshot,analysisSnapshot,restoreAnalysis,WATCHLIST_LIMIT,SCAN_LIMIT,ALERT_LIMIT} from './workspace.js';
 import { LIVE_UNIVERSE, DEMO_UNIVERSE, VOLATILITY_UNIVERSE, LIVE_EQUITY_COUNT, LIVE_ETF_COUNT, LIVE_VOLATILITY_COUNT, ALPACA_BATCH_SIZE } from './universe.js';
@@ -916,6 +917,7 @@ async function initApp(){
       '<div class="panel"><div class="panel-header"><h2>Market data policy</h2></div><div class="panel-body"><p class="section-note">GitHub Pages serves the public frontend only. Alpaca credentials are stored as Cloudflare Worker secrets and are never sent to this browser. Live data requests go through the Worker proxy.</p><p class="section-note">Imported and demo data remain available in Demo mode. Backtesting is research-only and does not submit orders.</p></div></div>';
   }
   function render(){
+    refreshLeaderboardIfRangeChanged();
     destroyCharts();shell();
     const views={screener:screenerView,briefing:briefingView,charts:chartsView,backtest:backtestView,optimize:optimizeView,volatility:volatilityView,scripts:scriptView,data:dataView};
     $('#main').innerHTML=views[S.tab]();
@@ -1331,19 +1333,43 @@ async function initApp(){
     S.lastBacktestSymbol=best.symbol;S.tab='backtest';
     if(runBt())render();
   }
+  function comparisonSource(){
+    return S.sources.get(S.symbol)==='ALPACA'?
+      'Alpaca '+String(S.liveFeed).toUpperCase()+' OHLCV':
+      S.sources.get(S.symbol)==='SIMULATED'?'SIMULATED Demo OHLCV':'IMPORTED CSV OHLCV';
+  }
+  function comparisonContext(){
+    return {bars:bars(),range:S.btRange,symbol:S.symbol,
+      timeframe:S.chart.tf,source:comparisonSource()};
+  }
+  function recalculateComparison(){
+    const context=comparisonContext();
+    const report=compareStrategiesInRange({...context,
+      options:{...S.bt,timeframe:S.chart.tf},
+      builtInExamples:PINE_EXAMPLES,backtest,compilePine,executePine,savedScripts:S.scriptLibrary});
+    S.leaderboard=report;S.leaderboardSort='sharpe';S.leaderboardDescending=true;
+    S.leaderboardError='';rememberLeaderboard();
+    return report;
+  }
+  // A restored report or a date-picker edit may not match today's controls.
+  // Rebuild before rendering, or show a conspicuous warning WITHOUT stale rows.
+  let leaderboardRefreshAttempt='';
+  function refreshLeaderboardIfRangeChanged(){
+    if(S.tab!=='backtest'||S.portfolioMode||S.leaderboard?.symbol!==S.symbol)return;
+    const context=comparisonContext(),status=leaderboardRangeStatus(S.leaderboard,context);
+    if(status.matches)return;
+    const key=JSON.stringify([S.symbol,S.chart.tf,S.btRange.startDate,S.btRange.endDate,
+      context.bars.length,context.bars.at(-1)?.time,context.source,
+      S.leaderboard?.runAt]);
+    if(key===leaderboardRefreshAttempt)return;
+    leaderboardRefreshAttempt=key;
+    try{recalculateComparison();}
+    catch(error){S.leaderboardError=String(error.message||error);}
+  }
   function runComparison(){
-    try{
-      const selected=windowBacktestBars(bars(),S.btRange);
-      const history=selected.bars;
-      const report=compareStrategies({symbol:S.symbol,bars:history,builtInExamples:PINE_EXAMPLES,
-        options:{...S.bt,timeframe:S.chart.tf},source:S.sources.get(S.symbol)==='ALPACA'?
-          'Alpaca '+String(S.liveFeed).toUpperCase()+' OHLCV':S.sources.get(S.symbol)==='SIMULATED'?
-          'SIMULATED Demo OHLCV':'IMPORTED CSV OHLCV',
-        backtest,compilePine,executePine,savedScripts:S.scriptLibrary});
-      report.range=selected.range;
-      S.leaderboard=report;S.leaderboardSort='sharpe';S.leaderboardDescending=true;S.leaderboardError='';
-      rememberLeaderboard();render();
-    }catch(err){S.leaderboardError=err.message;notice('Comparison failed: '+err.message);render();}
+    try{recalculateComparison();render();}
+    catch(err){S.leaderboardError=String(err.message||err);
+      notice('Comparison failed: '+S.leaderboardError);render();}
   }
   function loadComparisonStrategy(id){
     const lb=S.leaderboard?.symbol===S.symbol?S.leaderboard:null;
