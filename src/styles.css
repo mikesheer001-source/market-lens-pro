@@ -275,3 +275,12 @@ a:hover{text-decoration-color:currentColor}
 .briefing-history-details{color:var(--muted);font-size:11px;line-height:1.6;padding:0 0 12px 14px}
 .briefing-history-details p{margin:5px 0;overflow-wrap:anywhere}
 @media(max-width:700px){.briefing-table{min-width:550px}.briefing-history-row summary{font-size:11px}}
+
+/* Round 14: unmissable, per-symbol Alpaca stale notes in all four views. */
+.stale-reason{display:block;margin-top:5px;color:#e9bd68;font-size:11px;
+  font-weight:600;line-height:1.5;overflow-wrap:anywhere;white-space:normal}
+#data-freshness .data-item{display:block;line-height:1.6}
+#data-freshness .stale-reason,#chart-stale-warning .stale-reason{margin-top:6px}
+#chart-stale-warning{margin:0 0 14px}
+td.fresh-date{min-width:138px}
+tr[data-vol-symbol] td:nth-child(3){min-width:138px}
