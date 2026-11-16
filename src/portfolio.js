@@ -41,13 +41,19 @@ export function runPortfolio(data,selected,options,backtestFn,getSignals=null,co
   const perSymbol=[],trades=[];
   for(const [symbol,bars] of source.series){
     const opts={...options,capital:tranche,timeframe:'D'};
-    if(opts.strategy==='pine-custom'){
+    const chosen=typeof config.strategyForSymbol==='function'?
+      config.strategyForSymbol(symbol,bars,{...opts}):null;
+    if(chosen)Object.assign(opts,chosen);
+    if(opts.strategy==='pine-custom'&&!opts.customSignals){
       if(typeof getSignals!=='function')throw Error('Select a compiled Pine strategy in Script Lab first.');
       opts.customSignals=getSignals(symbol,bars,config.pineParams||{});
     }
     const result=backtestFn(bars,opts);
     if(!result.curve?.length)throw Error('Insufficient overlap for '+symbol+' after split.');
     perSymbol.push({symbol,source:config.sources?.get(symbol)||'UNKNOWN',
+      barDate:bars.at(-1)?.time||null,strategy:opts.strategy,
+      strategyName:chosen?.strategyName||opts.strategy,
+      fitSharpe:chosen?.fitSharpe??null,selectionId:chosen?.selectionId||null,
       metrics:result.metrics,curve:result.curve,trades:result.trades});
     trades.push(...result.trades.map(t=>({...t,symbol})));
   }
@@ -69,7 +75,8 @@ export function runPortfolio(data,selected,options,backtestFn,getSignals=null,co
   metrics.buyHoldPct=100*(benchmarkCurve.at(-1).value/capital-1);
   return {...source,symbols,weights:Object.fromEntries(symbols.map(s=>[s,1/n])),
     methodology:'Equal initial-dollar allocations; no periodic rebalancing; no cross-symbol capital netting; daily aligned closes.',
-    metrics,curve,benchmarkCurve,breakdown:perSymbol.map(({symbol,source,metrics})=>({symbol,source,...metrics})),trades,
+    metrics,curve,benchmarkCurve,breakdown:perSymbol.map(({symbol,source,barDate,strategy,strategyName,fitSharpe,selectionId,metrics})=>
+      ({symbol,source,barDate,strategy,strategyName,fitSharpe,selectionId,...metrics})),trades,
     sourceSummary:config.sourceSummary||null};
 }
 export function portfolioSweepVariants(options={},pineInputs=null){
