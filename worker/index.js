@@ -217,7 +217,7 @@ export default {
       const expectedTradingDay=expectedNyseBarDate(new Date());
       const cacheUrl = new URL("/api/stocks/scan", url.origin);
       cacheUrl.searchParams.set("feed", feed);
-      cacheUrl.searchParams.set("universe_revision", "2026-11-17-round12-mrsh-diagnostics");
+      cacheUrl.searchParams.set("universe_revision", "2026-11-17-round14-modal-freshness");
       cacheUrl.searchParams.set("expected_trading_day",expectedTradingDay);
       cacheUrl.searchParams.set("origin", origin || "none");
       const cacheKey = new Request(cacheUrl.toString(), { method: "GET" });
@@ -287,12 +287,13 @@ export default {
         }, status, origin, env, status === 429 ? { "Retry-After": "60" } : {});
       }
 
-      // One fresh-data retry per stale symbol, grouped in the same 15-symbol batches
-      // as the original scan to stay within Cloudflare's subrequest budget.
+      // The modal observed latest-bar date drives retries: one lagging ticker
+      // must not be masked by the pre-close wall-clock date.
+      // Retry stale symbols in capped batches to respect subrequest limits.
       const firstFreshness=freshnessWithUniverse(barsBySymbol,LIVE_UNIVERSE,expectedTradingDay);
       const retryAttempted=firstFreshness.stale.map(x=>x.symbol),retryUpdated=[],retryErrors=[];
       if(retryAttempted.length){
-        const recentStart=new Date(Date.parse(expectedTradingDay+'T00:00:00Z')-7*86400000).toISOString();
+        const recentStart=new Date(Date.parse(firstFreshness.expected+'T00:00:00Z')-7*86400000).toISOString();
         for(let i=0;i<retryAttempted.length;i+=ALPACA_BATCH_SIZE){
           const symbols=retryAttempted.slice(i,i+ALPACA_BATCH_SIZE);
           try{
@@ -323,16 +324,19 @@ export default {
           }
         }
         console.info("[market-lens] stale-bar retry",JSON.stringify({
-          expected:expectedTradingDay,attempted:retryAttempted,receivedNewBars:retryUpdated,
+          reference:firstFreshness.expected,clockFallback:expectedTradingDay,
+          attempted:retryAttempted,receivedNewBars:retryUpdated,
           errors:retryErrors.map(x=>({symbols:x.symbols,reason:x.reason}))
         }));
       }
       const freshness=freshnessWithUniverse(barsBySymbol,LIVE_UNIVERSE,expectedTradingDay);
       // Retry exhausted: explain each truly stale ticker with asset status.
       const diagnostics={};
-      for(const row of freshness.stale.slice(0,15)){
+      for(const [index,row] of freshness.stale.entries()){
         const retryFailed=retryErrors.some(error=>error.symbols?.includes(row.symbol));
-        diagnostics[row.symbol]={asset:await alpacaAsset(row.symbol,env),
+        // The retry response itself is evidence of no newer bar, even if the
+        // extra asset-status query budget has been exhausted (15 lookups).
+        diagnostics[row.symbol]={asset:index<15?await alpacaAsset(row.symbol,env):null,
           barsAfterLatest:retryFailed?null:retryUpdated.includes(row.symbol),
           retryFailed,latest:row.latest,checkedAt:new Date().toISOString()};
       }
@@ -347,7 +351,8 @@ export default {
         requested: LIVE_UNIVERSE.length,
         returned: returnedSymbols.length,
         missing,
-        freshness:{expected:freshness.expected,allFresh:freshness.allFresh,stale:freshness.stale,
+        freshness:{expected:freshness.expected,referenceMethod:freshness.referenceMethod,
+          clockFallback:expectedTradingDay,allFresh:freshness.allFresh,stale:freshness.stale,
           checked:freshness.checked,latestBySymbol:freshness.dates,verifiedAt:new Date().toISOString()},
         retry:retryInfo,
         diagnostics,
