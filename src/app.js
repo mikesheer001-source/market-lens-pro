@@ -863,7 +863,7 @@ async function initApp(){
       S.sources.get(S.symbol)==='ALPACA'&&!S.intraday.get(intradayKey(S.symbol))&&
       !S.intradayStatus.get(intradayKey(S.symbol)))
       void Promise.resolve().then(()=>loadLiveIntraday(S.symbol)).catch(()=>{});
-    if(S.tab==='backtest'&&(S.portfolioMode?S.portfolioResult?.curve?.length:S.result?.curve?.length))mountEquity();
+    if(S.tab==='backtest'&&(S.portfolioMode?activePortfolioResult()?.curve?.length:S.result?.curve?.length))mountEquity();
     if(S.tab==='backtest'&&!S.portfolioMode&&S.leaderboard?.symbol===S.symbol)mountLeaderboardChart();
     saveSettings();
   }
@@ -956,7 +956,7 @@ async function initApp(){
   function mountEquity(){
     const el=$('#equity-chart');if(!el)return;equityChart=newChart(el,275,92);
     const line=equityChart.addSeries(AreaSeries,{lineColor:colors.up,topColor:'#2aac765a',bottomColor:'#2aac7610',lineWidth:2,priceLineVisible:false,lastValueVisible:false,title:'Strategy'});
-    const active=S.portfolioMode?S.portfolioResult:S.result;
+    const active=S.portfolioMode?activePortfolioResult():S.result;
     line.setData(active.curve);
     const bb=equityChart.addSeries(LineSeries,{color:'#6c89a4',lineWidth:1,priceLineVisible:false,lastValueVisible:false,title:'Buy & hold'});
     if(S.portfolioMode&&active.benchmarkCurve?.length)bb.setData(active.benchmarkCurve);
@@ -979,7 +979,13 @@ async function initApp(){
     const obj=new Blob([contents],{type:mime}),url=URL.createObjectURL(obj),link=document.createElement('a');link.href=url;link.download=name;document.body.append(link);link.click();link.remove();setTimeout(()=>URL.revokeObjectURL(url),1000);
   }
   const runBt=()=>{
-    const b=bars();if(b.length<40){notice('Need at least 40 bars for a meaningful backtest.');return false;}
+    let window;
+    try{
+      window=windowBacktestBars(bars(),S.btRange);
+      if(window.bars.length<40)throw Error('Selected backtest date range has only '+
+        window.bars.length+' bars; at least 40 are required. Choose a wider range.');
+    }catch(error){S.backtestError=String(error.message||error);notice(S.backtestError);return false;}
+    const b=window.bars;
     try{
       const cfg={...S.bt,timeframe:S.chart.tf};
       if(cfg.strategy==='pine-custom'){
@@ -989,7 +995,12 @@ async function initApp(){
         const calculated=executePine(program,b,active.settings);
         cfg.customSignals=calculated.signals;
       }
-      S.result=backtest(b,cfg);S.resultSymbol=S.symbol;S.resultTf=S.chart.tf;rememberAnalysis();return true;
+      S.result=backtest(b,cfg);
+      S.result.range=window.range;
+      S.result.source=S.sources.get(S.symbol)==='ALPACA'?
+        'ALPACA '+String(S.liveFeed).toUpperCase()+' '+S.chart.tf:
+        S.sources.get(S.symbol)==='SIMULATED'?'SIMULATED OHLCV':'IMPORTED CSV OHLCV';
+      S.backtestError='';S.resultSymbol=S.symbol;S.resultTf=S.chart.tf;rememberAnalysis();return true;
     }catch(err){
       S.scriptError=err.message;S.tab='scripts';render();notice(err.message);return false;
     }
