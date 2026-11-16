@@ -49,8 +49,8 @@ test('Round 20: on-chart EMA settings gear updates original footer, live label a
   await expect(page.locator('[data-indicator-row="ema200"]')).toContainText('EMA 200');
   await expect(page.locator('[data-indicator-row="volume"]')).toContainText('Volume');
   await expect(page.locator('[data-indicator-row="rsi"]')).toContainText('RSI 14');
-  await expect(page.getByRole('button',{name:'Settings for EMA 20'})).toBeVisible();
-  await page.getByRole('button',{name:'Settings for EMA 20'}).click();
+  await expect(page.getByRole('button',{name:'Settings for EMA 20',exact:true})).toBeVisible();
+  await page.getByRole('button',{name:'Settings for EMA 20',exact:true}).click();
   await expect(page.locator('#indicator-settings-ema20')).toBeVisible();
   await expect(page.locator('#indicator-settings-ema20 input[type="checkbox"]')).toBeChecked();
   const period=page.locator('[data-indicator-field="ema20Len"]');
@@ -58,7 +58,7 @@ test('Round 20: on-chart EMA settings gear updates original footer, live label a
   await period.press('Tab');
   await expect(page.locator('[data-chart="ema20Len"]')).toHaveValue('34');
   await expect(page.locator('[data-indicator-row="ema20"]')).toContainText('EMA 34');
-  await expect(page.getByRole('button',{name:'Settings for EMA 34'})).toBeVisible();
+  await expect(page.getByRole('button',{name:'Settings for EMA 34',exact:true})).toBeVisible();
   // The legend and old controls use one state, including visibility.
   await page.locator('#indicator-settings-ema20 input[type="checkbox"]').uncheck();
   await expect(page.locator('[data-indicator-row="ema20"]')).toHaveCount(0);
@@ -117,7 +117,7 @@ test('Round 20: mobile fullscreen fills small viewport while indicator gear and 
   const stage=await page.locator('#chart-stage').boundingBox();
   expect(stage.height).toBeGreaterThan(110);
   await expect(page.locator('#price-chart canvas').first()).toBeVisible();
-  await page.getByRole('button',{name:'Settings for EMA 20'}).click();
+  await page.getByRole('button',{name:'Settings for EMA 20',exact:true}).click();
   await expect(page.locator('#indicator-settings-ema20')).toBeVisible();
   await page.locator('[data-indicator-field="ema20Len"]').fill('28');
   await page.locator('[data-indicator-field="ema20Len"]').press('Tab');
