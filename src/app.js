@@ -612,13 +612,15 @@ async function initApp(){
       '<div class="info-strip warning" id="chart-stale-warning" role="status">'+
       '<strong>'+esc(S.symbol)+' daily bars lag the observed universe reference '+esc(S.freshness.expected)+'</strong>'+
       staleNote(S.symbol)+'</div>':'';
-    const panel='<div class="panel '+(S.chartFullscreen?'chart-is-fullscreen':'')+
-      '" id="chart-lab-panel" data-fullscreen="'+S.chartFullscreen+'">'+
-      chartControls()+'<div class="chart-stage" id="chart-stage">'+
+    const chartMarkup=chartControls().replace(
+      '<div class="chart-area" id="price-chart"></div>',
+      '<div class="chart-stage" id="chart-stage">'+
       '<div class="chart-axis-hint" id="chart-axis-hint">Drag the price scale to rescale · double-click the axis to reset</div>'+
       '<div class="chart-area" id="price-chart"></div>'+
-      chartIndicatorLegend(b)+'</div>'+
-      '<div class="chart-intraday-control">'+
+      chartIndicatorLegend(b)+'</div>');
+    const panel='<div class="panel '+(S.chartFullscreen?'chart-is-fullscreen':'')+
+      '" id="chart-lab-panel" data-fullscreen="'+S.chartFullscreen+'">'+
+      chartMarkup+'<div class="chart-intraday-control">'+
       (intradayTf(S.chart.tf)?button('Refresh Alpaca 15m candles','refresh-intraday','small'):'')+
       '</div></div>';
     const footer=S.chartFullscreen?'':'<div class="info-strip">Data: <strong>'+
