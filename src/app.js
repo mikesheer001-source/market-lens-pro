@@ -183,7 +183,7 @@ async function initApp(){
 
   const status=()=>S.mode==='live'?'ALPACA LIVE · '+String(S.liveFeed||'iex').toUpperCase():S.sources.get(S.symbol)==='SIMULATED'?'SIMULATED SAMPLE':S.sources.get(S.symbol)==='IMPORTED'?'IMPORTED OHLCV':'NO DATA';
   const isVisibleSymbol=symbol=>modeSymbol(symbol)&&(S.universeFilter!=='volatility'||VOLATILITY_UNIVERSE.includes(symbol));
-  function destroyCharts(){if(chart){chart.remove();chart=null;}if(equityChart){equityChart.remove();equityChart=null;}}
+  function destroyCharts(){if(chart){chart.remove();chart=null;}if(equityChart){equityChart.remove();equityChart=null;}if(leaderboardChart){leaderboardChart.remove();leaderboardChart=null;}}
   function shell(){
     const nav=(mobile=false)=>'<nav aria-label="'+(mobile?'Mobile':'Primary')+' navigation" class="'+(mobile?'mobile-nav':'nav')+'">'+Object.entries(tabNames).map(([k,n])=>'<button class="nav-btn '+(S.tab===k?'active':'')+'" data-tab="'+k+'"><span class="nav-icon" aria-hidden="true">'+tabIcons[k]+'</span>'+n+'</button>').join('')+'</nav>';
     $('#app').innerHTML='<a href="#main" class="skip-link">Skip to workspace</a><div class="shell"><aside class="sidebar"><div class="brand"><div class="brand-mark" aria-hidden="true">ML</div><div><strong>MARKET LENS</strong><small>PRO WORKSTATION</small></div></div><div><div class="nav-label">Workspace</div>'+nav()+'</div><div class="sidebar-bottom">DATA NOTICE<br/>Your imported prices stay on this device. Simulated sample data is never live market data.<p>No account. No trades sent.</p></div></aside><div class="workspace"><header class="topbar"><div class="top-left"><strong>Market Lens Pro</strong><span class="workspace-label">/ Independent strategy laboratory</span></div><div class="top-actions"><span class="status"><span class="dot"></span>'+ (S.mode==='live'?'Alpaca data':'Local workspace') +'</span><span class="source-badge">'+status()+'</span><div class="mode-switch flex"><button class="btn small '+(S.mode==='demo'?'selected':'')+'" aria-pressed="'+(S.mode==='demo')+'" data-action="mode-demo">Use Demo</button><button class="btn small '+(S.mode==='live'?'selected':'')+'" aria-pressed="'+(S.mode==='live')+'" data-action="mode-live">Use Live</button></div><button class="btn" data-action="import">Import CSV</button></div></header>'+nav(true)+'<main id="main" class="main" tabindex="-1"></main></div></div><input id="csv-file" type="file" accept=".csv,text/csv" multiple hidden/>';
@@ -513,6 +513,7 @@ async function initApp(){
         void loadLiveIntraday(S.symbol);
     }
     if(S.tab==='backtest'&&(S.portfolioMode?S.portfolioResult?.curve?.length:S.result?.curve?.length))mountEquity();
+    if(S.tab==='backtest'&&!S.portfolioMode&&S.leaderboard?.symbol===S.symbol)mountLeaderboardChart();
     saveSettings();
   }
   const colors={background:'#101515',text:'#a8b7b0',grid:'#23302b',up:'#46d69b',down:'#f08480',yellow:'#e9bd68',blue:'#71b8b3',indicator:'#d69c65'};
@@ -825,6 +826,53 @@ async function initApp(){
     }catch(error){S.portfolioError=error.message;S.tab='optimize';render();notice(error.message);}
   }
 
+  function runComparison(){
+    try{
+      const history=bars();
+      const report=compareStrategies({symbol:S.symbol,bars:history,
+        options:{...S.bt,timeframe:S.chart.tf},source:S.sources.get(S.symbol)==='ALPACA'?
+          'Alpaca '+String(S.liveFeed).toUpperCase()+' OHLCV':S.sources.get(S.symbol)==='SIMULATED'?
+          'SIMULATED Demo OHLCV':'IMPORTED CSV OHLCV',
+        backtest,compilePine,executePine,savedScripts:S.scriptLibrary});
+      S.leaderboard=report;S.leaderboardSort='sharpe';S.leaderboardDescending=true;S.leaderboardError='';
+      rememberLeaderboard();render();
+    }catch(err){S.leaderboardError=err.message;notice('Comparison failed: '+err.message);render();}
+  }
+  function loadComparisonStrategy(id){
+    const lb=S.leaderboard?.symbol===S.symbol?S.leaderboard:null;
+    const choice=lb?.rows.find(x=>x.id===id);
+    if(!choice){notice('Run a strategy comparison for this symbol first.');return;}
+    S.portfolioMode=false;S.bt={...S.bt,...lb.settings,strategy:choice.strategy};
+    S.chart.tf=lb.timeframe;S.activeStrategy=choice.script?{
+      code:choice.script.code,settings:{...choice.script.settings},name:choice.name
+    }:null;
+    if(choice.script){
+      S.scriptCode=choice.script.code;S.scriptName=choice.name;
+      S.scriptId=choice.script.id;S.scriptSettings={...choice.script.settings};
+      parseCurrentPine();persistPineDraft();
+    }
+    S.result={metrics:choice.metrics,curve:choice.curve,trades:choice.trades};
+    S.resultSymbol=lb.symbol;S.resultTf=lb.timeframe;S.sweep=null;S.tab='backtest';
+    rememberAnalysis();render();
+  }
+  function mountLeaderboardChart(){
+    const el=$('#leaderboard-chart'),lb=S.leaderboard;
+    if(!el||!lb?.overlay)return;
+    leaderboardChart=newChart(el,320,90);
+    const palette=['#46d69b','#71b8b3','#e9bd68'];
+    for(const [i,entry] of lb.overlay.series.entries()){
+      const line=leaderboardChart.addSeries(LineSeries,{color:palette[i],lineWidth:i===0?3:2,
+        priceLineVisible:false,lastValueVisible:false,title:entry.name});
+      line.setData(entry.points);
+    }
+    if(lb.overlay.benchmark.length){
+      const reference=leaderboardChart.addSeries(LineSeries,{color:'#91a0a7',lineWidth:2,
+        priceLineVisible:false,lastValueVisible:false,title:'Buy & hold'});
+      reference.setData(lb.overlay.benchmark);
+    }
+    leaderboardChart.timeScale().fitContent();
+  }
+
   const action={
     'export-screener':()=>exportScreenerCsv(),
     'run-portfolio':()=>runPortfolioCurrent(),
@@ -879,6 +927,15 @@ async function initApp(){
     'clear-lines':()=>{S.chart.lines[S.symbol]=[];render();},
     'chart-png':()=>{if(!chart)return;try{const canvas=chart.takeScreenshot();canvas.toBlob(blob=>{if(!blob)return;const url=URL.createObjectURL(blob),a=document.createElement('a');a.href=url;a.download='market-lens-'+S.symbol+'.png';a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);});}catch{notice('Chart image export is unsupported in this browser.');}},
     'run-backtest':()=>{if(S.portfolioMode){runPortfolioCurrent();return;}if(runBt())render();},
+    'compare-strategies':()=>{if(S.portfolioMode){notice('Switch to Single symbol mode to compare individual strategies.');return;}runComparison();},
+    'load-best-strategy':()=>{const id=S.leaderboard?.bestId;if(id)loadComparisonStrategy(id);},
+    'sort-leaderboard':el=>{
+      const key=el.dataset.key;
+      if(!LEADERBOARD_METRICS.includes(key))return;
+      if(S.leaderboardSort===key)S.leaderboardDescending=!S.leaderboardDescending;
+      else {S.leaderboardSort=key;S.leaderboardDescending=!['name','maxDD'].includes(key);}
+      render();
+    },
     'run-sweep':()=>{if(S.portfolioMode){runPortfolioOptimization();return;}if(bars().length<60){notice('A parameter sweep needs at least 60 bars.');return;}if(S.bt.strategy==='pine-custom'){sweepCurrentPine();return;}S.sweep=parameterSweep(bars(),{...S.bt,timeframe:S.chart.tf});rememberAnalysis();render();},
     'apply-sweep':el=>{
       if(S.portfolioMode){
