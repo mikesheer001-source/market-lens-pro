@@ -60,7 +60,7 @@ test('Round 20: on-chart EMA settings gear updates original footer, live label a
   await expect(page.locator('[data-indicator-row="ema20"]')).toContainText('EMA 34');
   await expect(page.getByRole('button',{name:'Settings for EMA 34',exact:true})).toBeVisible();
   // The legend and old controls use one state, including visibility.
-  await page.locator('#indicator-settings-ema20 input[type="checkbox"]').uncheck();
+  await page.locator('#indicator-settings-ema20 input[type="checkbox"]').click();
   await expect(page.locator('[data-indicator-row="ema20"]')).toHaveCount(0);
   await expect(page.locator('[data-chart="ema20"]')).not.toBeChecked();
   await page.locator('[data-chart="ema20"]').check();
