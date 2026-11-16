@@ -39,6 +39,7 @@ test('real Alpaca Worker scans entire 133-symbol universe and publishes VXX dail
   const spyBars=Number((await page.locator('tr[data-symbol="SPY"] td').nth(8).innerText()).trim());
   expect(spyBars,'Real SPY scan should supply more than the old ~378 daily candles').toBeGreaterThan(378);
   await expect(page.locator('[data-weekly-ema200="SPY"]')).not.toHaveText('—');
+  const weeklyEmaPct=(await page.locator('[data-weekly-ema200="SPY"]').innerText()).trim();
   await page.locator('.sidebar [data-tab="charts"]').click();
   await page.locator('[data-option="symbol"]').selectOption('SPY');
   await expect(page.getByText(spyBars+' D bars',{exact:false})).toBeVisible();
@@ -48,8 +49,8 @@ test('real Alpaca Worker scans entire 133-symbol universe and publishes VXX dail
   await expect(page.locator('#scan-duration')).toContainText('1825-day daily lookback');
   await expect(page.locator('#scan-duration')).toContainText(/measured in this browser/);
   console.info('Round 19 REAL Alpaca SPY daily bars='+spyBars+
-    ', W EMA200='+await page.locator('.sidebar [data-tab="screener"]').count()+
-    ' (weekly column confirmed), scan duration '+(await page.locator('#scan-duration').innerText()));
+    ', W EMA200='+weeklyEmaPct+
+    ', '+(await page.locator('#scan-duration').innerText()));
   await page.locator('.sidebar [data-tab="charts"]').click();
   await expect(page.locator('[data-option="symbol"] option')).toHaveCount(LIVE_UNIVERSE.length);
   await page.locator('[data-option="symbol"]').selectOption('AAPL');
