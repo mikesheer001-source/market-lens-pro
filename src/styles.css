@@ -349,3 +349,14 @@ tr[data-vol-symbol] td:nth-child(3){min-width:138px}
   .chart-is-fullscreen .chart-toolbar .chart-actions{width:100%;gap:5px}
   .chart-is-fullscreen .chart-toolbar .btn{padding:7px 8px}
 }
+
+
+/* Round 22: compact validation filter, readable definition and briefing contrast. */
+.leaderboard-validation-controls{display:flex;flex-wrap:wrap;gap:10px 16px;align-items:center;margin:10px 0 14px;padding:10px 12px;border:1px solid var(--border);background:#17241c;border-radius:7px;color:var(--text)}
+.leaderboard-validation-controls .inline-check{display:inline-flex;gap:8px;align-items:center;font-weight:750;white-space:nowrap;cursor:pointer}
+.leaderboard-validation-controls input:focus-visible{outline:3px solid var(--focus);outline-offset:3px}
+#leaderboard-validation-count{font-size:12px;line-height:1.5;color:var(--muted);flex:1 1 330px;font-variant-numeric:tabular-nums}
+#leaderboard-validation-empty{font-size:14px;padding:30px 16px;text-align:center}
+#briefing-top-validated{font-weight:750;color:var(--text);overflow-wrap:anywhere}
+#briefing-top-full-period{color:var(--muted);overflow-wrap:anywhere}
+@media(max-width:600px){.leaderboard-validation-controls{padding:8px;gap:6px}#leaderboard-validation-count{flex-basis:100%;font-size:11px}}
