@@ -216,3 +216,19 @@ test('published Round 22 validated-only toggle matches displayed validation badg
   await expect(page.locator('#leaderboard-validation-count')).toContainText('Positive OOS Sharpe');
   expect(errors).toEqual([]);
 });
+
+
+test('published Round 23 validated universe fit mode can be selected without losing default ranking',async({page})=>{
+  const errors=[];page.on('pageerror',error=>errors.push(error.message));
+  await page.goto('./');
+  await page.locator('.sidebar [data-tab="backtest"]').click();
+  const toggle=page.locator('#fit-validated-only');
+  await expect(toggle).not.toBeChecked();
+  await expect(page.locator('#universe-fit h2')).toContainText('In-sample ranking');
+  await toggle.check();
+  await expect(page.locator('#universe-fit h2')).toContainText('Validated OOS ranking');
+  await expect(page.locator('#fit-validated-count')).toContainText('of 133');
+  await toggle.uncheck();
+  await expect(page.locator('#universe-fit h2')).toContainText('In-sample ranking');
+  expect(errors).toEqual([]);
+});

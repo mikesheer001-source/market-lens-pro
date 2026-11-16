@@ -1,11 +1,10 @@
 import {test,expect} from '@playwright/test';
 import {sampleData} from '../src/engine.js';
-import {LIVE_UNIVERSE,ALPACA_SCAN_LOOKBACK_DAYS} from '../src/universe.js';
 
 const demo=sampleData()['DEMO-SPY'];
 const bars=demo.slice(-300).map(b=>({t:b.time+'T21:00:00Z',
  o:b.open,h:b.high,l:b.low,c:b.close,v:b.volume}));
-const payload={source:'alpaca',feed:'iex',lookback_days:ALPACA_SCAN_LOOKBACK_DAYS,
+const payload={source:'alpaca',feed:'iex',
  requested:133,returned:2,missing:[],
  freshness:{expected:bars.at(-1).t.slice(0,10)},
  bars:{ABBV:bars,SPY:bars}};
