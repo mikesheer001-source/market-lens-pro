@@ -50,7 +50,7 @@ test('Daily Briefing uses real engine metrics, matched set, signal flips, proxy 
   assert.equal(briefing.alerts.items.length,1);
   assert.equal(briefing.alerts.items[0].symbol,'VXX');
   assert.equal(briefing.stale.items.length,1);
-  assert.match(briefing.stale.items[0].reason,/no bars after Nov 13, 2026 \\(2026-11-13\\)/);
+  assert.match(briefing.stale.items[0].reason,/no bars after Nov 13, 2026 [(]2026-11-13[)]/);
 });
 
 test('plain-text export contains date, matched prices/RSI 5D, LONGs, regime, VXX 20D, alerts and stale',()=>{
