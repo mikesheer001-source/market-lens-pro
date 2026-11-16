@@ -53,3 +53,16 @@ test('mobile navigation and candlestick canvas',async ({page})=>{
   await expect(page.locator('#price-chart canvas').first()).toBeVisible();
   expect(errors).toEqual([]);
 });
+
+test('failed Live scan restores Demo mode and keeps the sample universe visible',async ({page})=>{
+  await page.goto('./');
+  await page.evaluate(()=>{
+    localStorage.setItem('market-lens-pro-settings',JSON.stringify({apiBaseUrl:'https://unreachable.market-lens.invalid'}));
+  });
+  await page.reload();
+  await page.route('https://unreachable.market-lens.invalid/**',route=>route.abort());
+  await page.locator('.mode-switch [data-action="mode-live"]').click();
+  await expect(page.locator('#scan-status')).toContainText('Live scan failed; Demo mode restored');
+  await expect(page.locator('tr[data-symbol]')).toHaveCount(4);
+  await expect(page.locator('.mode-switch [data-action="mode-demo"]')).toHaveClass(/selected/);
+});
