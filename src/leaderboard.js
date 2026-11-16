@@ -64,9 +64,10 @@ export function buildEquityOverlay(leaderboard,bars){
   });
   return {series:curves,benchmark,labels:[...curves.map(x=>x.name),'Buy & hold']};
 }
-export function compareStrategies({symbol,bars,options,source,backtest,compilePine,executePine,savedScripts=[],builtInExamples=[]}){
+export function compareStrategies({symbol,bars,options,source,backtest,compilePine,executePine,savedScripts=[],builtInExamples=[],minBars=40}){
   if(typeof symbol!=='string'||!symbol.trim())throw Error('Choose a symbol.');
-  if(!Array.isArray(bars)||bars.length<40)throw Error('At least 40 real or labeled Demo price bars are required.');
+  if(!Array.isArray(bars)||bars.length<minBars)
+    throw Error('At least '+minBars+' real or labeled Demo price bars are required for this comparison.');
   const timeframe=options.timeframe||'D',base={...options,timeframe};
   const rows=[],skipped=[],seen=new Set();
   for(const preset of PRESET_STRATEGIES){
