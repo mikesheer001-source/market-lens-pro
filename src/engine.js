@@ -57,10 +57,11 @@ function aggregate(bars,tf) {
     const intraday=typeof b.time==='number'&&!Number.isInteger(b.time/86400);
     const day=intraday?nyParts(b.time).day:String(b.time).slice(0,10);
     let k=day, t=day;
-    if(tf==='2H'){
+    if(tf==='2H'||tf==='15m'){
       if(typeof b.time!=='number')continue;
       const n=nyParts(b.time);if(n.minute<570||n.minute>=960)continue;
-      const bucket=Math.floor((n.minute-570)/120);
+      const size=tf==='2H'?120:15;
+      const bucket=Math.floor((n.minute-570)/size);
       k=n.day+'-'+bucket;t=b.time;
     }else if(tf==='W'){
       const d=new Date(day+'T00:00:00Z');d.setUTCDate(d.getUTCDate()-(d.getUTCDay()+6)%7);k=t=d.toISOString().slice(0,10);
