@@ -89,8 +89,10 @@ test('published Screener strategy signal picker sorts LONG states with real date
   await page.locator('[data-option="signals-only"]').check();
   const statuses=await page.locator('tbody .signal-status').allTextContents();
   expect(statuses.every(x=>x.trim()==='LONG')).toBe(true);
+  const longCount=statuses.length;
   await page.reload();
   await expect(page.locator('[data-option="signal-strategy"]')).toHaveValue('preset:ema-cross');
-  await expect(page.locator('tbody tr[data-symbol]')).toHaveCount(4);
+  await expect(page.locator('[data-option="signals-only"]')).toBeChecked();
+  await expect(page.locator('tbody tr[data-symbol]')).toHaveCount(longCount);
   expect(errors).toEqual([]);
 });
