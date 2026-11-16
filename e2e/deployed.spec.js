@@ -3,7 +3,7 @@ import {test,expect} from '@playwright/test';
 test('published Pages site renders screener, daily RSI, chart and backtest',async ({page})=>{
   const errors=[];
   page.on('pageerror',error=>errors.push(error.message));
-  await page.goto('/');
+  await page.goto('./');
   await expect(page.getByRole('heading',{name:'Screener'})).toBeVisible();
   await expect(page.locator('tr[data-symbol]')).toHaveCount(4);
   await expect(page.locator('thead th').nth(4)).toHaveText('RSI 5D');
