@@ -14,6 +14,8 @@ import {runBestFitPortfolio} from './best-fit-portfolio.js';
 import {holdoutSummary} from './validation.js';
 import {compareStrategiesInRange,leaderboardRangeStatus,rangeLabel} from './leaderboard-range.js';
 import {rollingPositiveText,rollingWindowDates,rollingLeaderboardSummary,ROLLING_WINDOW_COUNT} from './rolling-validation.js';
+import {VALIDATION_RULE,validationReasons,rollingValidated,filterValidatedLeaderboard,
+  bestRollingValidatedStrategy,briefingStrategyLeaders} from './validated-strategies.js';
 import {VOL_TICKERS,volatilityRow,contangoPriceProxies} from './volatility.js';
 import {restoreWatchlists,watchlistChange,validateAlert,checkAlerts,makeScanSnapshot,analysisSnapshot,restoreAnalysis,WATCHLIST_LIMIT,SCAN_LIMIT,ALERT_LIMIT} from './workspace.js';
 import { LIVE_UNIVERSE, DEMO_UNIVERSE, VOLATILITY_UNIVERSE, LIVE_EQUITY_COUNT, LIVE_ETF_COUNT, LIVE_VOLATILITY_COUNT, ALPACA_BATCH_SIZE, ALPACA_SCAN_LOOKBACK_DAYS } from './universe.js';
@@ -85,7 +87,8 @@ async function initApp(){
     portfolioTimestamp:previousPortfolio?.savedAt||null,portfolioError:'',portfolioLoading:false,
     intraday:new Map(),intradayStatus:new Map(),intradayPromises:new Map(),intradayError:'',
     analysisLoading:'',analysisError:'',
-    symbolMemory:previousSymbolMemory,leaderboard:null,leaderboardSort:'sharpe',leaderboardDescending:true,leaderboardError:'',fitReport:null,fitSort:'sharpe',fitDescending:true,fitStatus:'',fitError:'',
+    symbolMemory:previousSymbolMemory,leaderboard:null,leaderboardSort:'sharpe',leaderboardDescending:true,
+    leaderboardValidatedOnly:!!saved.leaderboardValidatedOnly,leaderboardError:'',fitReport:null,fitSort:'sharpe',fitDescending:true,fitStatus:'',fitError:'',
     briefing:null,briefingHistory:savedBriefings,briefingLoading:false,briefingError:'',drawLine:false,
     chartFullscreen:false,indicatorEditor:null,pendingChartRange:null,fullscreenScrollY:0,
     scriptCode:typeof draft.code==='string'?draft.code:PINE_EXAMPLES[0].code,
@@ -107,7 +110,8 @@ async function initApp(){
   let chart=null,equityChart=null,leaderboardChart=null;
   const saveSettings=()=>{try{localStorage.setItem('market-lens-pro-settings',JSON.stringify({mode:S.preferredMode==='live'?'live':S.mode,
     tab:S.tab,lastSymbol:S.symbol,lastBacktestSymbol:S.lastBacktestSymbol,
-    lastLiveSymbol:S.lastLiveSymbol,lastDemoSymbol:S.lastDemoSymbol,watch:[...S.watch],watchlists:S.watchlists,watchlistId:S.watchlistId,alerts:S.alerts,savedScans:S.savedScans,rules:S.rules,chart:S.chart,bt:S.bt,portfolioMode:S.portfolioMode,bestFitMode:S.bestFitMode,btRange:S.btRange,portfolioScope:S.portfolioScope,portfolioWatchlistId:S.portfolioWatchlistId,signalSelection:S.signalSelection,signalsOnly:S.signalsOnly,apiBaseUrl:S.apiBaseUrl,universeFilter:S.universeFilter}));}catch{}};
+    lastLiveSymbol:S.lastLiveSymbol,lastDemoSymbol:S.lastDemoSymbol,watch:[...S.watch],watchlists:S.watchlists,watchlistId:S.watchlistId,alerts:S.alerts,savedScans:S.savedScans,rules:S.rules,chart:S.chart,bt:S.bt,portfolioMode:S.portfolioMode,bestFitMode:S.bestFitMode,btRange:S.btRange,portfolioScope:S.portfolioScope,portfolioWatchlistId:S.portfolioWatchlistId,signalSelection:S.signalSelection,signalsOnly:S.signalsOnly,
+    leaderboardValidatedOnly:S.leaderboardValidatedOnly,apiBaseUrl:S.apiBaseUrl,universeFilter:S.universeFilter}));}catch{}};
   function rememberPortfolio(){
     S.portfolioTimestamp=new Date().toISOString();
     try{localStorage.setItem('market-lens-pro-portfolio-v1',JSON.stringify({
@@ -157,9 +161,36 @@ async function initApp(){
     });
   }
 
+  // Briefing ranks a single explicit Live symbol on the actual selected
+  // Backtester dates, using daily OHLCV (not potentially missing intraday).
+  // The computation never changes leaderboard sorting, symbols or its overlay.
+  let briefingLeadersCache=null;
+  function currentBriefingLeaders(){
+    const symbol=S.symbol,b=S.data.get(symbol)||[];
+    if(S.sources.get(symbol)!=='ALPACA'||b.length<4)
+      return {leaders:null,error:'No eligible Live daily bars for '+symbol+'.'};
+    const source='Alpaca '+String(S.liveFeed).toUpperCase()+' OHLCV';
+    const key=JSON.stringify([symbol,b.length,b[0]?.time,b.at(-1)?.time,
+      b.at(-1)?.close,S.btRange,S.bt,S.scriptLibrary,source]);
+    if(briefingLeadersCache?.key===key)return briefingLeadersCache.result;
+    let result;
+    try{
+      const report=compareStrategiesInRange({symbol,bars:b,range:S.btRange,
+        timeframe:'D',source,options:{...S.bt,timeframe:'D'},
+        builtInExamples:PINE_EXAMPLES,backtest,compilePine,executePine,
+        savedScripts:S.scriptLibrary});
+      result={leaders:briefingStrategyLeaders(report),error:null};
+    }catch(error){
+      result={leaders:null,error:'Daily strategy validation unavailable: '+
+        String(error.message||error)};
+    }
+    briefingLeadersCache={key,result};
+    return result;
+  }
   function captureBriefing(){
     if(S.mode!=='live'||S.scan.status!=='complete'||S.scan.source!=='ALPACA')return null;
     const selection=screenerStrategies().find(x=>x.id===S.signalSelection)||null;
+    const leadersResult=currentBriefingLeaders();
     const symbols=LIVE_UNIVERSE.filter(sym=>S.universeFilter!=='volatility'||VOLATILITY_UNIVERSE.includes(sym));
     const briefing=compileDailyBriefing({
       generatedAt:new Date().toISOString(),scan:S.scan,data:S.data,sources:S.sources,
@@ -167,7 +198,8 @@ async function initApp(){
       strategyName:selection?.name||null,signals:S.signalRows,
       flips:S.lastSignalFlipStrategy===selection?.id?S.lastSignalFlips:[],
       hasFlipBaseline:!!selection&&S.lastSignalFlipStrategy===selection.id&&S.lastSignalFlipBaseline,
-      alerts:S.alerts,freshness:S.freshness,diagnostics:S.staleDiagnostics
+      alerts:S.alerts,freshness:S.freshness,diagnostics:S.staleDiagnostics,
+      strategyLeaders:leadersResult.leaders,strategyLeadersError:leadersResult.error
     });
     S.briefing=briefing;S.briefingHistory=saveBriefingHistory(S.briefingHistory,briefing);
     try{localStorage.setItem(briefingStorageKey,JSON.stringify(S.briefingHistory));}
@@ -661,6 +693,7 @@ async function initApp(){
   // Round 16: Never confer a Validated label on a short or unmeasurable holdout.
   function holdoutLabel(row){
     if(row?.validation?.validated)return '<span class="oos-validated" title="Positive out-of-sample Sharpe on at least 30 held-out bars">Validated</span>';
+    if(rollingValidated(row))return '<span class="oos-validated" title="At least 3 of 5 rolling OOS windows have positive Sharpe, each with 30+ held-out bars">Validated (rolling 3/5)</span>';
     if(row?.validation?.note)return '<small class="oos-note">'+esc(row.validation.note)+'</small>';
     return '<span class="muted">Not validated</span>';
   }
@@ -805,8 +838,11 @@ async function initApp(){
         '"><button class="table-sort" type="button" data-action="sort-leaderboard" data-key="'+key+
         '" aria-label="Sort by '+esc(title)+'">'+esc(title)+arrow+'</button></th>';
     }).join('');
-    const order=sortLeaderboard(lb.rows,S.leaderboardSort,S.leaderboardDescending);
+    const visibleRows=filterValidatedLeaderboard(lb.rows,S.leaderboardValidatedOnly);
+    const order=sortLeaderboard(visibleRows,S.leaderboardSort,S.leaderboardDescending);
     const top=lb.rows.find(row=>row.id===lb.bestId);
+    const bestValidated=bestRollingValidatedStrategy(lb.rows)||
+      sortLeaderboard(filterValidatedLeaderboard(lb.rows,true),'sharpe',true)[0]||null;
     const note=S.chart.tf!==lb.timeframe?'Current timeframe '+esc(S.chart.tf)+
       ' differs from saved comparison timeframe '+esc(lb.timeframe)+'. Rerun to update.':'';
     const provenance='<div class="info-strip" id="leaderboard-source"><strong>'+esc(lb.symbol)+
@@ -869,12 +905,23 @@ async function initApp(){
     return '<section class="panel" aria-label="Strategy comparison"><div class="panel-header"><h2>Strategy leaderboard</h2><div class="flex">'+
       '<span class="source-badge" id="leaderboard-window">'+esc(rangeLabel(lb.range||{}))+'</span>'+
       button('Compare all strategies','compare-strategies','small')+
-      (top?button('Load best into Backtester','load-best-strategy','primary'):'')+
+      (S.leaderboardValidatedOnly?
+        (bestValidated?button('Load best validated into Backtester','load-best-validated','primary'):''):
+        (top?button('Load best into Backtester','load-best-strategy','primary'):''))+
       '</div></div><div class="panel-body">'+provenance+
+      '<div class="leaderboard-validation-controls">'+
+      '<label class="inline-check"><input type="checkbox" id="leaderboard-validated-only" '+
+      'data-option="leaderboard-validated-only" '+(S.leaderboardValidatedOnly?'checked':'')+
+      '/> Validated only</label>'+
+      '<span id="leaderboard-validation-count" role="status">Showing '+visibleRows.length+
+      ' of '+lb.rows.length+' total leaderboard rows · '+esc(rangeLabel(lb.range||{}))+
+      ' · definition: '+esc(VALIDATION_RULE)+'</span></div>'+
       (lb.skipped.length?'<div class="info-strip warning" role="status">'+lb.skipped.length+
         ' scripts unavailable: '+lb.skipped.map(x=>esc(x.name)+': '+esc(x.reason)).join('; ')+'</div>':'')+
-      '<div class="table-wrap"><table class="data-table leaderboard-table"><thead><tr>'+
-      headers+'</tr></thead><tbody>'+cells+'</tbody></table></div>'+walk+
+      (S.leaderboardValidatedOnly&&!visibleRows.length?
+        '<div class="empty" role="status" id="leaderboard-validation-empty">No strategy validated on this window</div>':
+        '<div class="table-wrap"><table class="data-table leaderboard-table"><thead><tr>'+
+        headers+'</tr></thead><tbody>'+cells+'</tbody></table></div>')+walk+
       '<p class="section-note">Rank remains by <strong>training Sharpe</strong>, not OOS or rolling Sharpe. The original single 70/30 split, its Validated badge and Full-period equity overlay are unchanged. Rolling uses five windows, each 40% of selected history and stepped 15% forward, with disjoint test periods; the fixed strategy is tested on the final 30% of each window after indicator warm-up. Rolling mean/median use only windows with at least 30 test bars and finite Sharpe; missing windows are disclosed, never counted as losses. '+esc(definitions.find(x=>x[0]===S.leaderboardSort)?.[1]||'Train Sharpe')+
       ' is currently selected for table sorting. Rerun older saved comparisons to populate holdout values.</p>'+
       '</div></section><div class="panel"><div class="panel-header"><h2>Top 3 equity curves vs. buy-and-hold</h2>'+
@@ -1687,6 +1734,12 @@ async function initApp(){
       runComparison();
     },
     'load-best-strategy':()=>{const id=S.leaderboard?.bestId;if(id)loadComparisonStrategy(id);},
+    'load-best-validated':()=>{
+      const lb=S.leaderboard;
+      const choice=bestRollingValidatedStrategy(lb?.rows)||
+        sortLeaderboard(filterValidatedLeaderboard(lb?.rows,true),'sharpe',true)[0];
+      if(choice)loadComparisonStrategy(choice.id);
+    },
     'sort-leaderboard':el=>{
       const key=el.dataset.key;
       if(!LEADERBOARD_METRICS.includes(key))return;
@@ -1788,6 +1841,9 @@ async function initApp(){
       if(opt==='signal-strategy'){S.signalSelection=val;S.signalsOnly=false;
         evaluateScreenerSignals(false);saveSettings();render();return;}
       if(opt==='signals-only'){S.signalsOnly=el.checked;saveSettings();render();return;}
+      if(opt==='leaderboard-validated-only'){
+        S.leaderboardValidatedOnly=el.checked;saveSettings();render();return;
+      }
       if(opt==='watchlist-select'){selectWatchlist(val);render();return;}
       if(opt==='portfolio-mode'){S.portfolioMode=val!=='single';S.bestFitMode=val==='best-fit';S.portfolioError='';saveSettings();render();return;}
       if(opt==='portfolio-scope'){S.portfolioScope=val;saveSettings();render();return;}
