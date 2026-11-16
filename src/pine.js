@@ -64,7 +64,7 @@ function expression(src,line){
     const t=take();
     if(t.type==='number'||t.type==='string')return {type:'literal',value:t.value,line};
     if(t.value==='true'||t.value==='false')return {type:'literal',value:t.value==='true',line};
-    if(t.value==='na')return {type:'literal',value:null,line};
+    if(t.value==='na'&&peek().value!=='(')return {type:'literal',value:null,line};
     if(t.value==='not'||t.value==='!'||t.value==='-'||t.value==='+')
       return {type:'unary',op:t.value,arg:parse(6),line};
     if(t.value==='('){const node=parse(0);expect(')');return node;}
