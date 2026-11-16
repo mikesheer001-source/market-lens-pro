@@ -149,3 +149,25 @@ test('published Round 17 leaderboard auto-follows selected dates and resets to F
   await expect(page.locator('#leaderboard-chart canvas').first()).toBeVisible();
   expect(errors).toEqual([]);
 });
+
+test('published Round 18 shows five rolling test windows, median/mean and positive count on the live website',async ({page})=>{
+  test.setTimeout(120000);
+  const errors=[];page.on('pageerror',e=>errors.push(e.message));
+  await page.goto('./');
+  await page.locator('.sidebar [data-tab="backtest"]').click();
+  await page.locator('[data-action="compare-strategies"]').first().click();
+  await expect(page.locator('.leaderboard-table tbody tr')).toHaveCount(12);
+  await expect(page.locator('.leaderboard-table')).toContainText('Rolling mean OOS Sharpe (5)');
+  await expect(page.locator('.leaderboard-table')).toContainText('Rolling median OOS Sharpe (5)');
+  await expect(page.locator('.leaderboard-table')).toContainText('Rolling positive windows (5)');
+  await expect(page.locator('#rolling-window-dates')).toContainText('W1');
+  await expect(page.locator('#rolling-window-dates')).toContainText('W5');
+  await expect(page.locator('#walk-forward-summary')).toContainText('steadier evidence than a single holdout');
+  await expect(page.locator('tr[data-leaderboard-id="preset:ema-cross"] td').nth(7)).toContainText('/5');
+  await page.locator('[data-bt-range="startDate"]').fill('2025-01-02');
+  await page.locator('[data-bt-range="endDate"]').fill('2025-12-31');
+  await expect(page.locator('#leaderboard-window')).toContainText('2025-01-02 to 2025-12-31');
+  await expect(page.locator('#rolling-window-dates')).toContainText('2025');
+  await expect(page.locator('#leaderboard-chart canvas').first()).toBeVisible();
+  expect(errors).toEqual([]);
+});
