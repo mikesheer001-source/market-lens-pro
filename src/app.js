@@ -5,6 +5,7 @@ import {readableBarDate,normalizeStartupPreferences,intradayCacheFresh,intradayF
 import {availableStrategySignals,evaluateStrategySignals,scanSignalFlips} from './signals.js';
 import {expectedNyseBarDate,scanFreshness,staleReasonForSymbol} from './freshness.js';
 import {FIT_COLUMNS,sortUniverseFit,bestUniverseFit,fitAcrossUniverse} from './fit.js';
+import {fitValidatedAcrossUniverse,NO_VALIDATED_FIT} from './fit-validated.js';
 import {compileDailyBriefing,briefingToText,pruneBriefingHistory,saveBriefingHistory} from './briefing.js';
 import {renderBriefingView} from './briefing-view.js';
 import {compareStrategies,sortLeaderboard,leaderboardBest,updateSymbolMemory,pruneSymbolMemory,symbolMemoryItem,compactLeaderboard,LEADERBOARD_METRICS} from './leaderboard.js';
@@ -88,7 +89,7 @@ async function initApp(){
     intraday:new Map(),intradayStatus:new Map(),intradayPromises:new Map(),intradayError:'',
     analysisLoading:'',analysisError:'',
     symbolMemory:previousSymbolMemory,leaderboard:null,leaderboardSort:'sharpe',leaderboardDescending:true,
-    leaderboardValidatedOnly:!!saved.leaderboardValidatedOnly,leaderboardError:'',fitReport:null,fitSort:'sharpe',fitDescending:true,fitStatus:'',fitError:'',
+    leaderboardValidatedOnly:!!saved.leaderboardValidatedOnly,leaderboardError:'',fitReport:null,fitValidatedReport:null,fitValidatedOnly:!!saved.fitValidatedOnly,fitSort:'sharpe',fitDescending:true,fitStatus:'',fitError:'',
     briefing:null,briefingHistory:savedBriefings,briefingLoading:false,briefingError:'',drawLine:false,
     chartFullscreen:false,indicatorEditor:null,pendingChartRange:null,fullscreenScrollY:0,
     scriptCode:typeof draft.code==='string'?draft.code:PINE_EXAMPLES[0].code,
@@ -111,7 +112,7 @@ async function initApp(){
   const saveSettings=()=>{try{localStorage.setItem('market-lens-pro-settings',JSON.stringify({mode:S.preferredMode==='live'?'live':S.mode,
     tab:S.tab,lastSymbol:S.symbol,lastBacktestSymbol:S.lastBacktestSymbol,
     lastLiveSymbol:S.lastLiveSymbol,lastDemoSymbol:S.lastDemoSymbol,watch:[...S.watch],watchlists:S.watchlists,watchlistId:S.watchlistId,alerts:S.alerts,savedScans:S.savedScans,rules:S.rules,chart:S.chart,bt:S.bt,portfolioMode:S.portfolioMode,bestFitMode:S.bestFitMode,btRange:S.btRange,portfolioScope:S.portfolioScope,portfolioWatchlistId:S.portfolioWatchlistId,signalSelection:S.signalSelection,signalsOnly:S.signalsOnly,
-    leaderboardValidatedOnly:S.leaderboardValidatedOnly,apiBaseUrl:S.apiBaseUrl,universeFilter:S.universeFilter}));}catch{}};
+    leaderboardValidatedOnly:S.leaderboardValidatedOnly,fitValidatedOnly:S.fitValidatedOnly,apiBaseUrl:S.apiBaseUrl,universeFilter:S.universeFilter}));}catch{}};
   function rememberPortfolio(){
     S.portfolioTimestamp=new Date().toISOString();
     try{localStorage.setItem('market-lens-pro-portfolio-v1',JSON.stringify({
@@ -932,12 +933,57 @@ async function initApp(){
   }
 
   function universeFitView(){
-    const report=S.fitReport;
+    const validated=S.fitValidatedOnly,report=validated?S.fitValidatedReport:S.fitReport;
+    const mode=validated?'Validated OOS ranking':'In-sample ranking';
+    const count=S.fitValidatedReport?
+      S.fitValidatedReport.validated+' of '+LIVE_UNIVERSE.length+
+        ' symbols have a validated strategy':
+      'Validated-strategy count pending · 0 of '+LIVE_UNIVERSE.length+' evaluated';
+    const controls='<label class="inline-check"><input type="checkbox" id="fit-validated-only" '+
+      'data-option="fit-validated-only" '+(validated?'checked':'')+'/> Validated only</label>';
     const status=S.fitStatus?'<div id="fit-status" role="status" class="info-strip">'+esc(S.fitStatus)+'</div>':
       S.fitError?'<div id="fit-status" role="alert" class="info-strip warning">'+esc(S.fitError)+'</div>':'';
-    if(!report)return '<section class="panel" id="universe-fit"><div class="panel-header"><h2>Fit across universe</h2></div>'+
-      '<div class="panel-body">'+status+'<p class="section-note">Apply the selected strategy to all '+
-      LIVE_UNIVERSE.length+' curated Alpaca symbols. Training = first 70% of each symbol history; independent out-of-sample test = final 30%. Same modeled costs for each.</p></div></section>';
+    const header='<div class="panel-header"><h2>Fit across universe · '+mode+'</h2><div class="flex">'+
+      controls+(report&&(!validated||report.rows.length)?
+        button(validated?'Load best validated symbol':'Load best symbol','load-fit-best','primary')+
+        button('Export fit CSV','export-fit','small'):'')+'</div></div>';
+    const range=report?.dateRange;
+    if(!report)return '<section class="panel" id="universe-fit">'+header+
+      '<div class="panel-body">'+status+'<div id="fit-validated-count" role="status">'+esc(count)+'</div>'+
+      '<p class="section-note">Apply the selected strategy to all '+LIVE_UNIVERSE.length+
+      ' curated Alpaca symbols for the default training-Sharpe ranking. Validated mode checks presets, saved Pine strategies and built-in strategy examples against the same 70/30 and five rolling OOS windows as the leaderboard.</p></div></section>';
+    const provenance='<div id="fit-source" class="info-strip">'+
+      (S.fitReport?.completed??report.completed)+'/'+LIVE_UNIVERSE.length+
+      ' symbols backtested · '+mode+' · ALPACA '+esc(String(S.liveFeed).toUpperCase())+
+      ' 1Day OHLCV · '+esc(report.runAt)+
+      (range?.startDate||range?.endDate?
+        ' · selected range '+esc(range.startDate||'first available')+
+        ' to '+esc(range.endDate||'last available'):' · full available range')+
+      '</div><div id="fit-validated-count" role="status">'+esc(count)+'</div>';
+    if(validated){
+      const cells=report.rows.map((row,index)=>
+        '<tr data-fit-symbol="'+esc(row.symbol)+'"'+(index===0?' class="leaderboard-best"':'')+'>'+
+        '<td>'+esc(row.symbol)+(row.stale?'<small class="fit-stale">Stale</small>':'')+'</td>'+
+        '<td>'+esc(row.validatingStrategy.name)+'</td>'+
+        '<td>'+format(row.rollingMeanSharpe,3)+'</td>'+
+        '<td>'+format(row.rollingMedianSharpe,3)+'</td>'+
+        '<td>'+row.positiveWindows+'/'+row.totalWindows+
+          (row.assessableWindows<row.totalWindows?' ('+row.assessableWindows+
+            '/'+row.totalWindows+' assessable)':'')+'</td>'+
+        '<td>'+esc(row.validationReasons.join(' OR '))+'</td>'+
+        '<td>'+esc(row.source)+'</td>'+
+        '<td>'+esc(row.barDate||'—')+'</td></tr>').join('');
+      return '<section class="panel" id="universe-fit">'+header+
+        '<div class="panel-body">'+status+provenance+
+        (report.rows.length?'<div class="table-wrap"><table class="data-table fit-validated-table"><thead><tr>'+
+          '<th>Symbol</th><th>Validating strategy</th><th>Rolling mean OOS Sharpe</th>'+
+          '<th>Rolling median OOS Sharpe</th><th>Positive windows</th>'+
+          '<th>Validation rule</th><th>Data source</th><th>Last bar</th>'+
+          '</tr></thead><tbody>'+cells+'</tbody></table></div>':
+          '<div class="empty" id="fit-validated-empty" role="status">'+NO_VALIDATED_FIT+'</div>')+
+        '<p class="section-note">Ranked by the best validated strategy\'s numeric rolling mean OOS Sharpe, never training Sharpe. Single-split validated symbols with no measurable rolling mean are listed last as —. '+esc(VALIDATION_RULE)+'. Five sliding windows use the selected date range; insufficient or undefined OOS scores are never counted positive. Research only; selecting among OOS winners introduces selection bias.</p>'+
+        '</div></section>';
+    }
     const defs=[['symbol','Symbol'],['trainReturnPct','Train return (70%)'],
       ['sharpe','Train Sharpe (rank)'],['testReturnPct','OOS return (30%)'],
       ['testSharpe','OOS Sharpe (30%)'],['validation','Validation'],
@@ -963,17 +1009,9 @@ async function initApp(){
       '<td>'+pct(row.metrics?.winPct)+'</td><td>'+(row.metrics?.trades??'—')+'</td>'+
       '<td>'+esc(row.source)+'</td><td>'+esc(row.barDate||'—')+
       (row.error?'<small class="fit-error">'+esc(row.error)+'</small>':'')+'</td></tr>').join('');
-    return '<section class="panel" id="universe-fit"><div class="panel-header"><h2>Fit across universe</h2><div class="flex">'+
-      (best?button('Load best symbol','load-fit-best','primary'):'')+
-      button('Export fit CSV','export-fit','small')+
-      '</div></div><div class="panel-body">'+status+
-      '<div id="fit-source" class="info-strip">'+report.completed+'/'+report.requested+
-      ' symbols backtested · ALPACA '+esc(String(S.liveFeed).toUpperCase())+
-      ' 1Day OHLCV · '+esc(report.runAt)+
-      (report.dateRange?.startDate||report.dateRange?.endDate?
-        ' · selected range '+esc(report.dateRange.startDate||'first available')+
-        ' to '+esc(report.dateRange.endDate||'last available'):' · full available range')+
-      ' · ranked by training Sharpe, not OOS Sharpe. Insufficient OOS bars / unavailable Sharpe are explicitly labeled; positive OOS Sharpe is a descriptive Validated indicator, not statistical proof. Missing bars never fabricated.</div>'+
+    return '<section class="panel" id="universe-fit">'+header+
+      '<div class="panel-body">'+status+provenance+
+      '<p class="section-note">Default ranking uses training Sharpe, not OOS Sharpe. The 70/30 holdout and modeled costs are unchanged; no missing bars are fabricated.</p>'+
       '<div class="table-wrap"><table class="data-table fit-table"><thead><tr>'+
       headers+'</tr></thead><tbody>'+cells+'</tbody></table></div></div></section>';
   }
@@ -1502,38 +1540,74 @@ async function initApp(){
   }
 
 
-  async function runUniverseFitCurrent(){
-    if(S.fitStatus)return;
-    const cfg={...S.bt},script=cfg.strategy==='pine-custom'?
-      {...(S.activeStrategy||{code:S.scriptCode,settings:{...S.scriptSettings}})}:null;
-    S.fitReport=null;S.fitError='';S.fitStatus='Fetching 133 Alpaca daily OHLCV histories…';render();
+  let fitRunSerial=0,fitEverStarted=false,fitConfig=null;
+  async function runUniverseFitCurrent({reuseData=false}={}){
+    const runId=++fitRunSerial;
+    if(!reuseData||!fitConfig){
+      const cfg={...S.bt};
+      const script=cfg.strategy==='pine-custom'?
+        {...(S.activeStrategy||{code:S.scriptCode,settings:{...S.scriptSettings}})}:null;
+      fitConfig={cfg,script};
+    }
+    fitEverStarted=true;
+    const {cfg,script}=fitConfig;
+    S.fitReport=null;S.fitValidatedReport=null;
+    S.fitError='';S.fitStatus=reuseData?'Recalculating both rankings for selected dates…':
+      'Fetching '+LIVE_UNIVERSE.length+' Alpaca daily OHLCV histories…';
+    render();
     try{
-      await fetchLiveUniverse({restoreTab:'backtest',restoreSymbol:S.mode==='live'?S.symbol:S.lastLiveSymbol});
-      S.bt={...cfg};S.activeStrategy=script;
-      S.fitStatus='Running selected strategy across all live symbols…';render();
+      if(!reuseData)await fetchLiveUniverse({
+        restoreTab:'backtest',restoreSymbol:S.mode==='live'?S.symbol:S.lastLiveSymbol});
+      if(runId!==fitRunSerial)return;
+      S.fitStatus='Ranking '+LIVE_UNIVERSE.length+' symbols by training Sharpe…';render();
       await new Promise(resolve=>setTimeout(resolve,0));
       const histories=new Map(LIVE_UNIVERSE.filter(sym=>S.sources.get(sym)==='ALPACA')
         .map(sym=>[sym,S.data.get(sym)]));
-      S.fitReport=fitAcrossUniverse({symbols:LIVE_UNIVERSE,data:histories,
-        options:cfg,strategyScript:script,backtest,compilePine,executePine,
-        dateRange:S.btRange,expectedBarDate:S.freshness?.expected||expectedNyseBarDate(),
-        sourceFor:sym=>histories.has(sym)?'ALPACA '+String(S.liveFeed).toUpperCase()+' 1Day':'NO ALPACA BARS'});
-      S.fitSort='sharpe';S.fitDescending=true;S.fitStatus='';render();
-    }catch(err){S.fitStatus='';S.fitError=String(err.message||err);render();}
+      const common={symbols:LIVE_UNIVERSE,data:histories,options:cfg,
+        backtest,compilePine,executePine,dateRange:{...S.btRange},
+        expectedBarDate:S.freshness?.expected||expectedNyseBarDate(),
+        sourceFor:sym=>histories.has(sym)?
+          'ALPACA '+String(S.liveFeed).toUpperCase()+' 1Day':'NO ALPACA BARS'};
+      S.fitReport=fitAcrossUniverse({...common,strategyScript:script});
+      S.fitSort='sharpe';S.fitDescending=true;
+      S.fitStatus='Evaluating preset and Pine strategies for validated OOS fit…';render();
+      const validated=await fitValidatedAcrossUniverse({...common,
+        savedScripts:S.scriptLibrary,builtInExamples:PINE_EXAMPLES,
+        isCancelled:()=>runId!==fitRunSerial,
+        onProgress:(done,passing)=>{
+          if(runId!==fitRunSerial)return;
+          S.fitStatus='Validating '+done+'/'+LIVE_UNIVERSE.length+
+            ' symbols · '+passing+' currently qualify…';
+          const el=document.getElementById('fit-status');
+          if(el)el.textContent=S.fitStatus;
+        }});
+      if(runId!==fitRunSerial)return;
+      S.fitValidatedReport=validated;S.fitStatus='';S.fitError='';render();
+    }catch(err){
+      if(runId!==fitRunSerial)return;
+      S.fitStatus='';S.fitError=String(err.message||err);render();
+    }
   }
   function loadUniverseFitBest(){
-    const best=bestUniverseFit(S.fitReport?.rows||[]);
-    if(!best){notice('No symbol has a finite Sharpe in this fit.');return;}
-    const report=S.fitReport;
+    const report=S.fitValidatedOnly?S.fitValidatedReport:S.fitReport;
+    const best=S.fitValidatedOnly?report?.rows[0]:bestUniverseFit(report?.rows||[]);
+    if(!best){notice('No eligible symbol in this fit.');return;}
+    if(S.fitValidatedOnly&&!Number.isFinite(best.rollingMeanSharpe)){
+      notice('No validated symbol has a numeric rolling mean OOS Sharpe.');return;
+    }
     restoreSymbolState(best.symbol);S.bt={...S.bt,...report.settings};
-    S.chart.tf='D';S.activeStrategy=report.script?{...report.script}:null;
-    if(report.script){
-      S.scriptCode=report.script.code;S.scriptSettings={...(report.script.settings||{})};
+    const winner=S.fitValidatedOnly?best.validatingStrategy:null;
+    if(winner)S.bt.strategy=winner.strategy;
+    const script=winner?.script||report.script;
+    S.chart.tf='D';S.activeStrategy=script?{...script}:null;
+    if(script){
+      S.scriptCode=script.code;S.scriptSettings={...(script.settings||{})};
       parseCurrentPine();persistPineDraft();
     }
     S.lastBacktestSymbol=best.symbol;S.tab='backtest';
     if(runBt())render();
   }
+
   function comparisonSource(){
     return S.sources.get(S.symbol)==='ALPACA'?
       'Alpaca '+String(S.liveFeed).toUpperCase()+' OHLCV':
@@ -1620,7 +1694,7 @@ async function initApp(){
     'export-screener':()=>exportScreenerCsv(),
     'run-portfolio':()=>runPortfolioCurrent(),
     'run-best-fit':()=>void runBestFitCurrent(),
-    'clear-bt-dates':()=>{S.btRange={startDate:'',endDate:''};S.backtestError='';S.portfolioError='';saveSettings();render();},
+    'clear-bt-dates':()=>{S.btRange={startDate:'',endDate:''};S.backtestError='';S.portfolioError='';saveSettings();if(fitEverStarted)void runUniverseFitCurrent({reuseData:true});else render();},
     'refresh-volatility':async ()=>{await switchToLive();if(S.mode==='live'){S.tab='volatility';render();}},
     'export-portfolio':()=>{if(!activePortfolioResult()){notice('Run this portfolio mode before exporting its results.');return;}
       const p=activePortfolioResult();
@@ -1716,17 +1790,31 @@ async function initApp(){
       if(S.fitSort===key)S.fitDescending=!S.fitDescending;
       else{S.fitSort=key;S.fitDescending=!['symbol','source','barDate','maxDD'].includes(key);}
       render();},
-    'export-fit':()=>{if(!S.fitReport)return;exportFile('market-lens-universe-fit.csv',
-      csvDownload(S.fitReport.rows.map(r=>({symbol:r.symbol,returnPct:r.metrics?.returnPct??'',
-        cagrPct:r.metrics?.cagrPct??'',sharpe:r.metrics?.sharpe??'',
-        trainReturnPct:r.trainMetrics?.returnPct??'',trainSharpe:r.trainMetrics?.sharpe??'',
-        oosReturnPct:r.testMetrics?.returnPct??'',
-        oosSharpe:r.validation?.enoughTestBars?r.testMetrics?.sharpe??'':'',
-        validated:r.validation?.validated??false,holdoutNote:r.validation?.note??'',
-        trainStart:r.validation?.trainStart||'',trainEnd:r.validation?.trainEnd||'',
-        testStart:r.validation?.testStart||'',testEnd:r.validation?.testEnd||'',
-        maxDD:r.metrics?.maxDD??'',winPct:r.metrics?.winPct??'',trades:r.metrics?.trades??'',
-        source:r.source,barDate:r.barDate||'',error:r.error||''}))));},
+    'export-fit':()=>{
+      const report=S.fitValidatedOnly?S.fitValidatedReport:S.fitReport;
+      if(!report)return;
+      if(S.fitValidatedOnly){
+        exportFile('market-lens-universe-fit-validated.csv',csvDownload(report.rows.map(r=>({
+          symbol:r.symbol,validatingStrategy:r.validatingStrategy.name,
+          rollingMeanOosSharpe:r.rollingMeanSharpe??'',
+          rollingMedianOosSharpe:r.rollingMedianSharpe??'',
+          positiveWindows:r.positiveWindows,totalWindows:r.totalWindows,
+          assessableWindows:r.assessableWindows,validation:r.validationReasons.join(' OR '),
+          source:r.source,barDate:r.barDate||''
+        }))));return;
+      }
+      exportFile('market-lens-universe-fit.csv',
+        csvDownload(report.rows.map(r=>({symbol:r.symbol,returnPct:r.metrics?.returnPct??'',
+          cagrPct:r.metrics?.cagrPct??'',sharpe:r.metrics?.sharpe??'',
+          trainReturnPct:r.trainMetrics?.returnPct??'',trainSharpe:r.trainMetrics?.sharpe??'',
+          oosReturnPct:r.testMetrics?.returnPct??'',
+          oosSharpe:r.validation?.enoughTestBars?r.testMetrics?.sharpe??'':'',
+          validated:r.validation?.validated??false,holdoutNote:r.validation?.note??'',
+          trainStart:r.validation?.trainStart||'',trainEnd:r.validation?.trainEnd||'',
+          testStart:r.validation?.testStart||'',testEnd:r.validation?.testEnd||'',
+          maxDD:r.metrics?.maxDD??'',winPct:r.metrics?.winPct??'',trades:r.metrics?.trades??'',
+          source:r.source,barDate:r.barDate||'',error:r.error||''}))));
+    },
     'compare-strategies':async ()=>{
       if(S.portfolioMode){notice('Switch to Single symbol mode to compare individual strategies.');return;}
       S.lastBacktestSymbol=S.symbol;saveSettings();
@@ -1844,6 +1932,9 @@ async function initApp(){
       if(opt==='leaderboard-validated-only'){
         S.leaderboardValidatedOnly=el.checked;saveSettings();render();return;
       }
+      if(opt==='fit-validated-only'){
+        S.fitValidatedOnly=el.checked;saveSettings();render();return;
+      }
       if(opt==='watchlist-select'){selectWatchlist(val);render();return;}
       if(opt==='portfolio-mode'){S.portfolioMode=val!=='single';S.bestFitMode=val==='best-fit';S.portfolioError='';saveSettings();render();return;}
       if(opt==='portfolio-scope'){S.portfolioScope=val;saveSettings();render();return;}
@@ -1876,7 +1967,8 @@ async function initApp(){
     }
     if(el.dataset.btRange){
       S.btRange={...S.btRange,[el.dataset.btRange]:el.value};
-      S.backtestError='';S.portfolioError='';saveSettings();render();return;
+      S.backtestError='';S.portfolioError='';saveSettings();
+      if(fitEverStarted)void runUniverseFitCurrent({reuseData:true});else render();return;
     }
     if(el.dataset.bt){const key=el.dataset.bt;S.bt[key]=el.type==='number'?Number(el.value):el.value;S.result=null;S.sweep=null;saveSettings();return;}
   });
