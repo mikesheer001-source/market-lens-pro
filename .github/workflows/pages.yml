@@ -47,3 +47,4 @@ jobs:
             sleep 5
           done
           npx playwright test e2e/deployed.spec.js
+          REAL_ALPACA_TEST=1 npx playwright test e2e/real-live.spec.js
