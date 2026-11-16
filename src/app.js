@@ -1195,13 +1195,39 @@ async function initApp(){
   function runPortfolioCurrent(){
     try{
       const symbols=portfolioSelection(),{option,signals}=portfolioStrategyContext();
-      S.portfolioResult=runPortfolio(S.data,symbols,option,backtest,signals,{
+      const window=validateBacktestRange(S.btRange);
+      const filtered=windowPortfolioData(S.data,symbols,window);
+      S.portfolioResult=runPortfolio(filtered,symbols,option,backtest,signals,{
         sources:S.sources,sourceSummary:S.mode==='live'?
           'ALPACA '+String(S.liveFeed).toUpperCase()+' 1Day bars · Worker scan '+(S.scan.at||'not available'):
           'SIMULATED Demo / imported OHLCV daily bars'
       });
+      S.portfolioResult.mode='portfolio';
+      S.portfolioResult.range=actualPortfolioRange(S.portfolioResult.curve,window);
       S.portfolioError='';rememberPortfolio();S.tab='backtest';render();
-    }catch(error){S.portfolioError=error.message;S.tab='backtest';render();notice(error.message);}
+    }catch(error){S.portfolioError=String(error.message||error);S.tab='backtest';render();notice(S.portfolioError);}
+  }
+  async function runBestFitCurrent(){
+    if(S.portfolioLoading)return;
+    let symbols,window;
+    try{
+      symbols=portfolioSelection();
+      window=validateBacktestRange(S.btRange);
+      if(!symbols.length)throw Error('No symbols selected. Choose scan matches or a populated watchlist.');
+    }catch(error){S.portfolioError=String(error.message||error);S.tab='backtest';render();return;}
+    S.portfolioError='';S.portfolioLoading=true;S.tab='backtest';render();
+    // Yield to render the progress status before comparing many strategies.
+    await new Promise(resolve=>setTimeout(resolve,0));
+    try{
+      const result=runBestFitPortfolio({data:S.data,symbols,range:window,options:{...S.bt,timeframe:'D'},
+        backtest,compilePine,executePine,sources:S.sources,
+        savedScripts:S.scriptLibrary,builtInExamples:PINE_EXAMPLES,
+        sourceSummary:S.mode==='live'?
+          'ALPACA '+String(S.liveFeed).toUpperCase()+' 1Day bars · Worker scan '+(S.scan.at||'not available'):
+          'SIMULATED Demo / imported daily OHLCV'});
+      S.portfolioResult=result;S.portfolioError='';rememberPortfolio();
+    }catch(error){S.portfolioError=String(error.message||error);notice(S.portfolioError);}
+    finally{S.portfolioLoading=false;S.tab='backtest';render();}
   }
   function runPortfolioOptimization(){
     try{
@@ -1301,12 +1327,19 @@ async function initApp(){
     },
     'export-screener':()=>exportScreenerCsv(),
     'run-portfolio':()=>runPortfolioCurrent(),
+    'run-best-fit':()=>void runBestFitCurrent(),
+    'clear-bt-dates':()=>{S.btRange={startDate:'',endDate:''};S.backtestError='';S.portfolioError='';saveSettings();render();},
     'refresh-volatility':async ()=>{await switchToLive();if(S.mode==='live'){S.tab='volatility';render();}},
-    'export-portfolio':()=>{if(!S.portfolioResult){notice('Run an equal-weight portfolio before exporting its results.');return;}
-      const p=S.portfolioResult;
-      exportFile('equal-weight-portfolio-breakdown.csv',csvDownload(p.breakdown.map(r=>({symbol:r.symbol,source:r.source,weight:p.weights[r.symbol],
-        returnPct:r.returnPct,trades:r.trades,winRatePct:r.winPct,maxDrawdownPct:r.maxDD,sharpe:r.sharpe,
-        portfolioSource:p.sourceSummary,runAt:S.portfolioTimestamp}))));},
+    'export-portfolio':()=>{if(!activePortfolioResult()){notice('Run this portfolio mode before exporting its results.');return;}
+      const p=activePortfolioResult();
+      exportFile((S.bestFitMode?'best-fit':'equal-weight')+'-portfolio-breakdown.csv',
+        csvDownload(p.breakdown.map(r=>({symbol:r.symbol,strategy:r.strategyName||r.strategy,
+          fitSharpe:r.fitSharpe??'',source:r.source,barDate:String(r.barDate||'').slice(0,10),
+          weight:p.weights[r.symbol],returnPct:r.returnPct,trades:r.trades,winRatePct:r.winPct,
+          maxDrawdownPct:r.maxDD,sharpe:r.sharpe,rangeStart:p.range?.startDate||'',
+          rangeEnd:p.range?.endDate||'',actualStart:p.range?.actualStart||'',
+          actualEnd:p.range?.actualEnd||'',portfolioSource:p.sourceSummary,
+          runAt:S.portfolioTimestamp}))));},
     'watchlist-create':()=>changeWatchlist('create'),
     'watchlist-rename':()=>changeWatchlist('rename'),
     'watchlist-delete':()=>changeWatchlist('delete'),
@@ -1352,7 +1385,7 @@ async function initApp(){
     'clear-lines':()=>{S.chart.lines[S.symbol]=[];render();},
     'chart-png':()=>{if(!chart)return;try{const canvas=chart.takeScreenshot();canvas.toBlob(blob=>{if(!blob)return;const url=URL.createObjectURL(blob),a=document.createElement('a');a.href=url;a.download='market-lens-'+S.symbol+'.png';a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);});}catch{notice('Chart image export is unsupported in this browser.');}},
     'run-backtest':async ()=>{
-      if(S.portfolioMode){runPortfolioCurrent();return;}
+      if(S.portfolioMode){if(S.bestFitMode)void runBestFitCurrent();else runPortfolioCurrent();return;}
       S.lastBacktestSymbol=S.symbol;saveSettings();
       if(!await ensureAnalysisBars('Backtest'))return;
       if(runBt())render();
@@ -1469,7 +1502,7 @@ async function initApp(){
         evaluateScreenerSignals(false);saveSettings();render();return;}
       if(opt==='signals-only'){S.signalsOnly=el.checked;saveSettings();render();return;}
       if(opt==='watchlist-select'){selectWatchlist(val);render();return;}
-      if(opt==='portfolio-mode'){S.portfolioMode=val==='portfolio';saveSettings();render();return;}
+      if(opt==='portfolio-mode'){S.portfolioMode=val!=='single';S.bestFitMode=val==='best-fit';S.portfolioError='';saveSettings();render();return;}
       if(opt==='portfolio-scope'){S.portfolioScope=val;saveSettings();render();return;}
       if(opt==='portfolio-watchlist'){S.portfolioWatchlistId=val;saveSettings();render();return;}
       if(opt==='saved-scan-select'){if(val)loadSavedScan(val);else{clearSavedScanView();render();}return;}
@@ -1488,6 +1521,10 @@ async function initApp(){
     }
     if(el.dataset.rule!==undefined){clearSavedScanView();const r=S.rules[Number(el.dataset.rule)];if(r){r[el.dataset.key]=el.dataset.key==='value'?Number(el.value):el.value;render();}return;}
     if(el.dataset.chart){const key=el.dataset.chart;S.chart[key]=el.type==='checkbox'?el.checked:el.type==='number'?Math.max(2,Math.round(Number(el.value)||14)):el.value;render();return;}
+    if(el.dataset.btRange){
+      S.btRange={...S.btRange,[el.dataset.btRange]:el.value};
+      S.backtestError='';S.portfolioError='';saveSettings();render();return;
+    }
     if(el.dataset.bt){const key=el.dataset.bt;S.bt[key]=el.type==='number'?Number(el.value):el.value;S.result=null;S.sweep=null;saveSettings();return;}
   });
   document.addEventListener('dragover',ev=>{if(ev.target.closest('#dropzone')){ev.preventDefault();ev.target.closest('#dropzone').classList.add('dragging');}});
