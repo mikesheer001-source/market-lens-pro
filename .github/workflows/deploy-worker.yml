@@ -1,6 +1,13 @@
 name: Deploy Alpaca data worker
 on:
   workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - 'worker/**'
+      - 'src/universe.js'
+      - 'src/freshness.js'
+      - '.github/workflows/deploy-worker.yml'
 permissions:
   contents: read
 jobs:
