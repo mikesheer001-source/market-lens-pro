@@ -678,6 +678,7 @@ async function initApp(){
     S.mode='live';S.liveFeed=payload.feed||'iex';
     const visible=loaded.filter(isVisibleSymbol);
     if(!visible.includes(S.symbol))S.symbol=visible[0]||loaded[0];
+    restoreSymbolState(S.symbol);
     const matched=visible.filter(symbol=>screenSymbol(S.data.get(symbol),S.rules).pass).length;
     S.scan={status:'complete',source:'ALPACA',requested:payload.requested||LIVE_UNIVERSE.length,returned:loaded.length,matched,missing:payload.missing||[],cached:response.headers.get('X-Scan-Cache')==='HIT',at:new Date().toISOString()};
     evaluateLocalAlerts();S.tab='screener';render();
@@ -902,7 +903,7 @@ async function initApp(){
     'pine-delete':()=>{const id=S.scriptId;if(!id){notice('Load a saved script to delete it.');return;}if(!window.confirm('Delete this locally saved script?'))return;S.scriptLibrary=S.scriptLibrary.filter(x=>x.id!==id);persistPineLibrary();loadPineSource(PINE_EXAMPLES[0].code,'EMA crossover');},
     'pine-clear-plots':()=>{S.activeIndicators=[];S.scriptOutput='Removed all custom indicator plots from Chart Lab.';render();},
     import:()=>$('#csv-file')?.click(),
-    'mode-demo':()=>{clearSavedScanView();S.mode='demo';if(S.sources.get(S.symbol)==='ALPACA')S.symbol=S.lastDemoSymbol&&S.sources.get(S.lastDemoSymbol)!=='ALPACA'?S.lastDemoSymbol:'DEMO-SPY';S.scan={status:'idle'};S.result=null;S.sweep=null;render();},
+    'mode-demo':()=>{clearSavedScanView();S.mode='demo';if(S.sources.get(S.symbol)==='ALPACA')S.symbol=S.lastDemoSymbol&&S.sources.get(S.lastDemoSymbol)!=='ALPACA'?S.lastDemoSymbol:'DEMO-SPY';restoreSymbolState(S.symbol);S.scan={status:'idle'};render();},
     'mode-live':()=>switchToLive(),
     'scan-universe':()=>{clearSavedScanView();return S.mode==='live'?switchToLive():runDemoScan();},
     'test-live':()=>testLiveBackend().catch(err=>notice('Backend test failed: '+err.message)),
@@ -959,20 +960,20 @@ async function initApp(){
         testTrades:r.test.trades,testSharpe:r.test.sharpe,testProfitFactor:r.test.profitFactor}))));},
     'export-sample':()=>{const b=S.data.get('DEMO-SPY');exportFile('SIMULATED-DEMO-SPY.csv',csvDownload(b.map(x=>({Date:x.time,Symbol:'DEMO-SPY',Open:x.open,High:x.high,Low:x.low,Close:x.close,Volume:x.volume}))));},
     'clear-imports':()=>removeImports(),
-    'choose-symbol':el=>{S.symbol=el.dataset.symbol;S.tab='charts';S.result=null;S.sweep=null;render();}
+    'choose-symbol':el=>{restoreSymbolState(el.dataset.symbol);S.tab='charts';render();}
   };
   document.addEventListener('click',ev=>{
     const btn=ev.target.closest('[data-tab],[data-action]');if(btn){
       if(btn.dataset.tab){S.tab=btn.dataset.tab;render();return;}
       const handler=action[btn.dataset.action];if(handler){ev.stopPropagation();handler(btn);return;}
     }
-    const row=ev.target.closest('tr[data-symbol]');if(row){S.symbol=row.dataset.symbol;S.tab='charts';S.result=null;S.sweep=null;render();}
+    const row=ev.target.closest('tr[data-symbol]');if(row){restoreSymbolState(row.dataset.symbol);S.tab='charts';render();}
     if(ev.target.closest('#dropzone'))$('#csv-file')?.click();
   });
   document.addEventListener('keydown',ev=>{
     const row=ev.target.closest('tr[data-symbol]');
     if(row&&(ev.key==='Enter'||ev.key===' ')&&!ev.target.closest('button,input,select')){
-      ev.preventDefault();S.symbol=row.dataset.symbol;S.tab='charts';S.result=null;S.sweep=null;render();
+      ev.preventDefault();restoreSymbolState(row.dataset.symbol);S.tab='charts';render();
     }
     if(ev.key==='Escape'&&S.drawLine){S.drawLine=false;render();}
   });
@@ -1010,7 +1011,7 @@ async function initApp(){
       if(opt==='portfolio-watchlist'){S.portfolioWatchlistId=val;saveSettings();render();return;}
       if(opt==='saved-scan-select'){if(val)loadSavedScan(val);else{clearSavedScanView();render();}return;}
       if(opt==='preset'){if(val==='custom')return;clearSavedScanView();S.rules=(preset[val]||[]).map(x=>({...x}));S.universeFilter=val==='volatility'?'volatility':'all';S.scan={status:'idle'};}
-      else if(opt==='symbol'){S.symbol=val;S.result=null;S.sweep=null;S.symbolQuery='';}
+      else if(opt==='symbol'){restoreSymbolState(val);}
       else if(opt==='tf'){S.chart.tf=val;S.result=null;S.sweep=null;}
       else if(opt==='style')S.chart.style=val;
       else if(opt==='log')S.chart.log=val==='true';
