@@ -2,13 +2,14 @@
 import {barDate} from './freshness.js';
 import {assessHoldout} from './validation.js';
 export const FIT_COLUMNS=Object.freeze(['symbol','returnPct','cagrPct','sharpe','maxDD','winPct','trades',
-  'trainReturnPct','trainSharpe','testReturnPct','testSharpe','source','barDate']);
+  'trainReturnPct','trainSharpe','testReturnPct','testSharpe','validation','source','barDate']);
 const metricKeys=new Set(['returnPct','cagrPct','sharpe','maxDD','winPct','trades']);
 export function fitMetric(row,key){
   if(key==='trainReturnPct')return row.trainMetrics?.returnPct??null;
   if(key==='trainSharpe'||key==='sharpe')return row.trainMetrics?.sharpe??row.metrics?.sharpe??null;
   if(key==='testReturnPct')return row.testMetrics?.returnPct??null;
   if(key==='testSharpe')return row.validation?.enoughTestBars?row.testMetrics?.sharpe??null:null;
+  if(key==='validation')return row.validation?.validated?1:0;
   return metricKeys.has(key)?row.metrics?.[key]??null:row[key];
 }
 export function sortUniverseFit(rows,key='sharpe',descending=key!=='symbol'&&key!=='maxDD'){
