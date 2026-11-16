@@ -132,3 +132,17 @@ test('Round 16 best-fit freezes training winner and reports actual untouched hol
   ]);
   assert.equal(unrankedBest.id,'b');
 });
+
+test('Round 16 train-null candidates cannot win by leaking excellent full-period or test Sharpe',()=>{
+  const leaderboard=[
+    {id:'leaky',name:'leaky',strategy:'ema-cross',kind:'preset',
+      metrics:{sharpe:99},trainMetrics:{sharpe:null},testMetrics:{sharpe:20},curve:[1]},
+    {id:'valid',name:'valid',strategy:'breakout',kind:'preset',
+      metrics:{sharpe:-4},trainMetrics:{sharpe:0.5},testMetrics:{sharpe:-2},curve:[1]}
+  ];
+  assert.equal(leaderboardBest(leaderboard).id,'valid');
+  assert.equal(bestSharpeStrategy(leaderboard).id,'valid');
+  assert.equal(bestUniverseFit(leaderboard.map((x,i)=>({...x,symbol:'S'+i}))).symbol,'S1');
+  assert.equal(sortUniverseFit(leaderboard.map((x,i)=>({...x,symbol:'S'+i})),'sharpe')[0].symbol,'S1');
+  assert.equal(bestSharpeStrategy([leaderboard[0]]),null);
+});
