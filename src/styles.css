@@ -284,3 +284,14 @@ a:hover{text-decoration-color:currentColor}
 #chart-stale-warning{margin:0 0 14px}
 td.fresh-date{min-width:138px}
 tr[data-vol-symbol] td:nth-child(3){min-width:138px}
+
+/* Round 15: inclusive Backtest date selectors and best-fit strategy attribution. */
+.bt-date-window{display:flex;flex-wrap:wrap;align-items:end;gap:12px;margin-top:15px;
+  padding:12px 0;border-top:1px solid var(--border)}
+.bt-date-window input[type=date]{min-width:145px;border:1px solid var(--border);
+  background:var(--panel);color:var(--text);padding:8px;border-radius:6px;font:inherit}
+.bt-date-window .section-note{flex-basis:100%;margin:0}
+#portfolio-breakdown small{display:block;font-size:11px;color:var(--muted);margin-top:5px}
+.result-range{font-weight:600;margin-top:6px;color:var(--text)}
+#portfolio-methodology{margin-top:16px}
+@media(max-width:720px){.bt-date-window input[type=date]{width:100%}}
