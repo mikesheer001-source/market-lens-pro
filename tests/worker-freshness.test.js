@@ -39,7 +39,7 @@ test('Worker retries only the lagging VXZ daily bar once, merges it and logs whi
     assert.equal(result.returned,133);
     assert.equal(result.freshness.expected,expected);
     assert.equal(result.freshness.allFresh,true);
-    assert.equal(result.freshness.dates.VXZ,expected);
+    assert.equal(result.freshness.latestBySymbol.VXZ,expected);
     assert.deepEqual(result.retry.attempted,['VXZ']);
     assert.deepEqual(result.retry.updated,['VXZ']);
     assert.deepEqual(result.retry.stillStale,[]);
