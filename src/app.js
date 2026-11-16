@@ -1,6 +1,8 @@
 import './styles.css';
 import {compilePine, executePine, sweepPine, PineError} from './pine.js';
 import {PINE_EXAMPLES} from './pine-examples.js';
+import {availableStrategySignals,evaluateStrategySignals,scanSignalFlips} from './signals.js';
+import {expectedNyseBarDate,scanFreshness} from './freshness.js';
 import {compareStrategies,sortLeaderboard,leaderboardBest,updateSymbolMemory,pruneSymbolMemory,symbolMemoryItem,compactLeaderboard,LEADERBOARD_METRICS} from './leaderboard.js';
 import {runPortfolio,runPortfolioSweep,portfolioUniverse} from './portfolio.js';
 import {VOL_TICKERS,volatilityRow,contangoPriceProxies} from './volatility.js';
@@ -37,6 +39,8 @@ async function initApp(){
   let draft={};try{draft=JSON.parse(localStorage.getItem(scriptDraftKey)||'{}')||{};}catch{}
   let previousSymbolMemory={};
   try{previousSymbolMemory=pruneSymbolMemory(JSON.parse(localStorage.getItem('market-lens-pro-symbol-memory-v1')||'{}'));}catch{}
+  let priorSignalHistory={};
+  try{priorSignalHistory=JSON.parse(localStorage.getItem('market-lens-pro-signal-history-v1')||'{}')||{};}catch{}
   const workspaceLists=restoreWatchlists(saved);
   let previousAnalysis=null;
   try{previousAnalysis=restoreAnalysis(JSON.parse(localStorage.getItem('market-lens-pro-analysis-v1')||'null'));}catch{}
@@ -47,6 +51,9 @@ async function initApp(){
     alerts:Array.isArray(saved.alerts)?saved.alerts.slice(0,ALERT_LIMIT):[],alertHits:[],
     savedScans:Array.isArray(saved.savedScans)?saved.savedScans.slice(0,SCAN_LIMIT):[],
     scanDraft:'',savedScanId:null,savedScanView:null,
+    signalSelection:typeof saved.signalSelection==='string'?saved.signalSelection:'none',
+    signalsOnly:!!saved.signalsOnly,signalRows:new Map(),signalErrors:[],
+    signalHistory:priorSignalHistory,signalAsOf:null,freshness:null,
     rules:saved.rules||preset.trend.map(x=>({...x})),sort:'symbol',ascending:true,showOnlyMatches:false,showWatch:false,chart:(()=>{const restored={...defaultSettings,...saved.chart};if(!saved.chart?.style||saved.chart.style==='line')restored.style='candles';return restored;})(),bt:{...defaultBacktest,...saved.bt},result:previousAnalysis?.result||null,sweep:previousAnalysis?.sweep||null,lastAnalysis:previousAnalysis,resultSymbol:previousAnalysis?.symbol||null,resultTf:previousAnalysis?.tf||null,
     portfolioMode:!!saved.portfolioMode,portfolioScope:saved.portfolioScope==='watchlist'?'watchlist':'matches',
     portfolioWatchlistId:saved.portfolioWatchlistId||workspaceLists.watchlistId,
@@ -72,7 +79,7 @@ async function initApp(){
   restoreSymbolState(S.symbol);
   parseCurrentPine();
   let chart=null,equityChart=null,leaderboardChart=null;
-  const saveSettings=()=>{try{localStorage.setItem('market-lens-pro-settings',JSON.stringify({watch:[...S.watch],watchlists:S.watchlists,watchlistId:S.watchlistId,alerts:S.alerts,savedScans:S.savedScans,rules:S.rules,chart:S.chart,bt:S.bt,portfolioMode:S.portfolioMode,portfolioScope:S.portfolioScope,portfolioWatchlistId:S.portfolioWatchlistId,apiBaseUrl:S.apiBaseUrl,universeFilter:S.universeFilter}));}catch{}};
+  const saveSettings=()=>{try{localStorage.setItem('market-lens-pro-settings',JSON.stringify({watch:[...S.watch],watchlists:S.watchlists,watchlistId:S.watchlistId,alerts:S.alerts,savedScans:S.savedScans,rules:S.rules,chart:S.chart,bt:S.bt,portfolioMode:S.portfolioMode,portfolioScope:S.portfolioScope,portfolioWatchlistId:S.portfolioWatchlistId,signalSelection:S.signalSelection,signalsOnly:S.signalsOnly,apiBaseUrl:S.apiBaseUrl,universeFilter:S.universeFilter}));}catch{}};
   function rememberPortfolio(){
     S.portfolioTimestamp=new Date().toISOString();
     try{localStorage.setItem('market-lens-pro-portfolio-v1',JSON.stringify({
@@ -112,6 +119,58 @@ async function initApp(){
       result:S.result,sweep:S.sweep,options:{...S.bt},timeframe:S.resultTf||S.chart.tf,
       source:S.sources.get(S.symbol),activeStrategy:S.bt.strategy==='pine-custom'?S.activeStrategy:null,savedAt:S.lastAnalysis.savedAt
     }});
+  }
+  function screenerStrategies(){
+    return availableStrategySignals(S.scriptLibrary).filter(selection=>{
+      if(selection.kind!=='pine')return true;
+      try{return compilePine(selection.code).mode==='strategy';}catch{return false;}
+    });
+  }
+  function persistSignalHistory(){
+    try{
+      const keys=Object.keys(S.signalHistory);
+      if(keys.length>20)for(const oldKey of keys.slice(0,keys.length-20))delete S.signalHistory[oldKey];
+      localStorage.setItem('market-lens-pro-signal-history-v1',JSON.stringify(S.signalHistory));
+    }catch{notice('Signal history could not be saved locally. Flip detection may reset after reload.');}
+  }
+  function evaluateScreenerSignals(detectFlips=false){
+    if(S.signalSelection==='none'){S.signalRows=new Map();S.signalErrors=[];return;}
+    const selection=screenerStrategies().find(x=>x.id===S.signalSelection);
+    if(!selection){
+      S.signalSelection='none';S.signalRows=new Map();S.signalErrors=[];
+      saveSettings();return;
+    }
+    const available=new Map([...S.data].filter(([symbol])=>modeSymbol(symbol)));
+    const answer=evaluateStrategySignals({data:available,selection,
+      options:{...S.bt,side:'long',timeframe:'D'},backtest,compilePine,executePine,
+      sourceFor:symbol=>S.sources.get(symbol)==='ALPACA'?'ALPACA '+String(S.liveFeed).toUpperCase()+' 1Day':
+        S.sources.get(symbol)==='SIMULATED'?'SIMULATED DAILY':'IMPORTED CSV'});
+    S.signalRows=new Map(Object.entries(answer.signals));S.signalErrors=answer.errors;
+    S.signalAsOf=new Date().toISOString();
+    const current={};
+    for(const [symbol,signal] of S.signalRows)if(['LONG','FLAT','EXIT'].includes(signal.status))current[symbol]=signal;
+    const key=S.signalSelection+(selection.kind==='pine'?'|'+selection.code:'');
+    const prior=S.signalHistory[key]||{};
+    const checked=scanSignalFlips(prior,current,{strategyId:selection.id,strategyName:selection.name,
+      checkedAt:S.signalAsOf});
+    S.signalHistory[key]=checked.states;persistSignalHistory();
+    if(detectFlips&&Object.keys(prior).length){
+      for(const flip of checked.flips){
+        const event={type:'signal',metric:'signal',id:'signal-'+Date.now()+'-'+Math.random().toString(36).slice(2,7),
+          symbol:flip.symbol,strategyId:selection.id,strategyName:selection.name,
+          oldValue:flip.from,newValue:flip.to,observedFrom:flip.observedFrom,observedTo:flip.observedTo,
+          lastHitAt:flip.checkedAt,lastHitBarDate:flip.barDate,source:flip.source,
+          active:false,unread:true};
+        S.alerts.push(event);
+      }
+      // Keep the active alert queue bounded to prevent browser storage growth.
+      if(S.alerts.length>ALERT_LIMIT){
+        const old=S.alerts.filter(x=>x.type==='signal').slice(0,S.alerts.length-ALERT_LIMIT);
+        const removed=new Set(old.map(x=>x.id));S.alerts=S.alerts.filter(x=>!removed.has(x.id)).slice(-ALERT_LIMIT);
+      }
+      if(checked.flips.length)notice(checked.flips.length+' strategy position change'+(checked.flips.length===1?'':'s')+' detected.');
+    }
+    saveSettings();
   }
   function evaluateLocalAlerts(){
     const result=checkAlerts(S.alerts,S.data,statsFor,aggregate);
