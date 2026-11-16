@@ -1388,7 +1388,9 @@ async function initApp(){
       if(S.portfolioMode){if(S.bestFitMode)void runBestFitCurrent();else runPortfolioCurrent();return;}
       S.lastBacktestSymbol=S.symbol;saveSettings();
       if(!await ensureAnalysisBars('Backtest'))return;
-      if(runBt())render();
+      runBt();
+      // Always show an inline, plain-language date-window error on failure.
+      render();
     },
 
     'fit-universe':()=>void runUniverseFitCurrent(),
