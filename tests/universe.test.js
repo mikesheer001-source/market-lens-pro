@@ -27,6 +27,9 @@ test('bundled live universe has the exact documented composition',()=>{
   assert.ok(LIVE_UNIVERSE.includes('VXX'));
   assert.ok(LIVE_UNIVERSE.includes('UVXY'));
   assert.ok(LIVE_UNIVERSE.includes('SVXY'));
+  assert.ok(LIVE_UNIVERSE.includes('SVOL'), 'SVOL is the active replacement for old ZIVB');
+  assert.ok(!LIVE_UNIVERSE.includes('ZIVB'), 'ZIVB is not current');
+  assert.equal(VOLATILITY_UNIVERSE.length,11);
 });
 
 test('the four bundled demo symbols match the documented demo universe',()=>{
