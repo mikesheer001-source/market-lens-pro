@@ -1,6 +1,7 @@
 import './styles.css';
 import {compilePine, executePine, sweepPine, PineError} from './pine.js';
 import {PINE_EXAMPLES} from './pine-examples.js';
+import {readableBarDate,normalizeStartupPreferences,intradayCacheFresh,intradayFetchDecision} from './intraday-session.js';
 import {availableStrategySignals,evaluateStrategySignals,scanSignalFlips} from './signals.js';
 import {expectedNyseBarDate,scanFreshness} from './freshness.js';
 import {compareStrategies,sortLeaderboard,leaderboardBest,updateSymbolMemory,pruneSymbolMemory,symbolMemoryItem,compactLeaderboard,LEADERBOARD_METRICS} from './leaderboard.js';
@@ -33,6 +34,7 @@ async function initApp(){
   const defaultSettings={tf:'D',style:'candles',log:false,ema20:true,ema50:false,ema200:true,sma20:false,bollinger:false,volume:true,rsi:true,macd:false,rsiPeriod:14,bollPeriod:20,ema20Len:20,ema50Len:50,ema200Len:200,sma20Len:20,lines:{}};
   const defaultBacktest={strategy:'ema-cross',side:'long',borrowAnnualPct:0,fast:20,slow:100,rsiPeriod:14,buyLevel:30,sellLevel:65,period:20,multiplier:2,capital:10000,allocation:100,feeBps:1,slipBps:2,stopPct:0,targetPct:0};
   let saved={};try{saved=JSON.parse(localStorage.getItem('market-lens-pro-settings')||'{}')||{};}catch{}
+  const startupPrefs=normalizeStartupPreferences(saved);
   const scriptLibraryKey='market-lens-pro-pine-library-v1',scriptDraftKey='market-lens-pro-pine-draft-v1';
   let scriptLibrary=[];
   try{const parsed=JSON.parse(localStorage.getItem(scriptLibraryKey)||'[]');if(Array.isArray(parsed))scriptLibrary=parsed.filter(x=>x&&typeof x.code==='string'&&typeof x.name==='string').slice(0,30);}catch{}
@@ -46,7 +48,10 @@ async function initApp(){
   try{previousAnalysis=restoreAnalysis(JSON.parse(localStorage.getItem('market-lens-pro-analysis-v1')||'null'));}catch{}
   let previousPortfolio=null;
   try{previousPortfolio=JSON.parse(localStorage.getItem('market-lens-pro-portfolio-v1')||'null');}catch{}
-  const S={tab:'screener',mode:'demo',apiBaseUrl:String(saved.apiBaseUrl||'https://market-lens-pro-api.mikesheer001.workers.dev'),liveFeed:'iex',lastDemoSymbol:'DEMO-SPY',universeFilter:saved.universeFilter||'all',scan:{status:'idle'},data:new Map(Object.entries(sampleData())),sources:new Map(),symbol:'DEMO-SPY',query:'',symbolQuery:'',watch:workspaceLists.watch,watchlists:workspaceLists.watchlists,
+  const S={tab:startupPrefs.tab,mode:'demo',preferredMode:startupPrefs.mode,
+    lastDemoSymbol:startupPrefs.lastDemoSymbol,lastLiveSymbol:startupPrefs.lastLiveSymbol,
+    lastBacktestSymbol:startupPrefs.lastBacktestSymbol,lastSymbol:startupPrefs.lastSymbol,
+    apiBaseUrl:String(saved.apiBaseUrl||'https://market-lens-pro-api.mikesheer001.workers.dev'),liveFeed:'iex',universeFilter:saved.universeFilter||'all',scan:{status:'idle'},data:new Map(Object.entries(sampleData())),sources:new Map(),symbol:'DEMO-SPY',query:'',symbolQuery:'',watch:workspaceLists.watch,watchlists:workspaceLists.watchlists,
     watchlistId:workspaceLists.watchlistId,watchlistDraft:'',alertDraft:{symbol:'DEMO-SPY',metric:'price',op:'>',threshold:100},
     alerts:Array.isArray(saved.alerts)?saved.alerts.slice(0,ALERT_LIMIT):[],alertHits:[],
     savedScans:Array.isArray(saved.savedScans)?saved.savedScans.slice(0,SCAN_LIMIT):[],
@@ -59,7 +64,8 @@ async function initApp(){
     portfolioWatchlistId:saved.portfolioWatchlistId||workspaceLists.watchlistId,
     portfolioResult:previousPortfolio?.result||null,portfolioSweep:previousPortfolio?.sweep||null,
     portfolioTimestamp:previousPortfolio?.savedAt||null,portfolioError:'',
-    intraday:new Map(),intradayStatus:new Map(),intradayError:'',
+    intraday:new Map(),intradayStatus:new Map(),intradayPromises:new Map(),intradayError:'',
+    analysisLoading:'',analysisError:'',
     symbolMemory:previousSymbolMemory,leaderboard:null,leaderboardSort:'sharpe',leaderboardDescending:true,leaderboardError:'',
     drawLine:false,
     scriptCode:typeof draft.code==='string'?draft.code:PINE_EXAMPLES[0].code,
@@ -79,7 +85,9 @@ async function initApp(){
   restoreSymbolState(S.symbol);
   parseCurrentPine();
   let chart=null,equityChart=null,leaderboardChart=null;
-  const saveSettings=()=>{try{localStorage.setItem('market-lens-pro-settings',JSON.stringify({watch:[...S.watch],watchlists:S.watchlists,watchlistId:S.watchlistId,alerts:S.alerts,savedScans:S.savedScans,rules:S.rules,chart:S.chart,bt:S.bt,portfolioMode:S.portfolioMode,portfolioScope:S.portfolioScope,portfolioWatchlistId:S.portfolioWatchlistId,signalSelection:S.signalSelection,signalsOnly:S.signalsOnly,apiBaseUrl:S.apiBaseUrl,universeFilter:S.universeFilter}));}catch{}};
+  const saveSettings=()=>{try{localStorage.setItem('market-lens-pro-settings',JSON.stringify({mode:S.mode,
+    tab:S.tab,lastSymbol:S.symbol,lastBacktestSymbol:S.lastBacktestSymbol,
+    lastLiveSymbol:S.lastLiveSymbol,lastDemoSymbol:S.lastDemoSymbol,watch:[...S.watch],watchlists:S.watchlists,watchlistId:S.watchlistId,alerts:S.alerts,savedScans:S.savedScans,rules:S.rules,chart:S.chart,bt:S.bt,portfolioMode:S.portfolioMode,portfolioScope:S.portfolioScope,portfolioWatchlistId:S.portfolioWatchlistId,signalSelection:S.signalSelection,signalsOnly:S.signalsOnly,apiBaseUrl:S.apiBaseUrl,universeFilter:S.universeFilter}));}catch{}};
   function rememberPortfolio(){
     S.portfolioTimestamp=new Date().toISOString();
     try{localStorage.setItem('market-lens-pro-portfolio-v1',JSON.stringify({
