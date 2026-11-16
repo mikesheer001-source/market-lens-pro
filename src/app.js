@@ -1206,6 +1206,13 @@ async function initApp(){
   }
 
   const action={
+    'generate-briefing':()=>void generateBriefing(),
+    'copy-briefing':async ()=>{
+      if(!S.briefing){notice('Generate a live briefing before copying.');return;}
+      try{await navigator.clipboard.writeText(briefingToText(S.briefing));
+        notice('Daily briefing copied as plain text.');}
+      catch(error){notice('Clipboard access failed: '+String(error.message||error));}
+    },
     'export-screener':()=>exportScreenerCsv(),
     'run-portfolio':()=>runPortfolioCurrent(),
     'refresh-volatility':async ()=>{await switchToLive();if(S.mode==='live'){S.tab='volatility';render();}},
@@ -1317,7 +1324,13 @@ async function initApp(){
   };
   document.addEventListener('click',ev=>{
     const btn=ev.target.closest('[data-tab],[data-action]');if(btn){
-      if(btn.dataset.tab){S.tab=btn.dataset.tab;render();return;}
+      if(btn.dataset.tab){
+        S.tab=btn.dataset.tab;
+        if(S.tab==='briefing'&&S.mode==='live'&&S.scan.status==='complete')
+          try{captureBriefing();S.briefingError='';}
+          catch(error){S.briefingError=String(error.message||error);}
+        render();return;
+      }
       const handler=action[btn.dataset.action];if(handler){ev.stopPropagation();handler(btn);return;}
     }
     const row=ev.target.closest('tr[data-symbol]');if(row){restoreSymbolState(row.dataset.symbol);S.tab='charts';render();}
@@ -1358,6 +1371,14 @@ async function initApp(){
     }
     if(el.dataset.option){
       const opt=el.dataset.option,val=el.value;
+      if(opt==='briefing-strategy'){
+        S.signalSelection=val;S.signalsOnly=false;
+        evaluateScreenerSignals(false);saveSettings();
+        if(S.mode==='live'&&S.scan.status==='complete')
+          try{captureBriefing();S.briefingError='';}
+          catch(error){S.briefingError=String(error.message||error);}
+        render();return;
+      }
       if(opt==='signal-strategy'){S.signalSelection=val;S.signalsOnly=false;
         evaluateScreenerSignals(false);saveSettings();render();return;}
       if(opt==='signals-only'){S.signalsOnly=el.checked;saveSettings();render();return;}
