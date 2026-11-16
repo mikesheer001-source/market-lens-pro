@@ -43,7 +43,7 @@ test('missing symbols and missing bars count as stale; numeric timestamps and da
 
 test('stale asset reasoning separates missing, inactive and no-new-bar from unavailable checks',()=>{
   const entry={symbol:'VXZ',latest:'2026-11-13'};
-  assert.match(explainStaleSymbol(entry,{asset:{found:true,status:'active',tradable:true},barsAfterLatest:false}),/no bars after 2026-11-13/);
+  assert.match(explainStaleSymbol(entry,{asset:{found:true,status:'active',tradable:true},barsAfterLatest:false}),/no bars after Nov 13, 2026 \\(2026-11-13\\)/);
   assert.match(explainStaleSymbol(entry,{asset:{found:false}}),/asset not found/);
   assert.match(explainStaleSymbol(entry,{asset:{status:'inactive'}}),/inactive/);
   assert.match(explainStaleSymbol(entry,{asset:{error:'HTTP 401'},retryFailed:true}),/retry failed/);
