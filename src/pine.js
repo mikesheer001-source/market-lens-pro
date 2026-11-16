@@ -259,16 +259,15 @@ export function executePine(programOrSource,bars,overrides={}){
   }
   function set(name,value){let a=series.get(name);if(!a){a=[];series.set(name,a);}a[i]=value;}
   function state(node){let s=callState.get(node.id);if(!s){s={args:[],out:[],extra:{}};callState.set(node.id,s);}return s;}
-  function emaCurrent(values,length,slot){
-    if(!slot.values||slot.len!==length){slot.values=[];slot.len=length;}
-    const arr=slot.values;
-    const k=arr.length;let out=null;
-    if(k+1>=length){
-      const prev=arr[k-1];
-      if(k===length-1){const seed=values.slice(-length);out=seed.every(finite)?seed.reduce((a,b)=>a+b,0)/length:null;}
-      else if(finite(prev)&&finite(values[k]))out=prev+(values[k]-prev)*(2/(length+1));
-    }
-    arr.push(out);return out;
+  function emaCurrent(value,length,slot){
+    if(slot.len!==length){slot.len=length;slot.seed=[];slot.last=null;}
+    if(!finite(value))return null;
+    if(slot.last===null){
+      slot.seed.push(value);
+      if(slot.seed.length<length)return null;
+      slot.last=slot.seed.slice(-length).reduce((sum,x)=>sum+x,0)/length;
+    }else slot.last+=(value-slot.last)*2/(length+1);
+    return slot.last;
   }
   function runTa(node,args,st){
     const name=node.name,k=i;
@@ -327,14 +326,12 @@ export function executePine(programOrSource,bars,overrides={}){
     if(name==='ta.macd'){
       const fast=clampPeriod(args[1],node.line),slow=clampPeriod(args[2],node.line),sig=clampPeriod(args[3],node.line);
       const ex=st.extra;
-      if(!ex.fast||ex.fast.len!==fast||ex.slow.len!==slow||ex.sig.len!==sig){
-        st.extra={fast:{len:fast,values:[]},slow:{len:slow,values:[]},sig:{len:sig,values:[]},source:[],macd:[]};}
-      const e=st.extra;e.source.push(args[0]);
-      const f=emaCurrent(e.source,fast,e.fast),s=emaCurrent(e.source,slow,e.slow);
-      const macd=finite(f)&&finite(s)?f-s:null;
-      e.macd.push(macd);
-      const validMacd=e.macd.filter(finite);
-      const signal=emaCurrent(validMacd,sig,e.sig);
+      if(!ex.fast||ex.fast.len!==fast||ex.slow.len!==slow||ex.sig.len!==sig)
+        st.extra={fast:{len:fast,seed:[],last:null},slow:{len:slow,seed:[],last:null},sig:{len:sig,seed:[],last:null}};
+      const e=st.extra;
+      const fastEma=emaCurrent(args[0],fast,e.fast),slowEma=emaCurrent(args[0],slow,e.slow);
+      const macd=finite(fastEma)&&finite(slowEma)?fastEma-slowEma:null;
+      const signal=emaCurrent(macd,sig,e.sig);
       return [macd,signal,finite(macd)&&finite(signal)?macd-signal:null];
     }
     return null;
