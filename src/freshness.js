@@ -56,9 +56,9 @@ export function nyDateAndClock(now=new Date()){
 export function expectedNyseBarDate(now=new Date()){
   const {date,minute}=nyDateAndClock(now);
   const cursor=new Date(date+'T00:00:00Z');
-  // Current trading session is expected once equities are trading at 09:30 ET.
-  // Before the open, compare against the previous completed trading date.
-  if(minute<570)cursor.setUTCDate(cursor.getUTCDate()-1);
+  // Do not demand an unfinished daily bar during the cash session: allow
+  // 30 minutes after the 16:00 ET close for daily-bar publication.
+  if(minute<990)cursor.setUTCDate(cursor.getUTCDate()-1);
   for(let count=0;count<15;count++){
     const candidate=cursor.toISOString().slice(0,10);
     if(isNyseSessionDay(candidate))return candidate;
@@ -87,4 +87,17 @@ export function scanFreshness(items,expected=expectedNyseBarDate()){
 export function freshnessWithUniverse(items,symbols,expected=expectedNyseBarDate()){
   const all=Object.fromEntries(symbols.map(symbol=>[symbol,items?.[symbol]||[]]));
   return scanFreshness(all,expected);
+}
+
+// A failed asset status request is not evidence that a symbol has delisted.
+export function explainStaleSymbol(entry,diagnostic){
+  const date=entry?.latest||'the requested period';
+  if(!diagnostic)return 'No Alpaca diagnosis available; latest bar '+date;
+  if(diagnostic.asset?.found===false)return 'Alpaca asset not found (possible rename or delisting)';
+  if(diagnostic.asset?.status==='inactive')return 'Alpaca asset is inactive';
+  if(diagnostic.asset?.tradable===false)return 'Alpaca marks this asset non-tradable';
+  if(diagnostic.retryFailed)return 'Alpaca retry failed; newer bars not verified';
+  if(diagnostic.barsAfterLatest===true)return 'Alpaca returned a newer bar but it is still older than the required session';
+  if(diagnostic.barsAfterLatest===false)return 'Alpaca returns no bars after '+date+' on this feed';
+  return diagnostic.asset?.error?'Asset status unavailable: '+diagnostic.asset.error:'Newer bars could not be verified';
 }
