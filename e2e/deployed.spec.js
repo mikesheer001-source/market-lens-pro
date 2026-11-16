@@ -197,3 +197,22 @@ test('published Round 20 fullscreen Chart Lab, indicator gear, and right-axis re
   await expect(page.locator('#price-chart canvas').first()).toBeVisible();
   expect(errors).toEqual([]);
 });
+
+
+test('published Round 22 validated-only toggle matches displayed validation badges and empty selected range',async ({page})=>{
+  const errors=[];page.on('pageerror',e=>errors.push(e.message));
+  await page.goto('./');
+  await page.locator('.sidebar [data-tab="backtest"]').click();
+  await page.locator('[data-action="compare-strategies"]').first().click();
+  await expect(page.locator('.leaderboard-table tbody tr')).toHaveCount(12);
+  const good=await page.locator('.leaderboard-table .oos-validated').count();
+  await page.locator('#leaderboard-validated-only').check();
+  await expect(page.locator('#leaderboard-validation-count')).toContainText(
+    'Showing '+good+' of 12 total leaderboard rows');
+  if(good)await expect(page.locator('.leaderboard-table tbody tr')).toHaveCount(good);
+  else await expect(page.locator('#leaderboard-validation-empty')).toHaveText('No strategy validated on this window');
+  await page.locator('#leaderboard-validated-only').uncheck();
+  await expect(page.locator('.leaderboard-table tbody tr')).toHaveCount(12);
+  await expect(page.locator('#leaderboard-validation-count')).toContainText('positive OOS Sharpe');
+  expect(errors).toEqual([]);
+});
