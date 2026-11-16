@@ -39,3 +39,21 @@ test('published Pages site renders screener, daily RSI, chart and backtest',asyn
   await expect(page.locator('#scan-status')).toContainText('1 match');
   expect(errors).toEqual([]);
 });
+
+test('published Script Lab runs a Pine oscillator and a custom strategy through backtesting',async ({page})=>{
+  const errors=[];page.on('pageerror',error=>errors.push(error.message));
+  await page.goto('./');
+  await page.locator('.sidebar [data-tab="scripts"]').click();
+  await expect(page.getByRole('heading',{name:'Script Lab'})).toBeVisible();
+  await page.locator('[data-action="pine-example"][data-example="rsi-indicator"]').click();
+  await page.locator('[data-action="pine-run"]').click();
+  await expect(page.getByRole('heading',{name:'Chart Lab'})).toBeVisible();
+  await expect(page.locator('#price-chart canvas').first()).toBeVisible();
+  await page.locator('.sidebar [data-tab="scripts"]').click();
+  await page.locator('[data-action="pine-example"][data-example="ema-cross"]').click();
+  await page.locator('[data-action="pine-run"]').click();
+  await expect(page.getByRole('heading',{name:'Backtest'})).toBeVisible();
+  await expect(page.locator('[data-bt="strategy"]')).toHaveValue('pine-custom');
+  await expect(page.locator('#equity-chart canvas').first()).toBeVisible();
+  expect(errors).toEqual([]);
+});
