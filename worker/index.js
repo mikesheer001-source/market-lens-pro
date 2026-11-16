@@ -1,3 +1,5 @@
+import { LIVE_UNIVERSE, ALPACA_BATCH_SIZE, ALPACA_SCAN_LOOKBACK_DAYS, ALPACA_SCAN_CACHE_SECONDS } from "../src/universe.js";
+
 const DEFAULT_ORIGINS = [
   "https://mikesheer001-source.github.io",
   "http://localhost:5173",
@@ -82,7 +84,9 @@ export default {
       }, 200, origin, env);
     }
 
-    if (url.pathname !== "/api/stocks/bars") {
+    const isScan = url.pathname === "/api/stocks/scan";
+    const isBars = url.pathname === "/api/stocks/bars";
+    if (!isScan && !isBars) {
       return json({ error: "Not found." }, 404, origin, env);
     }
 
@@ -93,6 +97,106 @@ export default {
 
     if (!env.ALPACA_API_KEY || !env.ALPACA_API_SECRET) {
       return json({ error: "Alpaca credentials are not configured on the Worker." }, 503, origin, env);
+    }
+
+    if (isScan) {
+      const feed = String(url.searchParams.get("feed") || env.ALPACA_DATA_FEED || "iex").toLowerCase();
+      if (!FEEDS.has(feed)) return json({ error: "Unsupported Alpaca feed." }, 400, origin, env);
+
+      const cacheUrl = new URL("/api/stocks/scan", url.origin);
+      cacheUrl.searchParams.set("feed", feed);
+      cacheUrl.searchParams.set("origin", origin || "none");
+      const cacheKey = new Request(cacheUrl.toString(), { method: "GET" });
+      const edgeCache = globalThis.caches?.default;
+      if (edgeCache) {
+        try {
+          const cached = await edgeCache.match(cacheKey);
+          if (cached) {
+            const headers = new Headers(cached.headers);
+            headers.set("X-Scan-Cache", "HIT");
+            return new Response(cached.body, { status: cached.status, headers });
+          }
+        } catch {}
+      }
+
+      const end = new Date().toISOString();
+      const start = new Date(Date.now() - ALPACA_SCAN_LOOKBACK_DAYS * 86_400_000).toISOString();
+      const barsBySymbol = Object.create(null);
+      const batches = [];
+      for (let i = 0; i < LIVE_UNIVERSE.length; i += ALPACA_BATCH_SIZE) {
+        batches.push(LIVE_UNIVERSE.slice(i, i + ALPACA_BATCH_SIZE));
+      }
+
+      try {
+        for (const symbols of batches) {
+          let pageToken = null;
+          let page = 0;
+          do {
+            const upstreamUrl = new URL("https://data.alpaca.markets/v2/stocks/bars");
+            upstreamUrl.searchParams.set("symbols", symbols.join(","));
+            upstreamUrl.searchParams.set("timeframe", "1Day");
+            upstreamUrl.searchParams.set("start", start);
+            upstreamUrl.searchParams.set("end", end);
+            upstreamUrl.searchParams.set("limit", "10000");
+            upstreamUrl.searchParams.set("adjustment", "all");
+            upstreamUrl.searchParams.set("feed", feed);
+            upstreamUrl.searchParams.set("sort", "asc");
+            if (pageToken) upstreamUrl.searchParams.set("page_token", pageToken);
+
+            const upstream = await fetch(upstreamUrl, {
+              headers: {
+                "APCA-API-KEY-ID": env.ALPACA_API_KEY,
+                "APCA-API-SECRET-KEY": env.ALPACA_API_SECRET,
+                "Accept": "application/json"
+              }
+            });
+            const payload = await upstream.json().catch(() => null);
+            if (!upstream.ok) {
+              const error = new Error(typeof payload?.message === "string" ? payload.message : "Alpaca rejected a market scan batch.");
+              error.status = upstream.status;
+              throw error;
+            }
+            const rows = payload?.bars && typeof payload.bars === "object" ? payload.bars : {};
+            for (const [symbol, items] of Object.entries(rows)) {
+              if (Array.isArray(items)) (barsBySymbol[symbol] ||= []).push(...items);
+            }
+            pageToken = payload?.next_page_token || null;
+            page += 1;
+            if (pageToken && page >= 10) throw new Error("Alpaca scan pagination exceeded the safety limit.");
+          } while (pageToken);
+        }
+      } catch (error) {
+        const status = error.status === 429 ? 429 : 502;
+        return json({
+          error: "Alpaca market-wide scan failed.",
+          detail: error.message || "The Alpaca request could not be completed."
+        }, status, origin, env, status === 429 ? { "Retry-After": "60" } : {});
+      }
+
+      const returnedSymbols = Object.keys(barsBySymbol).filter(symbol => barsBySymbol[symbol]?.length);
+      const missing = LIVE_UNIVERSE.filter(symbol => !barsBySymbol[symbol]?.length);
+      const response = json({
+        source: "alpaca",
+        timeframe: "1Day",
+        feed,
+        requested: LIVE_UNIVERSE.length,
+        returned: returnedSymbols.length,
+        missing,
+        batch_size: ALPACA_BATCH_SIZE,
+        batches: batches.length,
+        lookback_days: ALPACA_SCAN_LOOKBACK_DAYS,
+        start,
+        end,
+        bars: barsBySymbol
+      }, 200, origin, env, {
+        "Cache-Control": "public, max-age=" + ALPACA_SCAN_CACHE_SECONDS,
+        "CDN-Cache-Control": "public, max-age=" + ALPACA_SCAN_CACHE_SECONDS,
+        "X-Scan-Cache": "MISS"
+      });
+      if (edgeCache) {
+        try { await edgeCache.put(cacheKey, response.clone()); } catch {}
+      }
+      return response;
     }
 
     const symbol = String(url.searchParams.get("symbol") || "").trim().toUpperCase();
