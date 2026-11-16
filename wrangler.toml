@@ -1,0 +1,11 @@
+name = "market-lens-pro-api"
+main = "worker/index.js"
+compatibility_date = "2026-11-16"
+workers_dev = true
+
+[vars]
+ALPACA_DATA_FEED = "iex"
+ALLOWED_ORIGINS = "https://mikesheer001-source.github.io,http://localhost:5173,http://127.0.0.1:5173"
+
+[secrets]
+required = ["ALPACA_API_KEY", "ALPACA_API_SECRET"]
