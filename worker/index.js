@@ -11,6 +11,28 @@ const FEEDS = new Set(["iex", "sip", "delayed_sip", "boats", "overnight", "otc"]
 const TIMEFRAMES = /^(?:[1-9]|[1-5]\d)Min$|^(?:[1-9]|1\d|2[0-3])Hour$|^(?:1Day|1Week|1Month)$/;
 const rateWindows = new Map();
 
+// Credentialed Alpaca getAsset lookup, on paper or live trading endpoints.
+// An authorization failure is UNKNOWN, never interpreted as delisting.
+async function alpacaAsset(symbol,env){
+  const headers={"APCA-API-KEY-ID":env.ALPACA_API_KEY,"APCA-API-SECRET-KEY":env.ALPACA_API_SECRET,
+    Accept:"application/json"};
+  const hosts=env.ALPACA_TRADING_API_BASE?[env.ALPACA_TRADING_API_BASE]:
+    ["https://paper-api.alpaca.markets","https://api.alpaca.markets"];
+  let lastError="Asset endpoint unavailable";
+  for(const host of hosts){
+    try{
+      const response=await fetch(host.replace(/\/$/,"")+"/v2/assets/"+encodeURIComponent(symbol),{headers});
+      if(response.status===401||response.status===403){lastError="Asset endpoint authorization HTTP "+response.status;continue;}
+      if(response.status===404)return {found:false,status:"not_found",tradable:false};
+      if(!response.ok){lastError="Asset lookup HTTP "+response.status;continue;}
+      const a=await response.json();
+      return {found:true,status:a.status||"unknown",tradable:a.tradable===true,
+        exchange:a.exchange||null,assetClass:a.class||null,symbol:a.symbol||symbol};
+    }catch(err){lastError=String(err.message||err);}
+  }
+  return {found:null,status:"unknown",tradable:null,error:lastError};
+}
+
 function corsHeaders(origin, env) {
   const allowed = (env.ALLOWED_ORIGINS || DEFAULT_ORIGINS.join(","))
     .split(",").map(value => value.trim()).filter(Boolean);
@@ -88,7 +110,8 @@ export default {
     const isScan = url.pathname === "/api/stocks/scan";
     const isBars = url.pathname === "/api/stocks/bars";
     const isIntraday = url.pathname === "/api/stocks/intraday";
-    if (!isScan && !isBars && !isIntraday) {
+    const isDiagnostics = url.pathname === "/api/stocks/diagnostics";
+    if (!isScan && !isBars && !isIntraday && !isDiagnostics) {
       return json({ error: "Not found." }, 404, origin, env);
     }
 
@@ -99,6 +122,38 @@ export default {
 
     if (!env.ALPACA_API_KEY || !env.ALPACA_API_SECRET) {
       return json({ error: "Alpaca credentials are not configured on the Worker." }, 503, origin, env);
+    }
+    // Explicit targeted diagnostic: asset status plus actual newest Alpaca daily bar.
+    // No prices or credentials are exposed. Up to five symbols per request.
+    if(isDiagnostics){
+      const symbols=String(url.searchParams.get("symbols")||"").toUpperCase().split(",").filter(Boolean);
+      if(!symbols.length||symbols.length>5||symbols.some(x=>!/^[A-Z][A-Z0-9.]{0,9}$/.test(x)))
+        return json({error:"Provide 1 to 5 valid ticker symbols."},400,origin,env);
+      const feed=String(url.searchParams.get("feed")||env.ALPACA_DATA_FEED||"iex").toLowerCase();
+      if(!FEEDS.has(feed))return json({error:"Unsupported Alpaca feed."},400,origin,env);
+      const start=new Date(Date.now()-400*86400000).toISOString(),end=new Date().toISOString();
+      const details={};
+      for(const symbol of symbols){
+        const asset=await alpacaAsset(symbol,env);
+        let latestBarDate=null,barCount=0,barError=null;
+        try{
+          const upstream=new URL("https://data.alpaca.markets/v2/stocks/"+encodeURIComponent(symbol)+"/bars");
+          for(const [k,v] of Object.entries({timeframe:"1Day",start,end,limit:"10000",
+            adjustment:"all",feed,sort:"desc"}))upstream.searchParams.set(k,v);
+          const response=await fetch(upstream,{headers:{"APCA-API-KEY-ID":env.ALPACA_API_KEY,
+            "APCA-API-SECRET-KEY":env.ALPACA_API_SECRET,Accept:"application/json"}});
+          const payload=await response.json().catch(()=>null);
+          if(!response.ok)barError="Alpaca historical bars HTTP "+response.status+
+            (payload?.message?": "+payload.message:"");
+          else{
+            const bars=Array.isArray(payload?.bars)?payload.bars:[];
+            barCount=bars.length;latestBarDate=bars.length?bars[0].t?.slice(0,10)||null:null;
+          }
+        }catch(err){barError=String(err.message||err);}
+        details[symbol]={asset,latestBarDate,barCount,barError,
+          barsSource:"Alpaca "+feed.toUpperCase()+" 1Day",checkedAt:new Date().toISOString()};
+      }
+      return json({source:"alpaca",feed,start,end,details},200,origin,env);
     }
 
     if (isIntraday) {
@@ -162,7 +217,7 @@ export default {
       const expectedTradingDay=expectedNyseBarDate(new Date());
       const cacheUrl = new URL("/api/stocks/scan", url.origin);
       cacheUrl.searchParams.set("feed", feed);
-      cacheUrl.searchParams.set("universe_revision", "2026-11-17-scan-freshness-retry");
+      cacheUrl.searchParams.set("universe_revision", "2026-11-17-round12-mrsh-diagnostics");
       cacheUrl.searchParams.set("expected_trading_day",expectedTradingDay);
       cacheUrl.searchParams.set("origin", origin || "none");
       const cacheKey = new Request(cacheUrl.toString(), { method: "GET" });
@@ -273,6 +328,14 @@ export default {
         }));
       }
       const freshness=freshnessWithUniverse(barsBySymbol,LIVE_UNIVERSE,expectedTradingDay);
+      // Retry exhausted: explain each truly stale ticker with asset status.
+      const diagnostics={};
+      for(const row of freshness.stale.slice(0,15)){
+        const retryFailed=retryErrors.some(error=>error.symbols?.includes(row.symbol));
+        diagnostics[row.symbol]={asset:await alpacaAsset(row.symbol,env),
+          barsAfterLatest:retryFailed?null:retryUpdated.includes(row.symbol),
+          retryFailed,latest:row.latest,checkedAt:new Date().toISOString()};
+      }
       const retryInfo={attempted:retryAttempted,updated:retryUpdated,
         stillStale:freshness.stale.map(x=>x.symbol),errors:retryErrors};
       const returnedSymbols = Object.keys(barsBySymbol).filter(symbol => barsBySymbol[symbol]?.length);
@@ -287,6 +350,7 @@ export default {
         freshness:{expected:freshness.expected,allFresh:freshness.allFresh,stale:freshness.stale,
           checked:freshness.checked,latestBySymbol:freshness.dates,verifiedAt:new Date().toISOString()},
         retry:retryInfo,
+        diagnostics,
         batch_size: ALPACA_BATCH_SIZE,
         batches: batches.length,
         lookback_days: ALPACA_SCAN_LOOKBACK_DAYS,
