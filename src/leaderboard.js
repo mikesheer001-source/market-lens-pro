@@ -9,7 +9,7 @@ export const PRESET_STRATEGIES=Object.freeze([
   {id:'breakout',name:'Price breakout'}
 ]);
 export const LEADERBOARD_METRICS=Object.freeze(['name','returnPct','cagrPct','sharpe','maxDD','winPct','trades','profitFactor',
-  'trainReturnPct','trainSharpe','testReturnPct','testSharpe','validation']);
+  'trainReturnPct','trainSharpe','testReturnPct','testSharpe','rollingMean','rollingMedian','rollingPositive','validation']);
 export const SYMBOL_MEMORY_LIMIT=10;
 export const SYMBOL_MEMORY_CHARS=2900000;
 const finite=Number.isFinite;
@@ -18,6 +18,9 @@ export function leaderboardMetric(row,key){
   if(key==='trainSharpe')return row.trainMetrics?.sharpe??null;
   if(key==='testReturnPct')return row.testMetrics?.returnPct??null;
   if(key==='testSharpe')return row.validation?.enoughTestBars?row.testMetrics?.sharpe??null:null;
+  if(key==='rollingMean')return row.rolling?.meanSharpe??null;
+  if(key==='rollingMedian')return row.rolling?.medianSharpe??null;
+  if(key==='rollingPositive')return row.rolling?.assessableCount?row.rolling.positiveCount:null;
   if(key==='validation')return row.validation?.validated?1:0;
   if(key==='sharpe')return row.trainMetrics?row.trainMetrics.sharpe??null:row.metrics?.sharpe??null;
   return row.metrics?.[key]??null;
