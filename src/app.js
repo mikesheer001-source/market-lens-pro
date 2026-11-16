@@ -352,6 +352,34 @@ async function initApp(){
       '<div class="panel"><div class="panel-header"><h2>Run sweep</h2><div class="flex"><label class="control">Strategy '+select([['ema-cross','EMA cross'],['rsi-revert','RSI reversion'],['trend-rsi','Trend + RSI'],['bollinger','Bollinger'],['breakout','Breakout'],['pine-custom','Pine Script strategy']],S.bt.strategy,'data-bt="strategy"')+'</label>'+button('Run 5–9 variations','run-sweep','primary')+button('Export CSV','export-sweep','small')+'</div></div><div class="panel-body"><p class="section-note">Each variation is trained on the first 70% of the dataset and independently simulated on the last 30%, using earlier bars only for indicator warm-up. The table sorts by holdout return. Choosing the best holdout result itself introduces selection bias; confirm on unseen data.</p></div></div>'+
       '<div class="panel"><div class="panel-header"><h2>Parameter ranking</h2><span class="muted">'+rows.length+' variations</span></div><div class="table-wrap">'+(rows.length?'<table class="data-table"><thead><tr><th>Parameters</th><th>Train return</th><th>Train DD</th><th>Test return</th><th>Test DD</th><th>Test trades</th><th>Test PF</th><th></th></tr></thead><tbody>'+rows.map((r,i)=>'<tr class="'+(i===0?'sweep-best':'')+'"><td>'+esc(Object.entries(r.params).map(([k,v])=>k+'='+v).join(', '))+'</td><td class="'+priceColor(r.train.returnPct)+'">'+pct(r.train.returnPct)+'</td><td>-'+format(r.train.maxDD)+'%</td><td class="'+priceColor(r.test.returnPct)+'">'+pct(r.test.returnPct)+'</td><td>-'+format(r.test.maxDD)+'%</td><td>'+r.test.trades+'</td><td>'+format(r.test.profitFactor)+'</td><td><button class="btn small" data-action="apply-sweep" data-index="'+i+'">Apply & test</button></td></tr>').join('')+'</tbody></table>':'<div class="empty"><strong>No sweep yet</strong>Choose a strategy and run a parameter sweep.</div>')+'</div></div>';
   }
+  function volatilityView(){
+    const available=new Map([...S.data].filter(([sym])=>VOL_TICKERS.includes(sym)&&modeSymbol(sym)));
+    const vSource=sym=>S.sources.get(sym)==='ALPACA'?'ALPACA '+String(S.liveFeed).toUpperCase()+' 1Day':
+      S.sources.get(sym)==='IMPORTED'?'IMPORTED CSV daily':'UNAVAILABLE';
+    const proxy=contangoPriceProxies(available,{sources:S.mode==='live'?'ALPACA '+S.liveFeed:'IMPORTED CSV'});
+    const rows=VOL_TICKERS.map(sym=>volatilityRow(sym,available.get(sym),available.has(sym)?vSource(sym):'NOT LOADED'));
+    const sourceNote=S.mode==='live'?'Live mode: '+esc(String(S.liveFeed).toUpperCase())+' Alpaca Worker daily OHLCV, cached scan '+esc(S.scan.at||'not yet scanned'):
+      'Demo mode: no real volatility symbols in the synthetic universe. Import genuine OHLCV CSV for these tickers or switch to Alpaca Live.';
+    return head('Volatility','Market-data volatility products and explicitly price-based roll/contango proxies; no futures or options pricing.',
+      button(S.mode==='live'?'Refresh real Alpaca scan':'Load real Alpaca scan','refresh-volatility','primary'))+
+      '<div class="info-strip" id="volatility-source">'+sourceNote+'</div>'+
+      '<div class="panel"><div class="panel-header"><h2>Price-based regime heuristic</h2><span class="source-badge">NOT VIX FUTURES CONTANGO</span></div>'+
+      '<div class="panel-body"><div class="vol-regime" id="contango-regime">'+esc(proxy.regime)+'</div>'+
+      '<div class="metrics">'+
+        metric('VXZ − VXX',''+pct(proxy.relativeReturn20),'20-day return spread · percentage points')+
+        metric('SVXY/VXX ratio trend',pct(proxy.svxyVxxRatioTrend20),'20-session relative-price ratio change')+
+        metric('Proxy date',esc(proxy.asOf||'Unavailable'),'Last aligned daily session')+
+        '</div><p class="section-note"><strong>Rule:</strong> '+esc(proxy.rule)+'</p>'+
+        '<p class="section-note"><strong>Meaning:</strong> '+esc(proxy.method)+
+        ' Source: '+esc(proxy.sources||'No ticker data loaded')+'. No VIX futures maturities, options implied volatility or actual roll yield are available in this feed.</p></div></div>'+
+      '<div class="panel"><div class="panel-header"><h2>Volatility product metrics</h2><span class="muted">'+available.size+' of '+VOL_TICKERS.length+' products with daily bars</span></div>'+
+      '<div class="table-wrap"><table class="data-table"><thead><tr><th>Symbol</th><th>OHLCV source</th><th>Bar date</th><th>Close</th><th>20D return</th><th>RV 20D</th><th>RV 60D</th><th>252D high DD</th><th>Bars</th></tr></thead><tbody>'+
+      rows.map(r=>'<tr data-vol-symbol="'+esc(r.symbol)+'"><td>'+esc(r.symbol)+'</td><td>'+esc(r.source)+'</td><td>'+esc(r.asOf||'—')+'</td>'+
+        '<td>'+format(r.close)+'</td><td class="'+priceColor(r.return20)+'">'+pct(r.return20)+'</td><td>'+pct(r.rv20)+'</td><td>'+pct(r.rv60)+'</td>'+
+        '<td class="'+priceColor(r.drawdown252)+'">'+pct(r.drawdown252)+'</td><td>'+format(r.bars,0)+'</td></tr>').join('')+'</tbody></table></div></div>'+
+      '<div class="info-strip">Method: 20D return = Close(t)/Close(t−20)−1. RV 20D/60D = sample standard deviation of 20/60 daily logarithmic returns × sqrt(252), annualized. High DD = Close / maximum daily HIGH across the last 252 sessions − 1. Values shown only with sufficient history.</div>';
+  }
+
   function scriptView(){
     const parsed=S.scriptParsed,inputs=parsed?.inputs||[];
     const examples=PINE_EXAMPLES.map(ex=>button(ex.label,'pine-example','small').replace('data-action="pine-example"','data-action="pine-example" data-example="'+esc(ex.id)+'"')).join('');
@@ -390,7 +418,7 @@ async function initApp(){
   }
   function render(){
     destroyCharts();shell();
-    const views={screener:screenerView,charts:chartsView,backtest:backtestView,optimize:optimizeView,scripts:scriptView,data:dataView};
+    const views={screener:screenerView,charts:chartsView,backtest:backtestView,optimize:optimizeView,volatility:volatilityView,scripts:scriptView,data:dataView};
     $('#main').innerHTML=views[S.tab]();
     if(S.tab==='charts'){
       mountPriceChart();
