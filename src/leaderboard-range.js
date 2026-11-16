@@ -7,7 +7,11 @@ import {compareStrategies} from './leaderboard.js';
 
 export function compareStrategiesInRange({bars,range={},...config}){
   const selected=windowBacktestBars(bars,range);
-  const report=compareStrategies({...config,bars:selected.bars});
+  const explicit=!!(selected.range.startDate||selected.range.endDate);
+  // A user-picked 33-session window should still be compared honestly.
+  // Do not impose the full-history research gate on its leaderboard.
+  // At least five bars are needed for a 3-bar train and 2-bar test split.
+  const report=compareStrategies({...config,bars:selected.bars,minBars:explicit?5:40});
   return {...report,range:selected.range};
 }
 
