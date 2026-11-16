@@ -112,3 +112,40 @@ test('real Alpaca IEX OHLCV runs the entire preset strategy leaderboard on VXX w
   await expect(page.locator('#equity-chart canvas').first()).toBeVisible();
   expect(errors).toEqual([]);
 });
+
+
+test('real Alpaca scan exposes latest-bar freshness and dated computed strategy positions without mocked data',async ({page,request})=>{
+  test.skip(process.env.REAL_ALPACA_TEST!=='1','Run after deployment against real Alpaca IEX Worker');
+  test.setTimeout(180000);
+  const errors=[];page.on('pageerror',e=>errors.push(e.message));
+  const response=await request.get(WORKER+'/api/stocks/scan?feed=iex',{timeout:120000});
+  expect(response.status()).toBe(200);
+  const payload=await response.json();
+  expect(payload.source).toBe('alpaca');
+  expect(payload.requested).toBe(133);
+  expect(payload.returned).toBe(133);
+  expect(payload.freshness.expected).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+  expect(payload.freshness.checked).toBe(133);
+  expect(Array.isArray(payload.freshness.stale)).toBe(true);
+  expect(Array.isArray(payload.retry.attempted)).toBe(true);
+  const rawVxx=payload.bars.VXX.at(-1).t.slice(0,10);
+  await page.goto('./');
+  await page.evaluate(url=>localStorage.setItem('market-lens-pro-settings',JSON.stringify({apiBaseUrl:url})),WORKER);
+  await page.reload();
+  await page.locator('.mode-switch [data-action="mode-live"]').click();
+  await expect(page.locator('#scan-status')).toContainText('133/133 symbols loaded',{timeout:150000});
+  await expect(page.locator('#scan-freshness')).toContainText('expected NYSE session '+payload.freshness.expected);
+  await expect(page.locator('tr[data-symbol="VXX"] .fresh-date')).toHaveText(rawVxx);
+  await expect(page.locator('tbody tr[data-symbol]')).toHaveCount(133);
+  await page.locator('[data-option="signal-strategy"]').selectOption('preset:ema-cross');
+  await expect(page.locator('thead th').last()).toContainText('EMA crossover');
+  await expect(page.locator('tbody .signal-status')).toHaveCount(133,{timeout:120000});
+  const statuses=await page.locator('tbody .signal-status').allTextContents();
+  expect(statuses.every(x=>['LONG','FLAT','EXIT'].includes(x.trim()))).toBe(true);
+  await expect(page.locator('tr[data-symbol="VXX"] .signal-date')).toHaveText(rawVxx);
+  await page.locator('[data-option="sort"]').selectOption('signal');
+  await page.locator('[data-option="signals-only"]').check();
+  const longs=await page.locator('tbody .signal-status').allTextContents();
+  expect(longs.every(x=>x.trim()==='LONG')).toBe(true);
+  expect(errors).toEqual([]);
+});
