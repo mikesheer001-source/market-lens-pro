@@ -313,6 +313,9 @@ test('Round 13 published Briefing uses real Alpaca daily data, saves history and
   await expect(page.locator('#briefing-metadata')).toContainText('ALPACA IEX 1Day',{timeout:150000});
   await expect(page.locator('#briefing-scan')).toContainText('Source: ALPACA IEX 1Day');
   await expect(page.locator('#briefing-signals')).toContainText('EMA crossover');
+  await expect(page.locator('#briefing-top-validated')).toContainText('Top validated strategy (rolling OOS):');
+  await expect(page.locator('#briefing-top-full-period')).toContainText('Full-period best (full-period Sharpe):');
+  await expect(page.locator('#briefing-strategy-leaders')).toContainText('Alpaca IEX OHLCV');
   await expect(page.locator('#briefing-regime')).toContainText('NOT VIX FUTURES CONTANGO');
   await expect(page.locator('#briefing-vxx')).toContainText('VXX 20D return');
   await expect(page.locator('#briefing-history .briefing-history-row')).toHaveCount(1);
@@ -320,7 +323,15 @@ test('Round 13 published Briefing uses real Alpaca daily data, saves history and
   await page.locator('[data-action="copy-briefing"]').click();
   const text=await page.evaluate(()=>navigator.clipboard.readText());
   expect(text).toContain('MARKET LENS PRO — DAILY BRIEFING');
-  expect(text).toContain('VXX: $');
+  expect(text).toContain('VXX: 
+  await page.reload();
+  await expect(page.locator('.sidebar [data-tab="briefing"]')).toHaveClass(/active/);
+  await expect(page.locator('#briefing-history .briefing-history-row')).toHaveCount(1,{timeout:150000});
+  expect(errors).toEqual([]);
+});
+);
+  expect(text).toContain('Top validated strategy (rolling OOS):');
+  expect(text).toContain('Full-period best (full-period Sharpe):');
   expect(text).toContain('NOT VIX FUTURES CONTANGO');
   await page.reload();
   await expect(page.locator('.sidebar [data-tab="briefing"]')).toHaveClass(/active/);
