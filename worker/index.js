@@ -105,6 +105,7 @@ export default {
 
       const cacheUrl = new URL("/api/stocks/scan", url.origin);
       cacheUrl.searchParams.set("feed", feed);
+      cacheUrl.searchParams.set("universe_revision", "2026-11-17-svol-133");
       cacheUrl.searchParams.set("origin", origin || "none");
       const cacheKey = new Request(cacheUrl.toString(), { method: "GET" });
       const edgeCache = globalThis.caches?.default;
