@@ -1,7 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {isNyseSessionDay,expectedNyseBarDate,nyDateAndClock,nyseHolidayDates,
-  barDate,scanFreshness,freshnessWithUniverse,explainStaleSymbol} from '../src/freshness.js';
+  barDate,modalLatestBarDate,scanFreshness,freshnessWithUniverse,explainStaleSymbol,
+  staleReasonForSymbol} from '../src/freshness.js';
 
 test('expected US trading date follows New York local session, weekends and holidays',()=>{
   assert.equal(expectedNyseBarDate('2026-11-16T13:00:00Z'),'2026-11-13'); // before NY open
@@ -47,4 +48,46 @@ test('stale asset reasoning separates missing, inactive and no-new-bar from unav
   assert.match(explainStaleSymbol(entry,{asset:{status:'inactive'}}),/inactive/);
   assert.match(explainStaleSymbol(entry,{asset:{error:'HTTP 401'},retryFailed:true}),/retry failed/);
   assert.doesNotMatch(explainStaleSymbol(entry,{asset:{error:'HTTP 401'}}),/delisting/);
+});
+
+test('Round 14: 132 symbols have Nov 16 bars while one has Nov 13, even when clock expects Nov 13',()=>{
+  const all=Object.fromEntries(Array.from({length:132},(_,i)=>['STOCK'+i,[{
+    t:'2026-11-16T21:00:00Z'
+  }]]));
+  all.VXZ=[{t:'2026-11-13T21:00:00Z'}];
+  const result=scanFreshness(all,'2026-11-13');
+  assert.equal(result.expected,'2026-11-16');
+  assert.equal(result.referenceMethod,'modal latest-bar date');
+  assert.equal(result.checked,133);
+  assert.equal(result.allFresh,false);
+  assert.deepEqual(result.stale,[{symbol:'VXZ',latest:'2026-11-13'}]);
+  assert.equal(result.checked-result.stale.length,132);
+  assert.equal(result.dates.VXZ,'2026-11-13');
+  assert.equal(modalLatestBarDate({A:'2026-11-13',B:'2026-11-16'},'2026-11-12'),'2026-11-16',
+    'tie-breaker prefers newer date');
+});
+
+test('Round 14: stale reason is from Alpaca retry evidence and actual dated bar, not guessed from ticker',()=>{
+  const freshness=scanFreshness({
+    VXZ:[{t:'2026-11-13T21:00:00Z'}],
+    VXX:[{t:'2026-11-16T21:00:00Z'}],
+    MRSH:[{t:'2026-11-16T21:00:00Z'}]
+  },'2026-11-13');
+  const diagnostics={VXZ:{asset:{found:true,status:'active',tradable:true},barsAfterLatest:false}};
+  assert.equal(staleReasonForSymbol('VXZ',freshness,diagnostics),
+    'Alpaca returns no bars after Nov 13, 2026 (2026-11-13) on this feed');
+  assert.equal(staleReasonForSymbol('VXX',freshness,diagnostics),null);
+  assert.equal(staleReasonForSymbol('VXZ',freshness,{}),
+    'No Alpaca diagnosis available; latest bar 2026-11-13');
+  assert.doesNotMatch(staleReasonForSymbol('VXZ',freshness,{}),/Alpaca returns no bars after/);
+  assert.equal(staleReasonForSymbol('VXZ',freshness,{VXZ:{retryFailed:true}}),
+    'Alpaca retry failed; newer bars not verified');
+});
+
+test('Round 14: no observed bars fall back to clock, missing symbols stay stale',()=>{
+  const empty=scanFreshness({VXX:[],VXZ:[]},'2026-11-13');
+  assert.equal(empty.expected,'2026-11-13');
+  assert.equal(empty.referenceMethod,'clock fallback (no bars)');
+  assert.equal(empty.stale.length,2);
+  assert.equal(empty.allFresh,false);
 });
