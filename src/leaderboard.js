@@ -40,7 +40,7 @@ export function sortLeaderboard(rows,key='sharpe',descending=key!=='name'){
   });
 }
 export function leaderboardBest(rows){
-  return sortLeaderboard(rows,'sharpe',true).find(r=>r.strategy&&
+  return sortLeaderboard(rows,'sharpe',true).find(r=>r.strategy!==null&&
     Number.isFinite(leaderboardMetric(r,'sharpe')))||null;
 }
 export function buildEquityOverlay(leaderboard,bars){
