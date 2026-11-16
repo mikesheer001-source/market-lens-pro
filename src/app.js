@@ -724,6 +724,7 @@ async function initApp(){
       (lb.builtInExamples||0)+' built-in examples, '+lb.savedPineStrategies+
       ' saved Pine) · ran '+esc(lb.runAt)+
       ' · same capital, allocation, side, costs and stop/target assumptions.'+
+      (lb.range?' · '+esc(displayBacktestRange(lb.range)):'')+
       (note?' '+note:'')+'</div>';
     const cells=order.map((row,index)=>{
       const best=row.id===lb.bestId,m=row.metrics||{},train=row.trainMetrics||{};
@@ -812,6 +813,9 @@ async function initApp(){
       '<div id="fit-source" class="info-strip">'+report.completed+'/'+report.requested+
       ' symbols backtested · ALPACA '+esc(String(S.liveFeed).toUpperCase())+
       ' 1Day OHLCV · '+esc(report.runAt)+
+      (report.dateRange?.startDate||report.dateRange?.endDate?
+        ' · selected range '+esc(report.dateRange.startDate||'first available')+
+        ' to '+esc(report.dateRange.endDate||'last available'):' · full available range')+
       ' · ranked by training Sharpe, not OOS Sharpe. Insufficient OOS bars / unavailable Sharpe are explicitly labeled; positive OOS Sharpe is a descriptive Validated indicator, not statistical proof. Missing bars never fabricated.</div>'+
       '<div class="table-wrap"><table class="data-table fit-table"><thead><tr>'+
       headers+'</tr></thead><tbody>'+cells+'</tbody></table></div></div></section>';
@@ -1309,7 +1313,7 @@ async function initApp(){
         .map(sym=>[sym,S.data.get(sym)]));
       S.fitReport=fitAcrossUniverse({symbols:LIVE_UNIVERSE,data:histories,
         options:cfg,strategyScript:script,backtest,compilePine,executePine,
-        expectedBarDate:S.freshness?.expected||expectedNyseBarDate(),
+        dateRange:S.btRange,expectedBarDate:S.freshness?.expected||expectedNyseBarDate(),
         sourceFor:sym=>histories.has(sym)?'ALPACA '+String(S.liveFeed).toUpperCase()+' 1Day':'NO ALPACA BARS'});
       S.fitSort='sharpe';S.fitDescending=true;S.fitStatus='';render();
     }catch(err){S.fitStatus='';S.fitError=String(err.message||err);render();}
@@ -1329,12 +1333,14 @@ async function initApp(){
   }
   function runComparison(){
     try{
-      const history=bars();
+      const selected=windowBacktestBars(bars(),S.btRange);
+      const history=selected.bars;
       const report=compareStrategies({symbol:S.symbol,bars:history,builtInExamples:PINE_EXAMPLES,
         options:{...S.bt,timeframe:S.chart.tf},source:S.sources.get(S.symbol)==='ALPACA'?
           'Alpaca '+String(S.liveFeed).toUpperCase()+' OHLCV':S.sources.get(S.symbol)==='SIMULATED'?
           'SIMULATED Demo OHLCV':'IMPORTED CSV OHLCV',
         backtest,compilePine,executePine,savedScripts:S.scriptLibrary});
+      report.range=selected.range;
       S.leaderboard=report;S.leaderboardSort='sharpe';S.leaderboardDescending=true;S.leaderboardError='';
       rememberLeaderboard();render();
     }catch(err){S.leaderboardError=err.message;notice('Comparison failed: '+err.message);render();}
@@ -1352,7 +1358,8 @@ async function initApp(){
       S.scriptId=choice.script.id;S.scriptSettings={...choice.script.settings};
       parseCurrentPine();persistPineDraft();
     }
-    S.result={metrics:choice.metrics,curve:choice.curve,trades:choice.trades};
+    S.result={metrics:choice.metrics,curve:choice.curve,trades:choice.trades,
+      source:lb.source,range:lb.range||null};
     S.resultSymbol=lb.symbol;S.resultTf=lb.timeframe;S.sweep=null;S.tab='backtest';
     rememberAnalysis();render();
   }
