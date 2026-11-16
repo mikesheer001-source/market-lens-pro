@@ -6,7 +6,7 @@ export const FIT_COLUMNS=Object.freeze(['symbol','returnPct','cagrPct','sharpe',
 const metricKeys=new Set(['returnPct','cagrPct','sharpe','maxDD','winPct','trades']);
 export function fitMetric(row,key){
   if(key==='trainReturnPct')return row.trainMetrics?.returnPct??null;
-  if(key==='trainSharpe'||key==='sharpe')return row.trainMetrics?.sharpe??row.metrics?.sharpe??null;
+  if(key==='trainSharpe'||key==='sharpe')return row.trainMetrics?row.trainMetrics.sharpe??null:row.metrics?.sharpe??null;
   if(key==='testReturnPct')return row.testMetrics?.returnPct??null;
   if(key==='testSharpe')return row.validation?.enoughTestBars?row.testMetrics?.sharpe??null:null;
   if(key==='validation')return row.validation?.validated?1:0;
@@ -26,7 +26,7 @@ export function sortUniverseFit(rows,key='sharpe',descending=key!=='symbol'&&key
   });
 }
 export function bestUniverseFit(rows){
-  return sortUniverseFit(rows,'sharpe',true).find(r=>Number.isFinite(r.metrics?.sharpe))||null;
+  return sortUniverseFit(rows,'sharpe',true).find(r=>Number.isFinite(fitMetric(r,'sharpe')))||null;
 }
 export function fitAcrossUniverse({symbols,data,options,backtest,compilePine,executePine,
  strategyScript=null,sourceFor=()=>null,expectedBarDate=null}){
