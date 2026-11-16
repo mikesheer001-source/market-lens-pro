@@ -778,31 +778,45 @@ async function initApp(){
     const status=S.fitStatus?'<div id="fit-status" role="status" class="info-strip">'+esc(S.fitStatus)+'</div>':
       S.fitError?'<div id="fit-status" role="alert" class="info-strip warning">'+esc(S.fitError)+'</div>':'';
     if(!report)return '<section class="panel" id="universe-fit"><div class="panel-header"><h2>Fit across universe</h2></div>'+
-      '<div class="panel-body">'+status+'<p class="section-note">Run the selected preset or Pine strategy on all '+
-      LIVE_UNIVERSE.length+' curated live Alpaca symbols with identical capital, fees, slippage and stops. Daily bars only. In-sample research, not proof of future performance.</p></div></section>';
-    const defs=[['symbol','Symbol'],['returnPct','Total return'],['cagrPct','CAGR'],['sharpe','Sharpe'],
-      ['maxDD','Max DD'],['winPct','Win rate'],['trades','Trades'],['source','Data source'],['barDate','Last bar']];
-    const headers=defs.map(([key,name])=>'<th aria-sort="'+(S.fitSort===key?(S.fitDescending?'descending':'ascending'):'none')+
-      '"><button type="button" class="table-sort" data-action="sort-fit" data-key="'+key+'">'+name+
-      (S.fitSort===key?(S.fitDescending?' ▼':' ▲'):'')+'</button></th>').join('');
+      '<div class="panel-body">'+status+'<p class="section-note">Apply the selected strategy to all '+
+      LIVE_UNIVERSE.length+' curated Alpaca symbols. Training = first 70% of each symbol history; independent out-of-sample test = final 30%. Same modeled costs for each.</p></div></section>';
+    const defs=[['symbol','Symbol'],['trainReturnPct','Train return (70%)'],
+      ['sharpe','Train Sharpe (rank)'],['testReturnPct','OOS return (30%)'],
+      ['testSharpe','OOS Sharpe (30%)'],['validation','Validation'],
+      ['returnPct','Full return'],['cagrPct','Full CAGR'],
+      ['maxDD','Full max DD'],['winPct','Full win rate'],['trades','Full trades'],
+      ['source','Data source'],['barDate','Last bar']];
+    const headers=defs.map(([key,name])=>'<th aria-sort="'+
+      (S.fitSort===key?(S.fitDescending?'descending':'ascending'):'none')+
+      '"><button type="button" class="table-sort" data-action="sort-fit" data-key="'+key+'">'+
+      name+(S.fitSort===key?(S.fitDescending?' ▼':' ▲'):'')+'</button></th>').join('');
     const best=bestUniverseFit(report.rows);
     const cells=sortUniverseFit(report.rows,S.fitSort,S.fitDescending).map(row=>
       '<tr data-fit-symbol="'+esc(row.symbol)+'"'+(best?.symbol===row.symbol?' class="leaderboard-best"':'')+'>'+
       '<td>'+esc(row.symbol)+(row.stale?'<small class="fit-stale">Stale</small>':'')+'</td>'+
-      '<td>'+pct(row.metrics?.returnPct)+'</td><td>'+pct(row.metrics?.cagrPct)+'</td>'+
-      '<td>'+format(row.metrics?.sharpe)+'</td><td>'+format(row.metrics?.maxDD)+'%</td>'+
+      '<td>'+pct(row.trainMetrics?.returnPct)+'</td>'+
+      '<td>'+format(row.trainMetrics?.sharpe,2)+'</td>'+
+      '<td>'+pct(row.testMetrics?.returnPct)+'</td>'+
+      '<td>'+holdoutSharpe(row)+'</td>'+
+      '<td>'+holdoutLabel(row)+'</td>'+
+      '<td>'+pct(row.metrics?.returnPct)+'</td>'+
+      '<td>'+pct(row.metrics?.cagrPct)+'</td>'+
+      '<td>'+format(row.metrics?.maxDD)+'%</td>'+
       '<td>'+pct(row.metrics?.winPct)+'</td><td>'+(row.metrics?.trades??'—')+'</td>'+
       '<td>'+esc(row.source)+'</td><td>'+esc(row.barDate||'—')+
       (row.error?'<small class="fit-error">'+esc(row.error)+'</small>':'')+'</td></tr>').join('');
     return '<section class="panel" id="universe-fit"><div class="panel-header"><h2>Fit across universe</h2><div class="flex">'+
-      (best?button('Load best symbol','load-fit-best','primary'):'')+button('Export fit CSV','export-fit','small')+
+      (best?button('Load best symbol','load-fit-best','primary'):'')+
+      button('Export fit CSV','export-fit','small')+
       '</div></div><div class="panel-body">'+status+
-      '<div id="fit-source" class="info-strip">'+report.completed+'/'+report.requested+' symbols backtested · ALPACA '+
-      esc(String(S.liveFeed).toUpperCase())+' 1Day OHLCV · '+esc(report.runAt)+
-      '. In-sample research, not proof of future performance. Missing bars are never fabricated.</div>'+
-      '<div class="table-wrap"><table class="data-table fit-table"><thead><tr>'+headers+
-      '</tr></thead><tbody>'+cells+'</tbody></table></div></div></section>';
+      '<div id="fit-source" class="info-strip">'+report.completed+'/'+report.requested+
+      ' symbols backtested · ALPACA '+esc(String(S.liveFeed).toUpperCase())+
+      ' 1Day OHLCV · '+esc(report.runAt)+
+      ' · ranked by training Sharpe, not OOS Sharpe. Insufficient OOS bars / unavailable Sharpe are explicitly labeled; positive OOS Sharpe is a descriptive Validated indicator, not statistical proof. Missing bars never fabricated.</div>'+
+      '<div class="table-wrap"><table class="data-table fit-table"><thead><tr>'+
+      headers+'</tr></thead><tbody>'+cells+'</tbody></table></div></div></section>';
   }
+
   function backtestView(){
     if(S.portfolioMode)return portfolioBacktestView();
     const dataStatus=S.analysisLoading?
