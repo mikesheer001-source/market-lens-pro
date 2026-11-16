@@ -37,7 +37,7 @@ test('Round 13 live Daily Briefing compiles real-source fields, copies text and 
   await expect(page.locator('#briefing-vxx')).toContainText('VXX 20D return');
   await expect(page.locator('#briefing-alerts')).toContainText('Source: LOCAL browser alerts');
   await expect(page.locator('#briefing-stale')).toContainText('VXZ');
-  await expect(page.locator('#briefing-stale')).toContainText('Alpaca returns no bars after '+staleDate);
+  await expect(page.locator('#briefing-stale')).toContainText('('+staleDate+') on this feed');
   await expect(page.locator('#briefing-history .briefing-history-row')).toHaveCount(1);
 
   await page.context().grantPermissions(['clipboard-read','clipboard-write']);
