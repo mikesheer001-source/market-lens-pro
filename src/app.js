@@ -149,7 +149,7 @@ async function initApp(){
     S.signalAsOf=new Date().toISOString();
     const current={};
     for(const [symbol,signal] of S.signalRows)if(['LONG','FLAT','EXIT'].includes(signal.status))current[symbol]=signal;
-    const key=S.signalSelection+(selection.kind==='pine'?'|'+selection.code:'');
+    const key=S.mode+'|'+S.signalSelection+(selection.kind==='pine'?'|'+selection.code:'');
     const prior=S.signalHistory[key]||{};
     const checked=scanSignalFlips(prior,current,{strategyId:selection.id,strategyName:selection.name,
       checkedAt:S.signalAsOf});
@@ -290,7 +290,12 @@ async function initApp(){
   function activeAlertBanner(){
     const unread=S.alerts.filter(a=>a.unread);
     const alertsBanner=unread.length?'<div class="alert-banner" role="alert"><strong>'+unread.length+' in-app alert'+(unread.length===1?'':'s')+' triggered</strong>'+
-      unread.map(a=>'<div>'+esc(a.symbol)+' · '+esc(a.metric.toUpperCase())+' '+(a.op==='>'?'above':'below')+' '+format(a.threshold,2)+' · latest '+format(a.lastValue,2)+' · bar '+esc(a.lastHitBarDate||'')+' '+button('Dismiss alert','alert-ack','small').replace('data-action="alert-ack"','data-action="alert-ack" data-alert-id="'+esc(a.id)+'"')+'</div>').join('')+'</div>':'';
+      unread.map(a=>'<div>'+(a.type==='signal'?
+        esc(a.strategyName||'Strategy')+' · '+esc(a.symbol)+' · '+esc(a.oldValue)+' → '+esc(a.newValue)+
+        ' (observed '+esc(a.observedTo||'')+') · '+esc(a.source||'')+' · bar '+esc(a.lastHitBarDate||''):
+        esc(a.symbol)+' · '+esc(a.metric.toUpperCase())+' '+(a.op==='>'?'above':'below')+' '+
+        format(a.threshold,2)+' · latest '+format(a.lastValue,2)+' · bar '+esc(a.lastHitBarDate||''))+
+        ' '+button('Dismiss alert','alert-ack','small').replace('data-action="alert-ack"','data-action="alert-ack" data-alert-id="'+esc(a.id)+'"')+'</div>').join('')+'</div>':'';
     return alertsBanner;
   }
   function activeSnapshotBanner(){
@@ -344,7 +349,11 @@ async function initApp(){
     const listOptions=S.watchlists.map(x=>[x.id,x.name+' ('+x.symbols.length+')']);
     const alertSymbols=[...S.data.keys()].filter(modeSymbol).sort();
     const alertSymbol=alertSymbols.includes(S.alertDraft.symbol)?S.alertDraft.symbol:alertSymbols[0]||'';
-    const alertRows=S.alerts.length?S.alerts.map(a=>'<div class="data-item"><span>'+esc(a.symbol)+' '+esc(a.metric.toUpperCase())+' '+(a.op==='>'?'above':'below')+' '+format(a.threshold,2)+' <small>'+(a.active?'Condition met':'Not triggered')+'</small></span>'+button('Remove alert','alert-delete','small').replace('data-action="alert-delete"','data-action="alert-delete" data-alert-id="'+esc(a.id)+'"')+'</div>').join(''):'<p class="section-note">No local alerts. They check only when you scan or refresh while this page is running.</p>';
+    const alertRows=S.alerts.length?S.alerts.map(a=>'<div class="data-item"><span>'+(a.type==='signal'?
+        esc(a.strategyName||'Strategy')+' · '+esc(a.symbol)+' '+esc(a.oldValue)+' → '+esc(a.newValue):
+        esc(a.symbol)+' '+esc(a.metric.toUpperCase())+' '+(a.op==='>'?'above':'below')+' '+format(a.threshold,2))+
+        ' <small>'+(a.type==='signal'?'At '+esc(a.lastHitBarDate||''):a.active?'Condition met':'Not triggered')+
+        '</small></span>'+button('Remove alert','alert-delete','small').replace('data-action="alert-delete"','data-action="alert-delete" data-alert-id="'+esc(a.id)+'"')+'</div>').join(''):'<p class="section-note">No local alerts. They check only when you scan or refresh while this page is running.</p>';
     const savedChoices=S.savedScans.map(x=>[x.id,x.name+' · '+x.rows.length+' rows']);
     const loaded=S.savedScanView;
     return ''+
@@ -746,6 +755,7 @@ async function initApp(){
     const symbols=[...S.data.keys()].filter(symbol=>S.sources.get(symbol)!=='ALPACA'&&isVisibleSymbol(symbol));
     const matches=symbols.filter(symbol=>screenSymbol(S.data.get(symbol),S.rules).pass);
     S.scan={status:'complete',source:'DEMO',requested:symbols.length,returned:symbols.length,matched:matches.length,missing:[],cached:false,at:new Date().toISOString()};
+    S.freshness=null;evaluateScreenerSignals(true);
     evaluateLocalAlerts();S.tab='screener';render();
     notice('Demo scan complete: '+matches.length+' '+(matches.length===1?'match':'matches')+' across '+symbols.length+' symbols.');
   }
@@ -771,7 +781,13 @@ async function initApp(){
     if(!visible.includes(S.symbol))S.symbol=visible[0]||loaded[0];
     restoreSymbolState(S.symbol);
     const matched=visible.filter(symbol=>screenSymbol(S.data.get(symbol),S.rules).pass).length;
-    S.scan={status:'complete',source:'ALPACA',requested:payload.requested||LIVE_UNIVERSE.length,returned:loaded.length,matched,missing:payload.missing||[],cached:response.headers.get('X-Scan-Cache')==='HIT',at:new Date().toISOString()};
+    const expected=payload.freshness?.expected||expectedNyseBarDate(new Date());
+    const allBars=Object.fromEntries(LIVE_UNIVERSE.map(sym=>[sym,S.sources.get(sym)==='ALPACA'?S.data.get(sym):[]]));
+    S.freshness=scanFreshness(allBars,expected);
+    S.scan={status:'complete',source:'ALPACA',requested:payload.requested||LIVE_UNIVERSE.length,returned:loaded.length,
+      matched,missing:payload.missing||[],cached:response.headers.get('X-Scan-Cache')==='HIT',
+      retry:payload.retry||null,at:new Date().toISOString()};
+    evaluateScreenerSignals(true);
     evaluateLocalAlerts();S.tab='screener';render();
     notice('Live scan complete: '+matched+' '+(matched===1?'match':'matches')+' across '+visible.length+' visible symbols ('+loaded.length+'/'+S.scan.requested+' returned).');
   }
@@ -845,7 +861,10 @@ async function initApp(){
       const ema=r.d.ema200==null?null:100*(r.d.price/r.d.ema200-1);
       return {Symbol:r.symbol,Source:r.source,Close:r.d.price,RSI_D:r.d.rsi,RSI_W:r.w.rsi,RSI_5D:r.d.rsi5,
         Pct_vs_D_EMA200:ema,Return_20D_pct:r.d.ret20,Drawdown_pct:r.d.drawdown,Bars:r.d.bars,
-        Match:r.evalResult.pass?'MATCH':'NO MATCH',SnapshotDate:S.savedScanView?.savedAt||new Date().toISOString()};
+        Match:r.evalResult.pass?'MATCH':'NO MATCH',
+        LatestBar:r.latestBar||'',SignalStrategy:S.signalSelection,Signal:r.signal?.status||'',
+        SignalBar:r.signal?.barDate||'',Source:r.source,
+        SnapshotDate:S.savedScanView?.savedAt||new Date().toISOString()};
     });
     exportFile('market-lens-screener-'+new Date().toISOString().slice(0,10)+'.csv',csvDownload(rows));
   }
@@ -1096,6 +1115,9 @@ async function initApp(){
     }
     if(el.dataset.option){
       const opt=el.dataset.option,val=el.value;
+      if(opt==='signal-strategy'){S.signalSelection=val;S.signalsOnly=false;
+        evaluateScreenerSignals(false);saveSettings();render();return;}
+      if(opt==='signals-only'){S.signalsOnly=el.checked;saveSettings();render();return;}
       if(opt==='watchlist-select'){selectWatchlist(val);render();return;}
       if(opt==='portfolio-mode'){S.portfolioMode=val==='portfolio';saveSettings();render();return;}
       if(opt==='portfolio-scope'){S.portfolioScope=val;saveSettings();render();return;}
