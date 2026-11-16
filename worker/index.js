@@ -257,10 +257,11 @@ export default {
               const recent=Array.isArray(returned[symbol])?returned[symbol]:[];
               if(!recent.length)continue;
               const existing=barsBySymbol[symbol]||[];
+              const previousLatest=existing.at(-1)?.t||'';
               const merged=new Map(existing.map(bar=>[bar.t,bar]));
               for(const bar of recent)if(bar?.t)merged.set(bar.t,bar);
               barsBySymbol[symbol]=[...merged.values()].sort((a,b)=>String(a.t).localeCompare(String(b.t)));
-              retryUpdated.push(symbol);
+              if((barsBySymbol[symbol].at(-1)?.t||'')>previousLatest)retryUpdated.push(symbol);
             }
           }catch(err){
             retryErrors.push({symbols,reason:String(err.message||err)});
