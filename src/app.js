@@ -1,7 +1,7 @@
 import './styles.css';
 import {compilePine, executePine, sweepPine, PineError} from './pine.js';
 import {PINE_EXAMPLES} from './pine-examples.js';
-import {compareStrategies,sortLeaderboard,leaderboardBest,updateSymbolMemory,pruneSymbolMemory,symbolMemoryItem,LEADERBOARD_METRICS} from './leaderboard.js';
+import {compareStrategies,sortLeaderboard,leaderboardBest,updateSymbolMemory,pruneSymbolMemory,symbolMemoryItem,compactLeaderboard,LEADERBOARD_METRICS} from './leaderboard.js';
 import {runPortfolio,runPortfolioSweep,portfolioUniverse} from './portfolio.js';
 import {VOL_TICKERS,volatilityRow,contangoPriceProxies} from './volatility.js';
 import {restoreWatchlists,watchlistChange,validateAlert,checkAlerts,makeScanSnapshot,analysisSnapshot,restoreAnalysis,WATCHLIST_LIMIT,SCAN_LIMIT,ALERT_LIMIT} from './workspace.js';
@@ -84,7 +84,7 @@ async function initApp(){
     catch(err){notice('Per-symbol history is visible but could not be saved in browser storage. Older comparisons may need deleting.');}
   }
   function rememberLeaderboard(){
-    if(S.leaderboard?.symbol===S.symbol)persistSymbolState(S.symbol,{leaderboard:S.leaderboard});
+    if(S.leaderboard?.symbol===S.symbol)persistSymbolState(S.symbol,{leaderboard:compactLeaderboard(S.leaderboard)});
   }
   function restoreSymbolState(symbol){
     S.symbol=symbol;S.symbolQuery='';
