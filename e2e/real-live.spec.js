@@ -90,3 +90,25 @@ test('actual Alpaca IEX 15m bars produce real 2H candles, volatility analytics a
   await expect(page.locator('.data-table tbody tr').first()).toContainText('ALPACA');
   expect(pageErrors).toEqual([]);
 });
+
+
+test('real Alpaca IEX OHLCV runs the entire preset strategy leaderboard on VXX without mock quotes',async ({page})=>{
+  test.skip(process.env.REAL_ALPACA_TEST!=='1','Run after deployment against the actual configured Worker');
+  test.setTimeout(180000);
+  const errors=[];page.on('pageerror',err=>errors.push(err.message));
+  await page.goto('./');
+  await page.evaluate(url=>localStorage.setItem('market-lens-pro-settings',JSON.stringify({apiBaseUrl:url})),WORKER);
+  await page.reload();
+  await page.locator('.mode-switch [data-action="mode-live"]').click();
+  await expect(page.locator('#scan-status')).toContainText('133/133 symbols loaded',{timeout:150000});
+  await page.locator('.sidebar [data-tab="backtest"]').click();
+  await page.locator('[data-option="symbol"]').selectOption('VXX');
+  await page.locator('[data-action="compare-strategies"]').first().click();
+  await expect(page.locator('.leaderboard-table tbody tr')).toHaveCount(5);
+  await expect(page.locator('#leaderboard-source')).toContainText('Alpaca IEX OHLCV');
+  await expect(page.locator('#leaderboard-source')).toContainText('VXX');
+  await expect(page.locator('#leaderboard-chart canvas').first()).toBeVisible();
+  await page.locator('[data-action="load-best-strategy"]').click();
+  await expect(page.locator('#equity-chart canvas').first()).toBeVisible();
+  expect(errors).toEqual([]);
+});
