@@ -233,17 +233,22 @@ async function initApp(){
       try{
         const program=compilePine(item.code),evaluated=executePine(program,b,item.settings||{});
         const paneIndex=program.overlay?0:chart.panes().length;
+        let firstScriptSeries=null;
         for(const p of evaluated.plots){
           const data=p.values.flatMap((v,k)=>Number.isFinite(v)?[{time:b[k].time,value:v}]:[]);
           if(!data.length)continue;
           const series=chart.addSeries(LineSeries,{color:p.color,lineWidth:2,priceLineVisible:false,lastValueVisible:false,title:String(item.name||program.title)+' · '+p.title},paneIndex);
-          series.setData(data);
+          series.setData(data);firstScriptSeries ||= series;
         }
+        const scriptMarkers=[];
         for(const shape of evaluated.shapes){
           shape.values.forEach((active,k)=>{
-            if(active)pineMarkers.push({time:b[k].time,position:shape.position==='location.abovebar'?'aboveBar':'belowBar',shape:shape.position==='location.abovebar'?'arrowDown':'arrowUp',color:shape.color,text:shape.title.slice(0,20)});
+            if(active)scriptMarkers.push({time:b[k].time,position:shape.position==='location.abovebar'?'aboveBar':'belowBar',shape:shape.position==='location.abovebar'?'arrowDown':'arrowUp',color:shape.color,text:shape.title.slice(0,20)});
           });
         }
+        if(!program.overlay&&firstScriptSeries&&scriptMarkers.length)
+          createSeriesMarkers(firstScriptSeries,scriptMarkers.sort((a,b)=>stamp(a.time)-stamp(b.time)));
+        else pineMarkers.push(...scriptMarkers);
       }catch(error){pineErrors.push((item.name||'Custom script')+': '+error.message);}
     }
     if(pineMarkers.length)createSeriesMarkers(base,pineMarkers.sort((a,b)=>stamp(a.time)-stamp(b.time)));
