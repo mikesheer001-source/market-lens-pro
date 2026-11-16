@@ -13,10 +13,12 @@ import {windowBacktestBars,windowPortfolioData,validateBacktestRange,actualPortf
 import {runBestFitPortfolio} from './best-fit-portfolio.js';
 import {holdoutSummary} from './validation.js';
 import {compareStrategiesInRange,leaderboardRangeStatus,rangeLabel} from './leaderboard-range.js';
-import {rollingPositiveText,rollingWindowDates,ROLLING_WINDOW_COUNT} from './rolling-validation.js';
+import {rollingPositiveText,rollingWindowDates,rollingLeaderboardSummary,ROLLING_WINDOW_COUNT} from './rolling-validation.js';
 import {VOL_TICKERS,volatilityRow,contangoPriceProxies} from './volatility.js';
 import {restoreWatchlists,watchlistChange,validateAlert,checkAlerts,makeScanSnapshot,analysisSnapshot,restoreAnalysis,WATCHLIST_LIMIT,SCAN_LIMIT,ALERT_LIMIT} from './workspace.js';
 import { LIVE_UNIVERSE, DEMO_UNIVERSE, VOLATILITY_UNIVERSE, LIVE_EQUITY_COUNT, LIVE_ETF_COUNT, LIVE_VOLATILITY_COUNT, ALPACA_BATCH_SIZE, ALPACA_SCAN_LOOKBACK_DAYS } from './universe.js';
+import {DEFAULT_ALPACA_WORKER,inspectLiveHistory,shouldTryDefaultWorker,liveScanUrl,canonicalWorkerBase}
+  from './live-history.js';
 import {INDICATOR_SETTINGS,activeIndicatorReadings,updateChartField,updateIndicatorSetting,
   nextFullscreenState,chartScaleOptions,resetPriceScale,macdSeries,bollingerSeries} from './chart-usability.js';
 async function initApp(){
@@ -65,7 +67,7 @@ async function initApp(){
   const S={tab:startupPrefs.tab,mode:'demo',preferredMode:startupPrefs.mode,
     lastDemoSymbol:startupPrefs.lastDemoSymbol,lastLiveSymbol:startupPrefs.lastLiveSymbol,
     lastBacktestSymbol:startupPrefs.lastBacktestSymbol,lastSymbol:startupPrefs.lastSymbol,
-    apiBaseUrl:String(saved.apiBaseUrl||'https://market-lens-pro-api.mikesheer001.workers.dev'),liveFeed:'iex',universeFilter:saved.universeFilter||'all',scan:{status:'idle'},data:new Map(Object.entries(sampleData())),sources:new Map(),symbol:'DEMO-SPY',query:'',symbolQuery:'',watch:workspaceLists.watch,watchlists:workspaceLists.watchlists,
+    apiBaseUrl:String(saved.apiBaseUrl||DEFAULT_ALPACA_WORKER),liveFeed:'iex',universeFilter:saved.universeFilter||'all',scan:{status:'idle'},data:new Map(Object.entries(sampleData())),sources:new Map(),symbol:'DEMO-SPY',query:'',symbolQuery:'',watch:workspaceLists.watch,watchlists:workspaceLists.watchlists,
     watchlistId:workspaceLists.watchlistId,watchlistDraft:'',alertDraft:{symbol:'DEMO-SPY',metric:'price',op:'>',threshold:100},
     alerts:Array.isArray(saved.alerts)?saved.alerts.slice(0,ALERT_LIMIT):[],alertHits:[],
     savedScans:Array.isArray(saved.savedScans)?saved.savedScans.slice(0,SCAN_LIMIT):[],
@@ -840,7 +842,8 @@ async function initApp(){
       '<i class="leaderboard-swatch" style="--swatch:'+legendColors[i]+'"></i>'+
       (i+1)+'. '+esc(entry.name)+'</span>').join('')+
       '<span class="leaderboard-legend-item"><i class="leaderboard-swatch" style="--swatch:#91a0a7"></i>Buy &amp; hold</span>';
-    const assessment=holdoutSummary(lb.rows),split=lb.rows.find(x=>x.validation)?.validation;
+    const assessment=holdoutSummary(lb.rows),rollingAssessment=rollingLeaderboardSummary(lb.rows),
+      split=lb.rows.find(x=>x.validation)?.validation;
     const walk='<div class="info-strip" id="walk-forward-summary">Walk-forward summary (single 70/30 chronological holdout): '+
       assessment.positive+' of '+assessment.assessable+' assessable strategies retained positive OOS Sharpe'+
       (assessment.assessable<assessment.total?' ('+(assessment.total-assessment.assessable)+
@@ -851,6 +854,12 @@ async function initApp(){
       ' · Source: '+esc(lb.source)+' · bar date: '+esc(readableBarDate(lb.asOf))+
       (split?' · holdout '+esc(split.testStart||'—')+' to '+esc(split.testEnd||'—'):'')+
       ' · '+esc(rangeLabel(lb.range||{}))+
+      '<div class="rolling-wf-result" id="rolling-wf-result"><strong>Five-window rolling mean OOS Sharpe:</strong> '+
+      rollingAssessment.positive+' of '+rollingAssessment.assessable+
+      ' assessable strategies have a positive rolling mean OOS Sharpe'+
+      (rollingAssessment.unassessable?' ('+rollingAssessment.unassessable+
+        ' strategies have no numeric rolling mean/median; shown as — in the table)':'')+
+      '. This count uses only the numeric rolling cells in the table; it is NOT the single-split holdout count.</div>'+
       '<div class="rolling-wf-dates" id="rolling-window-dates"><strong>Repeated rolling OOS ('+
       (lb.rollingWindowCount||ROLLING_WINDOW_COUNT)+' sliding 70/30 windows):</strong> '+
       (lb.rollingWindows?.length?esc(rollingWindowDates(lb.rollingWindows)):
@@ -1017,7 +1026,13 @@ async function initApp(){
         S.scan.returned+'/'+S.scan.requested+' symbols · '+
         (S.scan.cached?'15-minute cache HIT':'fresh scan')+
         (Number.isFinite(S.scan.workerDurationMs)?' · Worker acquisition '+format(S.scan.workerDurationMs/1000,2)+' seconds':'')+
-        ' · '+ALPACA_SCAN_LOOKBACK_DAYS+'-day daily lookback. Longer history may make uncached scans and browser processing slower.</div>':'')+
+        ' · Worker reported '+(S.scan.history?.reportedDays??'unknown')+' daily lookback days'+
+        ' · ABBV '+(S.scan.history?.counts?.ABBV??'unavailable')+
+        ' actual bars · SPY '+(S.scan.history?.counts?.SPY??'unavailable')+' actual bars'+
+        ' · Worker '+esc(S.scan.history?.baseUrl||S.apiBaseUrl)+
+        ' · cache revision '+esc(S.scan.history?.revision||'unknown')+
+        (S.scan.history?.recovered?' · Outdated saved Worker automatically replaced with the official Worker':'')+
+        '. Longer history may make uncached scans and browser processing slower.</div>':'')+
       '<div class="panel"><div class="panel-header"><h2>Live market scanner · Alpaca</h2><span class="source-badge">Keys stay server-side</span></div><div class="panel-body"><label class="field">Cloudflare Worker API URL<input type="url" data-setting="apiBaseUrl" placeholder="https://market-lens-pro-api.your-subdomain.workers.dev" value="'+esc(S.apiBaseUrl)+'"/></label><div class="flex" style="margin-top:13px">'+button('Test backend','test-live','small')+button('Scan live universe & switch to Live','mode-live','primary')+button('Switch to Demo','mode-demo','small')+'</div><div class="info-strip">The live universe is '+LIVE_UNIVERSE.length+' curated symbols — not a full S&P 500 constituent list: '+LIVE_EQUITY_COUNT+' liquid US equities, '+LIVE_ETF_COUNT+' broad-market ETFs and '+LIVE_VOLATILITY_COUNT+' live volatility tickers. The volatility filter list has '+VOLATILITY_UNIVERSE.length+' entries, including the synthetic DEMO-VXX proxy; Demo mode scans '+DEMO_UNIVERSE.length+' synthetic symbols. Live volatility tickers include VXX, UVXY, SVXY, VIXY, VIXM, VXZ, SVIX, UVIX, SVOL and ZVOL. The Worker requests '+ALPACA_SCAN_LOOKBACK_DAYS+' calendar days (approximately five years) of daily bars in batches of '+ALPACA_BATCH_SIZE+' symbols ('+Math.ceil(LIVE_UNIVERSE.length/ALPACA_BATCH_SIZE)+' batches for the current universe), paginates if necessary, and caches completed scans for 15 minutes. The default feed is IEX; consolidated SIP data requires an eligible Alpaca subscription.</div><p class="section-note">Alpaca credentials remain in encrypted Cloudflare Worker secrets. The browser receives OHLCV only. If the live request fails, the app returns to Demo mode automatically. The market-wide scanner uses daily bars over REST. Chart Lab fetches genuine Alpaca 15Min bars for the selected Live symbol when 15m or 2H is chosen; it never fabricates intraday from daily. No streaming WebSocket.</p><p class="section-note">The setup guide is in <code>docs/ALPACA_SETUP.md</code>. No keys belong in this website, browser storage, or chat.</p></div></div>'+
       '<div class="panel"><div class="panel-header"><h2>Import historical data</h2><span class="source-badge">Browser only · IndexedDB</span></div><div class="panel-body"><div class="upload" id="dropzone"><strong>Drop one or more CSV files here</strong><p class="subtle">Or tap to browse. Multiple symbols are supported in a single file.</p>'+button('Choose CSV files','import')+'</div><div class="info-strip">Required columns: <code>Date,Open,High,Low,Close</code>. Optional: <code>Symbol,Volume</code>. For daily files, enter ISO dates like 2026-01-05. Chart Lab in Live mode fetches real 15Min bars, aggregates them into 2H OHLCV, and labels the IEX source. Market-wide 2H screener rules still require timestamped intraday inputs. Imported CSV prices should be split-adjusted consistently. Close-only files are permitted but weaken fill accuracy.</div></div></div>'+
       '<div class="panel"><div class="panel-header"><h2>Saved imported symbols</h2><div class="flex">'+button('Reset to demo data','clear-imports','small')+button('Export sample CSV','export-sample','small')+'</div></div><div class="panel-body"><div class="data-list">'+(imported.length?imported.map(([symbol,b])=>'<div class="data-item"><div><strong>'+esc(symbol)+'</strong><br/><small>'+b.length+' bars · '+dateLabel(b[0].time)+' to '+dateLabel(b.at(-1).time)+'</small></div><button class="btn small" data-action="choose-symbol" data-symbol="'+esc(symbol)+'">Open chart</button></div>').join(''):'<div class="empty"><strong>No imported data yet.</strong>Four clearly labeled synthetic symbols are included to demonstrate the interface.</div>')+'</div></div></div>'+
@@ -1205,13 +1220,30 @@ async function initApp(){
     notice('Demo scan complete: '+matches.length+' '+(matches.length===1?'match':'matches')+' across '+symbols.length+' symbols.');
   }
   async function fetchLiveUniverse(options={}){
-    let base=S.apiBaseUrl.trim();while(base.endsWith('/'))base=base.slice(0,-1);
+    let base=canonicalWorkerBase(S.apiBaseUrl);
     if(!base.startsWith('https://'))throw new Error('Enter the Cloudflare Worker URL in Data Center first.');
     clearSavedScanView();S.scan={status:'loading',source:'ALPACA'};S.tab=options.restoreTab||'screener';render();
     const scanStartedAt=performance.now();
-    const response=await fetch(base+'/api/stocks/scan?feed='+encodeURIComponent(S.liveFeed||'iex'),{headers:{Accept:'application/json'}});
-    const payload=await response.json().catch(()=>({}));
-    if(!response.ok)throw new Error(payload.error||payload.detail||'Alpaca market scan failed ('+response.status+').');
+    const requestHistory=async (workerBase)=>{
+      const response=await fetch(liveScanUrl(workerBase,S.liveFeed||'iex'),{
+        headers:{Accept:'application/json'},cache:'no-store'});
+      const payload=await response.json().catch(()=>({}));
+      if(!response.ok)throw new Error(payload.error||payload.detail||
+        'Alpaca market scan failed ('+response.status+').');
+      return {response,payload,history:inspectLiveHistory(payload)};
+    };
+    let {response,payload,history}=await requestHistory(base),recovered=false;
+    if(shouldTryDefaultWorker(base,history)){
+      const fallback=await requestHistory(DEFAULT_ALPACA_WORKER);
+      if(!fallback.history.ok)throw new Error('Both selected and default Workers returned short history. '+
+        fallback.history.reason);
+      ({response,payload,history}=fallback);
+      base=DEFAULT_ALPACA_WORKER;
+      S.apiBaseUrl=DEFAULT_ALPACA_WORKER;
+      recovered=true;
+    }
+    if(!history.ok)throw new Error('Stale or truncated live daily history rejected. '+
+      history.reason+' Check the configured Worker URL or reload the site.');
     const raw=payload.bars&&typeof payload.bars==='object'?payload.bars:{},parsed=[];
     for(const [symbol,items] of Object.entries(raw)){
       const liveBars=alpacaBars(items,'1Day');
@@ -1237,12 +1269,16 @@ async function initApp(){
     S.scan={status:'complete',source:'ALPACA',requested:payload.requested||LIVE_UNIVERSE.length,returned:loaded.length,
       matched,missing:payload.missing||[],cached:response.headers.get('X-Scan-Cache')==='HIT',
       retry:payload.retry||null,at:new Date().toISOString(),
-      durationMs:performance.now()-scanStartedAt,workerDurationMs:payload.scan_duration_ms??null};
+      durationMs:performance.now()-scanStartedAt,workerDurationMs:payload.scan_duration_ms??null,
+      history:{...history,baseUrl:base,revision:payload.scan_cache_revision||'unreported',
+        recovered}};
     evaluateScreenerSignals(true);
     evaluateLocalAlerts();S.tab=options.restoreTab||'screener';
     if(S.tab==='briefing')captureBriefing();
     render();
-    notice('Live scan complete: '+matched+' '+(matched===1?'match':'matches')+' across '+visible.length+' visible symbols ('+loaded.length+'/'+S.scan.requested+' returned).');
+    notice((recovered?'Saved Worker returned old history; restored the official Worker. ':'')+
+      'Live scan complete: '+matched+' '+(matched===1?'match':'matches')+' across '+
+      visible.length+' visible symbols ('+loaded.length+'/'+S.scan.requested+' returned).');
   }
   async function switchToLive(options={}){
     S.preferredMode='live';
