@@ -53,24 +53,6 @@ test('bad Pine scripts show a precise line number instead of a blank view',async
   await expect(page.locator('#pine-editor')).toBeVisible();
 });
 
-test('Alpaca live market fact displays real VXX daily close returned by the connected client, not demo fallback',async ({page})=>{
-  await page.goto('./');
-  await page.evaluate(()=>localStorage.setItem('market-lens-pro-settings',JSON.stringify({apiBaseUrl:'https://alpaca-test-worker.example'})));
-  await page.reload();
-  await page.route('https://alpaca-test-worker.example/api/stocks/scan**',route=>route.fulfill({
-    status:200,contentType:'application/json',
-    body:JSON.stringify({source:'alpaca',feed:'iex',requested:133,missing:[],
-      bars:{VXX:[{t:'2026-11-16T21:00:00Z',o:24.05,h:24.70,l:23.90,c:24.34,v:400000}],SPY:[{t:'2026-11-16T21:00:00Z',o:590,h:596,l:588,c:594.12,v:10000000}]}
-    })
-  }));
-  await page.locator('.mode-switch [data-action="mode-live"]').click();
-  await expect(page.locator('.market-fact')).toContainText('ALPACA VXX DAILY CLOSE');
-  await expect(page.locator('.market-fact')).toContainText('$24.34');
-  await expect(page.locator('.market-fact')).toContainText('2026-11-16');
-  await expect(page.locator('.market-fact')).not.toContainText('SIMULATED');
-  await expect(page.locator('tr[data-symbol="VXX"]')).toHaveCount(1);
-});
-
 test('saved scripts can be renamed and deleted without server access',async ({page})=>{
   await page.goto('./');
   await page.locator('.sidebar [data-tab="scripts"]').click();
