@@ -268,18 +268,87 @@ async function initApp(){
     if(!r||!r.trades.length)return '<div class="empty">No completed trades for this strategy on the selected dataset.</div>';
     return '<div class="table-wrap"><table class="data-table"><thead><tr><th>Entry</th><th>Exit</th><th>Entry price</th><th>Exit price</th><th>Quantity</th><th>Net P&amp;L</th><th>Return</th><th>Bars</th><th>Reason</th></tr></thead><tbody>'+r.trades.slice().reverse().slice(0,300).map(t=>'<tr><td>'+dateLabel(t.entry)+'</td><td>'+dateLabel(t.exit)+'</td><td>'+format(t.buy)+'</td><td>'+format(t.sell)+'</td><td>'+format(t.qty,4)+'</td><td class="'+priceColor(t.pnl)+'">'+format(t.pnl)+'</td><td class="'+priceColor(t.pnlPct)+'">'+pct(t.pnlPct)+'</td><td>'+t.barsHeld+'</td><td>'+esc(t.reason)+'</td></tr>').join('')+'</tbody></table></div>';
   }
+  const portfolioModeControl=()=>'<div class="portfolio-mode"><label class="control">Backtest mode '+
+    select([['single','Single symbol'],['portfolio','Equal-weight portfolio']],S.portfolioMode?'portfolio':'single','data-option="portfolio-mode"')+
+    '</label><span class="muted">Portfolio runs use daily OHLCV, equal initial allocations, and independent existing-engine trades; no automatic rebalancing.</span></div>';
+  function portfolioSelection(){
+    if(S.portfolioScope==='watchlist'){
+      const list=S.watchlists.find(x=>x.id===S.portfolioWatchlistId);
+      return [...new Set((list?.symbols||[]).filter(modeSymbol))];
+    }
+    return [...S.data.keys()].filter(isVisibleSymbol).filter(sym=>screenSymbol(S.data.get(sym),S.rules).pass);
+  }
+  function portfolioBacktestView(){
+    const selections=portfolioSelection(),result=S.portfolioResult;
+    const sourceName=S.mode==='live'?'Alpaca '+String(S.liveFeed).toUpperCase()+' 1Day bars':
+      'Simulated Demo or imported daily OHLCV';
+    const namedLists=S.watchlists.map(w=>[w.id,w.name+' · '+w.symbols.length+' symbols']);
+    const controls='<div class="panel"><div class="panel-header"><h2>Portfolio selection & strategy</h2><div class="flex">'+
+      button('Run equal-weight portfolio','run-portfolio','primary')+button('Sweep portfolio parameters','view-optimize','small')+
+      button('Export portfolio breakdown','export-portfolio','small')+'</div></div><div class="panel-body">'+
+      '<div class="portfolio-pick"><label class="control">Symbol source '+
+      select([['matches','All current scan matches'],['watchlist','Named watchlist']],S.portfolioScope,'data-option="portfolio-scope"')+'</label>'+
+      (S.portfolioScope==='watchlist'?'<label class="control">Watchlist '+
+        select(namedLists,S.portfolioWatchlistId,'data-option="portfolio-watchlist"')+'</label>':'')+
+      '<strong>'+selections.length+' selected</strong></div>'+
+      (S.portfolioScope==='matches'?'<p class="section-note">Uses current Screener filter rules, including active volatility-universe restriction, but not the text search. Saved scan snapshots are not silently reused.</p>':
+        '<p class="section-note">Uses every currently loaded symbol from the selected named list. Unavailable symbols are excluded.</p>')+
+      '<div class="info-strip">Inputs: '+esc(sourceName)+'. Equal initial capital (1/N each), independent positions, no periodic rebalancing, same fee/slippage/stop/target rules as single-symbol Backtest. Daily close-aligned calendar. This is research, not order execution.</div>'+
+      btOptions()+'</div></div>';
+    const summary=result?'<div class="metrics">'+
+      metric('Total return',pct(result.metrics.returnPct),'Equal-weight initial allocations',priceColor(result.metrics.returnPct))+
+      metric('CAGR',pct(result.metrics.cagrPct),'Calendar years on common dates')+
+      metric('Sharpe',format(result.metrics.sharpe,2),'252-session annualization; RF = 0')+
+      metric('Maximum DD',pct(-result.metrics.maxDD),'Peak-to-trough portfolio equity')+
+      '</div>':'<div class="empty">Select a watchlist or matching scan symbols, then run a portfolio backtest.</div>';
+    const names=result?result.symbols.join(', '):'';
+    const rows=result?.breakdown||[];
+    const table='<div class="table-wrap"><table class="data-table"><thead><tr><th>Symbol</th><th>Daily source</th><th>Weight</th><th>Return</th><th>Trades</th><th>Win rate</th><th>Max DD</th><th>Sharpe</th></tr></thead><tbody>'+
+      rows.map(r=>'<tr><td>'+esc(r.symbol)+'</td><td>'+esc(r.source)+'</td><td>'+pct(result.weights[r.symbol]*100)+'</td><td class="'+priceColor(r.returnPct)+'">'+pct(r.returnPct)+'</td><td>'+format(r.trades,0)+'</td><td>'+pct(r.winPct)+'</td><td>'+pct(-r.maxDD)+'</td><td>'+format(r.sharpe,2)+'</td></tr>').join('')+
+      '</tbody></table></div>';
+    return head('Backtest · Portfolio','Run the same entry and exit logic across a shared daily calendar. No live trades are placed.')+
+      portfolioModeControl()+controls+
+      (S.portfolioError?'<div class="warning info-strip" role="alert">'+esc(S.portfolioError)+'</div>':'')+
+      (result?'<div class="info-strip" id="portfolio-source">Saved equal-weight portfolio · '+esc(result.sourceSummary||'Daily OHLCV from selected data')+
+        ' · '+result.symbols.length+' symbols · '+result.curve.length+' common daily bars · run '+esc(S.portfolioTimestamp||'')+
+        (result.omitted.length?' · excluded '+esc(result.omitted.join(', '))+' (too few bars)':'')+'</div>':'')+
+      summary+
+      '<div class="panel"><div class="panel-header"><h2>Combined portfolio equity vs. equal-weight buy & hold</h2></div>'+
+      (result?.curve?.length?'<div class="equity-legend"><span><i class="equity-swatch strategy"></i>Equal-weight strategy</span><span><i class="equity-swatch benchmark"></i>Equal-weight buy &amp; hold</span></div><div id="equity-chart" class="equity-plot"></div>':
+        '<div class="empty">Run a portfolio backtest to draw its combined equity curve.</div>')+'</div>'+
+      '<div class="panel"><div class="panel-header"><h2>Per-symbol breakdown</h2><span class="muted">'+rows.length+' symbols</span></div>'+
+      (rows.length?table:'<div class="empty">No portfolio runs yet.</div>')+'</div>';
+  }
+  function portfolioOptimizeView(){
+    const rows=S.portfolioSweep||[];
+    return head('Optimize · Portfolio','70% common-date training / 30% chronological holdout, same strategy on each equal-capital symbol.')+
+      portfolioModeControl()+
+      '<div class="panel"><div class="panel-header"><h2>Equal-weight portfolio sweep</h2><div class="flex">'+button('Run portfolio sweep','run-sweep','primary')+
+        button('Export portfolio sweep','export-sweep','small')+'</div></div>'+
+      '<div class="panel-body"><p class="section-note">Population: '+portfolioSelection().length+' '+(S.portfolioScope==='matches'?'current scan matches':'named watchlist symbols')+
+        '. Each parameter set is simulated independently across the same symbols; splits use aligned daily dates. Ranking on the holdout itself may overfit.</p></div></div>'+
+      '<div class="panel"><div class="panel-header"><h2>Holdout ranking</h2><span class="muted">'+rows.length+' variations</span></div><div class="table-wrap">'+
+      (rows.length?'<table class="data-table"><thead><tr><th>Parameters</th><th>Symbols</th><th>Train return</th><th>Train DD</th><th>Test return</th><th>Test DD</th><th>Test Sharpe</th><th></th></tr></thead><tbody>'+
+      rows.map((r,i)=>'<tr><td>'+esc(Object.entries(r.params).map(([k,v])=>k+'='+v).join(', '))+'</td><td>'+r.n+'</td>'+
+        '<td>'+pct(r.train.returnPct)+'</td><td>'+pct(-r.train.maxDD)+'</td><td>'+pct(r.test.returnPct)+'</td><td>'+pct(-r.test.maxDD)+'</td><td>'+format(r.test.sharpe,2)+'</td>'+
+        '<td><button class="btn small" data-action="apply-sweep" data-index="'+i+'">Apply & test</button></td></tr>').join('')+'</tbody></table>':
+        '<div class="empty">Run a portfolio sweep to compare parameter variations.</div>')+'</div></div>';
+  }
+
   function backtestView(){
+    if(S.portfolioMode)return portfolioBacktestView();
     const analysisNotice=S.result&&S.lastAnalysis?'<div class="info-strip">Saved analysis for <strong>'+esc(S.resultSymbol||S.symbol)+'</strong> · '+esc(S.resultTf||S.chart.tf)+' · '+esc(S.lastAnalysis.savedAt)+
       (S.resultSymbol!==S.symbol?' · Historical result from another symbol; select the original symbol and rerun for a matching chart.':'')+'</div>':'';
-    return head('Backtest','Signals use completed bars and next-open fills. One position at a time, long or short.',symbolSelect()+tfSelect())+
+    return head('Backtest','Signals use completed bars and next-open fills. One position at a time, long or short.',symbolSelect()+tfSelect())+portfolioModeControl()+
       '<div class="panel"><div class="panel-header"><h2>Strategy settings</h2><div class="flex">'+button('Run backtest','run-backtest','primary')+button('Optimize parameters','view-optimize')+'</div></div><div class="panel-body">'+btOptions()+'<p class="section-note">Stop-first rule when stop and target are both hit inside the same bar. Costs are modeled on each side. Short borrow fees are approximate; the engine does not model margin calls, locate availability, dividends, partial fills, taxes, or corporate actions.</p></div></div>'+
       sourceStrip()+analysisNotice+'<div class="panel"><div class="panel-header"><h2>Performance</h2><div class="flex">'+button('Export trades CSV','export-trades','small')+button('View trade markers','view-charts','small')+'</div></div><div class="panel-body">'+resultCards(S.result)+'</div></div>'+
       '<div class="panel"><div class="panel-header"><h2>Equity curve vs. buy-and-hold</h2></div>'+(S.result?.curve?.length?'<div class="equity-legend"><span><i class="equity-swatch strategy"></i>Strategy</span><span><i class="equity-swatch benchmark"></i>Buy &amp; hold</span></div><div id="equity-chart" class="equity-plot"></div>':'<div class="empty">Run a backtest to generate an equity curve.</div>')+'</div>'+
       '<div class="panel"><div class="panel-header"><h2>Trade log</h2></div>'+tradeTable(S.result)+'</div>';
   }
   function optimizeView(){
+    if(S.portfolioMode)return portfolioOptimizeView();
     const rows=S.sweep||[];
-    return head('Optimize','Parameter sweep with a 70% training / 30% chronological holdout split.',symbolSelect()+tfSelect())+
+    return head('Optimize','Parameter sweep with a 70% training / 30% chronological holdout split.',symbolSelect()+tfSelect())+portfolioModeControl()+
       '<div class="panel"><div class="panel-header"><h2>Run sweep</h2><div class="flex"><label class="control">Strategy '+select([['ema-cross','EMA cross'],['rsi-revert','RSI reversion'],['trend-rsi','Trend + RSI'],['bollinger','Bollinger'],['breakout','Breakout'],['pine-custom','Pine Script strategy']],S.bt.strategy,'data-bt="strategy"')+'</label>'+button('Run 5–9 variations','run-sweep','primary')+button('Export CSV','export-sweep','small')+'</div></div><div class="panel-body"><p class="section-note">Each variation is trained on the first 70% of the dataset and independently simulated on the last 30%, using earlier bars only for indicator warm-up. The table sorts by holdout return. Choosing the best holdout result itself introduces selection bias; confirm on unseen data.</p></div></div>'+
       '<div class="panel"><div class="panel-header"><h2>Parameter ranking</h2><span class="muted">'+rows.length+' variations</span></div><div class="table-wrap">'+(rows.length?'<table class="data-table"><thead><tr><th>Parameters</th><th>Train return</th><th>Train DD</th><th>Test return</th><th>Test DD</th><th>Test trades</th><th>Test PF</th><th></th></tr></thead><tbody>'+rows.map((r,i)=>'<tr class="'+(i===0?'sweep-best':'')+'"><td>'+esc(Object.entries(r.params).map(([k,v])=>k+'='+v).join(', '))+'</td><td class="'+priceColor(r.train.returnPct)+'">'+pct(r.train.returnPct)+'</td><td>-'+format(r.train.maxDD)+'%</td><td class="'+priceColor(r.test.returnPct)+'">'+pct(r.test.returnPct)+'</td><td>-'+format(r.test.maxDD)+'%</td><td>'+r.test.trades+'</td><td>'+format(r.test.profitFactor)+'</td><td><button class="btn small" data-action="apply-sweep" data-index="'+i+'">Apply & test</button></td></tr>').join('')+'</tbody></table>':'<div class="empty"><strong>No sweep yet</strong>Choose a strategy and run a parameter sweep.</div>')+'</div></div>';
   }
