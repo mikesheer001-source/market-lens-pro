@@ -27,6 +27,10 @@ const MARKET_ETFS = [
   'XLY','XLU','XBI','SMH','TLT','GLD','HYG','LQD'
 ];
 
+export const LIVE_EQUITY_COUNT = LIQUID_US_SYMBOLS.length;
+export const LIVE_ETF_COUNT = MARKET_ETFS.length;
+export const LIVE_VOLATILITY_COUNT = VOLATILITY_UNIVERSE.filter(s=>s!=='DEMO-VXX').length;
+
 export const LIVE_UNIVERSE = Object.freeze(
   [...new Set([...LIQUID_US_SYMBOLS,...MARKET_ETFS,...VOLATILITY_UNIVERSE.filter(s=>s!=='DEMO-VXX')])]
 );
