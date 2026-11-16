@@ -1594,6 +1594,27 @@ async function initApp(){
     'range-1y':()=>showRange(S.chart.tf==='D'?252:52),
     'range-all':()=>showRange(0),
     'range-fit':()=>showRange(180),
+    'reset-price-scale':()=>{
+      if(resetPriceScale(chart)){
+        const hint=$('#chart-axis-hint');
+        if(hint)hint.textContent='Price scale reset · drag the price scale to rescale';
+      }
+    },
+    'chart-fullscreen':()=>setChartFullscreen(true),
+    'chart-exit-fullscreen':()=>setChartFullscreen(false),
+    'indicator-settings':el=>{
+      preserveChartViewport();
+      S.indicatorEditor=S.indicatorEditor===el.dataset.indicatorKey?null:el.dataset.indicatorKey;
+      render();
+      const current=S.indicatorEditor;
+      if(current)document.querySelector('#indicator-settings-'+current+' input')?.focus();
+      else document.querySelector('[data-action="indicator-settings"][data-indicator-key="'+el.dataset.indicatorKey+'"]')?.focus();
+    },
+    'indicator-close':()=>{
+      const id=S.indicatorEditor;
+      preserveChartViewport();S.indicatorEditor=null;render();
+      if(id)document.querySelector('[data-action="indicator-settings"][data-indicator-key="'+id+'"]')?.focus();
+    },
     'draw-line':()=>{S.drawLine=!S.drawLine;render();},
     'clear-lines':()=>{S.chart.lines[S.symbol]=[];render();},
     'chart-png':()=>{if(!chart)return;try{const canvas=chart.takeScreenshot();canvas.toBlob(blob=>{if(!blob)return;const url=URL.createObjectURL(blob),a=document.createElement('a');a.href=url;a.download='market-lens-'+S.symbol+'.png';a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);});}catch{notice('Chart image export is unsupported in this browser.');}},
@@ -1681,6 +1702,15 @@ async function initApp(){
     if(row&&(ev.key==='Enter'||ev.key===' ')&&!ev.target.closest('button,input,select')){
       ev.preventDefault();restoreSymbolState(row.dataset.symbol);S.tab='charts';render();
     }
+    if(ev.key==='Escape'&&S.chartFullscreen&&S.tab==='charts'){
+      ev.preventDefault();setChartFullscreen(false);return;
+    }
+    if(ev.key==='Escape'&&S.indicatorEditor){
+      const key=S.indicatorEditor;
+      preserveChartViewport();S.indicatorEditor=null;render();
+      document.querySelector('[data-action="indicator-settings"][data-indicator-key="'+key+'"]')?.focus();
+      return;
+    }
     if(ev.key==='Escape'&&S.drawLine){S.drawLine=false;render();}
   });
   document.addEventListener('input',ev=>{
@@ -1741,7 +1771,17 @@ async function initApp(){
       render();return;
     }
     if(el.dataset.rule!==undefined){clearSavedScanView();const r=S.rules[Number(el.dataset.rule)];if(r){r[el.dataset.key]=el.dataset.key==='value'?Number(el.value):el.value;render();}return;}
-    if(el.dataset.chart){const key=el.dataset.chart;S.chart[key]=el.type==='checkbox'?el.checked:el.type==='number'?Math.max(2,Math.round(Number(el.value)||14)):el.value;render();return;}
+    if(el.dataset.indicatorKey&&el.dataset.indicatorField){
+      const key=el.dataset.indicatorKey,field=el.dataset.indicatorField;
+      S.chart=updateIndicatorSetting(S.chart,key,field,el.type==='checkbox'?el.checked:el.value);
+      if(field==='enabled'&&!S.chart[key])S.indicatorEditor=null;
+      preserveChartViewport();saveSettings();render();return;
+    }
+    if(el.dataset.chart){
+      preserveChartViewport();
+      S.chart=updateChartField(S.chart,el.dataset.chart,el.type==='checkbox'?el.checked:el.value);
+      saveSettings();render();return;
+    }
     if(el.dataset.btRange){
       S.btRange={...S.btRange,[el.dataset.btRange]:el.value};
       S.backtestError='';S.portfolioError='';saveSettings();render();return;
