@@ -33,7 +33,8 @@ function snapAlert(alert,sourceFor,barFor){
 export function compileDailyBriefing({
   generatedAt=new Date().toISOString(),scan,data,sources,rules=[],symbols,
   feed='iex',signalSelection='none',strategyName=null,signals=new Map(),
-  flips=[],hasFlipBaseline=false,alerts=[],freshness=null,diagnostics={}
+  flips=[],hasFlipBaseline=false,alerts=[],freshness=null,diagnostics={},
+  strategyLeaders=null,strategyLeadersError=null
 }){
   if(scan?.status!=='complete'||scan.source!=='ALPACA')
     throw Error('A completed live Alpaca scan is required. Demo and saved scans are not live briefings.');
@@ -75,6 +76,8 @@ export function compileDailyBriefing({
     scan:{loaded:Number(scan.returned??liveSymbols.length),requested:Number(scan.requested??symbols.length),
       scope:symbols.length,matched:matches.length,barDate:maxDate,source},
     matches,
+    strategyLeaders:strategyLeaders||null,
+    strategyLeadersError:strategyLeadersError||null,
     strategy:{id:selected?signalSelection:null,name:selected?strategyName:null,
       source,barDate:longSignals.map(x=>x.barDate).filter(Boolean).sort().at(-1)||maxDate,
       baselineAvailable:selected&&hasFlipBaseline,long:longSignals,flips:validFlips},
@@ -90,6 +93,29 @@ export function compileDailyBriefing({
   };
 }
 const num=(value,digits=2)=>finite(value)?value.toFixed(digits):'N/A';
+export function briefingLeaderLines(b){
+  const leaders=b?.strategyLeaders,rolling=leaders?.rolling,full=leaders?.fullPeriod;
+  const prefix=leaders?.symbol?
+    leaders.symbol+' '+(leaders.timeframe||'D')+
+    (leaders.dateRange?.startDate||leaders.dateRange?.endDate?
+      ' ('+(leaders.dateRange.startDate||'first')+' to '+
+        (leaders.dateRange.endDate||'latest')+')':' (full range)'):
+    'No current strategy comparison';
+  const validated=rolling?
+    'Top validated strategy (rolling OOS): '+rolling.name+
+      ' · rolling mean OOS Sharpe '+num(rolling.meanSharpe,3)+
+      ' · '+rolling.positiveWindows+'/'+rolling.totalWindows+' windows positive'+
+      ' ('+rolling.assessableWindows+'/'+rolling.totalWindows+' assessable)'+
+      ' · '+rolling.reasons.join(' OR ')+' · '+prefix:
+    'Top validated strategy (rolling OOS): No validated strategy with a numeric rolling mean on this window.'+
+      (b?.strategyLeadersError?' '+b.strategyLeadersError:'')+
+      ' · '+prefix;
+  const fullPeriod=full?
+    'Full-period best (full-period Sharpe): '+full.name+
+      ' · full-period Sharpe '+num(full.sharpe,3)+' · '+prefix:
+    'Full-period best (full-period Sharpe): Unavailable · '+prefix;
+  return {validated,fullPeriod};
+}
 const money=value=>finite(value)?'$'+num(value):'N/A';
 const pct=value=>finite(value)?num(value)+'%':'N/A';
 export function briefingToText(b){
@@ -105,6 +131,8 @@ export function briefingToText(b){
       b.matches.map(x=>x.symbol+' '+money(x.price)+' RSI 5D '+num(x.rsi5,1)+
         ' ['+(x.barDate||'N/A')+']').join('; '):'None'),
     'Strategy: '+(b.strategy.name||'Not selected'),
+    briefingLeaderLines(b).validated,
+    briefingLeaderLines(b).fullPeriod,
     'LONG ('+b.strategy.long.length+'): '+(b.strategy.name?
       (b.strategy.long.map(x=>x.symbol+' ['+(x.barDate||'N/A')+']').join(', ')||'None'):
       'Unavailable — select a strategy'),
