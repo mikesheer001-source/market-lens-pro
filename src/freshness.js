@@ -114,7 +114,7 @@ export function explainStaleSymbol(entry,diagnostic){
   if(diagnostic.retryFailed)return 'Alpaca retry failed; newer bars not verified';
   if(diagnostic.barsAfterLatest===true)return 'Alpaca returned a newer bar but it is still older than the required session';
   if(diagnostic.barsAfterLatest===false){
-    const parsed=/^\\d{4}-\\d{2}-\\d{2}$/.test(date)?new Date(date+'T00:00:00Z'):null;
+    const parsed=/^[0-9]{4}-[0-9]{2}-[0-9]{2}$/.test(date)?new Date(date+'T00:00:00Z'):null;
     const human=parsed&&Number.isFinite(parsed.valueOf())?
       new Intl.DateTimeFormat('en-US',{timeZone:'UTC',month:'short',day:'numeric',year:'numeric'}).format(parsed):date;
     return 'Alpaca returns no bars after '+human+' ('+date+') on this feed';
