@@ -31,7 +31,7 @@ export function normalizeStartupPreferences(saved={}){
   const lastBacktestSymbol=typeof saved.lastBacktestSymbol==='string'&&saved.lastBacktestSymbol?
     saved.lastBacktestSymbol:null;
   const lastSymbol=typeof saved.lastSymbol==='string'&&saved.lastSymbol?saved.lastSymbol:null;
-  const tab=['screener','charts','backtest','optimize','scripts','data','volatility'].includes(saved.tab)?
+  const tab=['screener','briefing','charts','backtest','optimize','scripts','data','volatility'].includes(saved.tab)?
     saved.tab:'screener';
   const liveCandidate=[lastBacktestSymbol,lastSymbol,lastLiveSymbol].find(x=>x&&!x.startsWith('DEMO-'));
   return {mode,tab,lastDemoSymbol,lastLiveSymbol,lastBacktestSymbol,lastSymbol,
