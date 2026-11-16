@@ -16,6 +16,7 @@ test('Round 12 mocks Alpaca ONLY IN TEST to verify 133-symbol fit table, sorting
   await page.goto('./');
   await page.locator('.sidebar [data-tab="backtest"]').click();
   await expect(page.locator('[data-action="fit-universe"]')).toBeVisible();
+  await page.locator('[data-bt="strategy"]').selectOption('breakout');
   await page.locator('[data-action="fit-universe"]').click();
   await expect(page.locator('.fit-table tbody tr')).toHaveCount(133,{timeout:45000});
   await expect(page.locator('#fit-source')).toContainText('133/133 symbols backtested');
