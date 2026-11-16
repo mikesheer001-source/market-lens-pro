@@ -1,5 +1,6 @@
 import { LIVE_UNIVERSE, ALPACA_BATCH_SIZE, ALPACA_SCAN_LOOKBACK_DAYS, ALPACA_SCAN_CACHE_SECONDS } from "../src/universe.js";
 import { expectedNyseBarDate, freshnessWithUniverse } from "../src/freshness.js";
+import {LIVE_SCAN_CACHE_REVISION} from "../src/live-history.js";
 
 const DEFAULT_ORIGINS = [
   "https://mikesheer001-source.github.io",
@@ -103,7 +104,10 @@ export default {
         provider: "alpaca",
         configured: Boolean(env.ALPACA_API_KEY && env.ALPACA_API_SECRET),
         feed: env.ALPACA_DATA_FEED || "iex",
-        service: "market-lens-pro-api"
+        service: "market-lens-pro-api",
+        daily_lookback_days: ALPACA_SCAN_LOOKBACK_DAYS,
+        scan_cache_revision: LIVE_SCAN_CACHE_REVISION,
+        scan_cache_seconds: ALPACA_SCAN_CACHE_SECONDS
       }, 200, origin, env);
     }
 
@@ -218,7 +222,7 @@ export default {
       const expectedTradingDay=expectedNyseBarDate(new Date());
       const cacheUrl = new URL("/api/stocks/scan", url.origin);
       cacheUrl.searchParams.set("feed", feed);
-      cacheUrl.searchParams.set("universe_revision", "2026-11-17-round19-five-year-history");
+      cacheUrl.searchParams.set("universe_revision", LIVE_SCAN_CACHE_REVISION);
       cacheUrl.searchParams.set("expected_trading_day",expectedTradingDay);
       cacheUrl.searchParams.set("origin", origin || "none");
       const cacheKey = new Request(cacheUrl.toString(), { method: "GET" });
@@ -360,6 +364,7 @@ export default {
         batch_size: ALPACA_BATCH_SIZE,
         batches: batches.length,
         lookback_days: ALPACA_SCAN_LOOKBACK_DAYS,
+        scan_cache_revision: LIVE_SCAN_CACHE_REVISION,
         scan_duration_ms: Date.now()-scanStartedAt,
         start,
         end,
