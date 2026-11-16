@@ -20,6 +20,7 @@ test('Round 13 live Daily Briefing compiles real-source fields, copies text and 
     status:200,contentType:'application/json',body:JSON.stringify(fixture)
   }));
   await page.goto('./');
+  await page.locator('[data-option="preset"]').selectOption('all');
   await page.locator('.sidebar [data-tab="briefing"]').click();
   await expect(page.getByRole('heading',{name:'Briefing'})).toBeVisible();
   await expect(page.locator('#briefing-history')).toContainText('No saved daily briefings');
