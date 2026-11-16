@@ -68,7 +68,7 @@ If it reports a missing secret, add the exact missing name above and rerun it. T
 5. Click **Test backend** to confirm the Worker and its encrypted Alpaca secrets are ready.
 6. Click **Scan live universe & switch to Live**, or use the top-bar **Live** switch. The app fetches the bundled universe and displays the symbols with returned bars.
 7. Use **Refresh live scan** in the Screener to refresh the universe. Repeated scans within 15 minutes are served from the Worker cache rather than sending another batch of Alpaca requests.
-8. Use the **VXX / Volatility** screener preset to restrict results to 11 entries: the 10 live tickers VXX, UVXY, SVXY, VIXY, VIXM, VXZ, SVIX, UVIX, ZIVB and ZVOL, plus the synthetic DEMO-VXX proxy in Demo mode. It applies daily RSI below 60, 252-session drawdown below -5%, and price below daily EMA200. Demo mode scans 4 synthetic symbols; with the Oversold preset it returns one match, DEMO-COIN.
+8. Use the **VXX / Volatility** screener preset to restrict results to 11 entries: the 10 live tickers VXX, UVXY, SVXY, VIXY, VIXM, VXZ, SVIX, UVIX, SVOL and ZVOL, plus the synthetic DEMO-VXX proxy in Demo mode. It applies daily RSI below 60, 252-session drawdown below -5%, and price below daily EMA200. Demo mode scans 4 synthetic symbols; with the Oversold preset it returns one match, DEMO-COIN.
 
 The Worker health endpoint reports only whether credentials are configured and which feed is selected; it never returns the keys. The browser sends requests to the Worker, not directly to Alpaca.
 
