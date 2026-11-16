@@ -64,7 +64,7 @@ If it reports a missing secret, add the exact missing name above and rerun it. T
 1. In Cloudflare **Workers & Pages**, open market-lens-pro-api.
 2. Copy its workers.dev URL. It will look like https://market-lens-pro-api.<your-workers-subdomain>.workers.dev.
 3. Open Market Lens Pro, then **Data Center**.
-4. Paste that public Worker URL into **Cloudflare Worker API URL**. This URL is not a secret.
+4. The production website pre-populates the public URL **https://market-lens-pro-api.mikesheer001.workers.dev**. You can replace it if you run a different Worker. The URL is not a secret.
 5. Click **Test backend** to confirm the Worker and its encrypted Alpaca secrets are ready.
 6. Click **Scan live universe & switch to Live**, or use the top-bar **Live** switch. The app fetches the bundled universe and displays the symbols with returned bars.
 7. Use **Refresh live scan** in the Screener to refresh the universe. Repeated scans within 15 minutes are served from the Worker cache rather than sending another batch of Alpaca requests.
@@ -79,4 +79,4 @@ The Worker health endpoint reports only whether credentials are configured and w
 - .github/workflows/deploy-worker.yml: manual deployment using GitHub Secrets and Cloudflare Wrangler.
 - ALPACA_API_KEY and ALPACA_API_SECRET: encrypted Worker secrets after deployment.
 
-The Cloudflare Worker is **not deployed until the four GitHub secrets are added and the workflow is run**. The GitHub Pages front end can be deployed and used in Demo mode without any of those credentials. Demo scanning uses exactly four deterministic synthetic sample symbols. With the Oversold preset it currently returns one match, DEMO-COIN. The VXX preset can return a match for DEMO-VXX, but that is a simulated test case, not a real market quote.
+The production Cloudflare Worker **was redeployed successfully on November 16, 2026** at https://market-lens-pro-api.mikesheer001.workers.dev. The GitHub Actions post-deployment smoke test confirmed 133/133 real Alpaca symbols including SVOL and an actual dated VXX daily close. For a different Cloudflare account, the Worker still requires the four GitHub secrets and the manual workflow. The GitHub Pages front end can be deployed and used in Demo mode without any of those credentials. Demo scanning uses exactly four deterministic synthetic sample symbols. With the Oversold preset it currently returns one match, DEMO-COIN. The VXX preset can return a match for DEMO-VXX, but that is a simulated test case, not a real market quote.
