@@ -164,7 +164,7 @@ function backtest(bars,opts={}){
   const fee=Math.max(0,Number(opts.feeBps??1))/10000,slip=Math.max(0,Number(opts.slipBps??2))/10000,stop=Math.max(0,Number(opts.stopPct||0))/100,target=Math.max(0,Number(opts.targetPct||0))/100;
   const side=opts.side==='short'?'short':'long',annualPeriods=opts.timeframe==='W'?52:opts.timeframe==='M'?12:252,borrowRate=side==='short'?Math.max(0,Number(opts.borrowAnnualPct||0))/100/annualPeriods:0;
   if(valid.length<3||start>end)return {metrics:{trades:0,returnPct:0,maxDD:0,profitFactor:null,sharpe:null,winPct:null},curve:[],trades:[],notice:'Not enough price bars'};
-  const signals=signalSets(valid,opts);let cash=initial,pos=null,peak=initial,maxDD=0,exposed=0;const curve=[],trades=[];
+  const signals=opts.customSignals||signalSets(valid,opts);let cash=initial,pos=null,peak=initial,maxDD=0,exposed=0;const curve=[],trades=[];
   function close(i,raw,reason){
     if(!pos)return;
     const price=raw*(side==='short'?1+slip:1-slip);
@@ -177,7 +177,7 @@ function backtest(bars,opts={}){
   }
   for(let i=start;i<=end;i++){
     const b=valid[i];
-    const shouldExit=side==='long'?signals.sell[i-1]:signals.buy[i-1];
+    const shouldExit=side==='long'?(signals.closeLong?.[i-1]||signals.sell[i-1]):(signals.closeShort?.[i-1]||signals.buy[i-1]);
     const shouldEnter=side==='long'?signals.buy[i-1]:signals.sell[i-1];
     if(pos&&shouldExit)close(i,b.open,'Signal');
     if(!pos&&shouldEnter&&cash>0){
@@ -185,12 +185,13 @@ function backtest(bars,opts={}){
       const qty=Math.min(budget,cash)/(price*(1+fee));
       if(qty>0){const entryFee=qty*price*fee,reserved=qty*price,cost=reserved+entryFee;cash-=cost;pos={qty,price,cost,index:i,reserved,entryFee,borrow:0};}
     }
-    if(pos&&(stop||target)){
-      const stopLevel=side==='short'?pos.price*(1+stop):pos.price*(1-stop);
-      const targetLevel=side==='short'?pos.price*(1-target):pos.price*(1+target);
-      // If both intrabar stop and target trigger, assume stop hits first.
-      if(stop&&(side==='short'?b.high>=stopLevel:b.low<=stopLevel))close(i,side==='short'?Math.max(b.open,stopLevel):Math.min(b.open,stopLevel),'Stop');
-      else if(target&&(side==='short'?b.low<=targetLevel:b.high>=targetLevel))close(i,side==='short'?Math.min(b.open,targetLevel):Math.max(b.open,targetLevel),'Target');
+    const scriptedStop=opts.customSignals?.stop?.[i-1],scriptedLimit=opts.customSignals?.limit?.[i-1];
+    const stopLevel=Number.isFinite(scriptedStop)&&scriptedStop>0?scriptedStop:stop?(side==='short'?pos?.price*(1+stop):pos?.price*(1-stop)):null;
+    const targetLevel=Number.isFinite(scriptedLimit)&&scriptedLimit>0?scriptedLimit:target?(side==='short'?pos?.price*(1-target):pos?.price*(1+target)):null;
+    if(pos&&(stopLevel!=null||targetLevel!=null)){
+      // The same conservative stop-before-target policy applies to Pine strategy.exit orders.
+      if(stopLevel!=null&&(side==='short'?b.high>=stopLevel:b.low<=stopLevel))close(i,side==='short'?Math.max(b.open,stopLevel):Math.min(b.open,stopLevel),'Stop');
+      else if(targetLevel!=null&&(side==='short'?b.low<=targetLevel:b.high>=targetLevel))close(i,side==='short'?Math.min(b.open,targetLevel):Math.max(b.open,targetLevel),'Target');
     }
     if(pos&&borrowRate){const interest=pos.qty*b.close*borrowRate;cash-=interest;pos.borrow+=interest;}
     if(pos)exposed++;
