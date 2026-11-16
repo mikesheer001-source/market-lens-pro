@@ -179,11 +179,11 @@ test('published Round 20 fullscreen Chart Lab, indicator gear, and right-axis re
   await page.locator('.sidebar [data-tab="charts"]').click();
   await expect(page.locator('#price-chart canvas').first()).toBeVisible();
   await expect(page.locator('#chart-indicator-legend')).toBeVisible();
-  await expect(page.getByRole('button',{name:'Settings for EMA 20'})).toBeVisible();
+  await expect(page.getByRole('button',{name:'Settings for EMA 20',exact:true})).toBeVisible();
   await page.locator('[data-action="chart-fullscreen"]').click();
   await expect(page.locator('#chart-lab-panel')).toHaveAttribute('data-fullscreen','true');
   await expect(page.locator('#price-chart canvas').first()).toBeVisible();
-  await page.getByRole('button',{name:'Settings for EMA 20'}).click();
+  await page.getByRole('button',{name:'Settings for EMA 20',exact:true}).click();
   await expect(page.locator('#indicator-settings-ema20')).toBeVisible();
   await page.locator('[data-indicator-field="ema20Len"]').fill('32');
   await page.locator('[data-indicator-field="ema20Len"]').press('Tab');
