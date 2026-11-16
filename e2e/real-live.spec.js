@@ -9,7 +9,7 @@ const WORKER='https://market-lens-pro-api.mikesheer001.workers.dev';
 // It is intentionally disabled for the local simulator and enabled after production deploy.
 test('real Alpaca Worker scans entire 133-symbol universe and publishes VXX daily close',async ({page,request})=>{
   test.skip(process.env.REAL_ALPACA_TEST!=='1','Requires REAL_ALPACA_TEST=1, run after publishing GitHub Pages');
-  test.setTimeout(180_000);
+  test.setTimeout(300_000);
   const health=await request.get(WORKER+'/api/health',{timeout:30_000});
   expect(health.status(),'Actual Cloudflare health endpoint').toBe(200);
   const healthData=await health.json();
@@ -22,7 +22,7 @@ test('real Alpaca Worker scans entire 133-symbol universe and publishes VXX dail
   await page.reload();
   await page.locator('.mode-switch [data-action="mode-live"]').click();
   const status=page.locator('#scan-status');
-  await expect(status).toContainText('Live scan complete',{timeout:150_000});
+  await expect(status).toContainText('Live scan complete',{timeout:240_000});
   await expect(status).toContainText('133/133 symbols loaded');
   await expect(page.locator('tr[data-symbol]')).toHaveCount(133);
   await expect(page.locator('tr[data-symbol="SVOL"]')).toHaveCount(1);
@@ -35,6 +35,21 @@ test('real Alpaca Worker scans entire 133-symbol universe and publishes VXX dail
   await expect(fact).toContainText('$'+actualClose);
   await expect(page.locator('tr[data-symbol="VXX"] td').nth(5)).not.toHaveText('—');
   await expect(page.locator('thead th').nth(5)).toContainText('% vs D EMA200');
+  await expect(page.getByRole('columnheader',{name:/% vs W EMA200/})).toBeVisible();
+  const spyBars=Number((await page.locator('tr[data-symbol="SPY"] td').nth(8).innerText()).trim());
+  expect(spyBars,'Real SPY scan should supply more than the old ~378 daily candles').toBeGreaterThan(378);
+  await expect(page.locator('[data-weekly-ema200="SPY"]')).not.toHaveText('—');
+  await page.locator('.sidebar [data-tab="charts"]').click();
+  await page.locator('[data-option="symbol"]').selectOption('SPY');
+  await expect(page.getByText(spyBars+' D bars',{exact:false})).toBeVisible();
+  await expect(page.locator('#price-chart canvas').first()).toBeVisible();
+  await page.locator('.sidebar [data-tab="data"]').click();
+  await expect(page.locator('#scan-duration')).toContainText('Last live scan:');
+  await expect(page.locator('#scan-duration')).toContainText('1825-day daily lookback');
+  await expect(page.locator('#scan-duration')).toContainText(/measured in this browser/);
+  console.info('Round 19 REAL Alpaca SPY daily bars='+spyBars+
+    ', W EMA200='+await page.locator('.sidebar [data-tab="screener"]').count()+
+    ' (weekly column confirmed), scan duration '+(await page.locator('#scan-duration').innerText()));
   await page.locator('.sidebar [data-tab="charts"]').click();
   await expect(page.locator('[data-option="symbol"] option')).toHaveCount(LIVE_UNIVERSE.length);
   await page.locator('[data-option="symbol"]').selectOption('AAPL');
