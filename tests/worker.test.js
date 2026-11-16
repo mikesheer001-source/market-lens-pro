@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import worker from '../worker/index.js';
+import { LIVE_UNIVERSE, ALPACA_BATCH_SIZE } from '../src/universe.js';
 
 const allowed = 'https://mikesheer001-source.github.io';
 const base = 'https://market-lens-pro-api.example.workers.dev';
@@ -74,4 +75,56 @@ test('bars endpoint rejects browser origins outside the configured allowlist', a
     ALPACA_API_KEY:'key',ALPACA_API_SECRET:'secret',ALLOWED_ORIGINS:allowed
   });
   assert.equal(response.status,403);
+});
+
+test('market scan batches the bundled universe and caches the Alpaca response', async () => {
+  const originalFetch=globalThis.fetch,originalCaches=globalThis.caches;
+  const cached=new Map(),batches=[];
+  let upstreamCalls=0;
+  globalThis.caches={default:{
+    match:async request=>cached.get(request.url)?.clone()||null,
+    put:async (request,response)=>{cached.set(request.url,response.clone());}
+  }};
+  globalThis.fetch=async (url,options)=>{
+    const parsed=new URL(url),symbols=(parsed.searchParams.get('symbols')||'').split(',').filter(Boolean);
+    upstreamCalls+=1;batches.push(symbols);
+    assert.equal(parsed.hostname,'data.alpaca.markets');
+    assert.equal(parsed.pathname,'/v2/stocks/bars');
+    assert.equal(parsed.searchParams.get('timeframe'),'1Day');
+    assert.equal(parsed.searchParams.get('feed'),'iex');
+    assert.equal(options.headers['APCA-API-KEY-ID'],'scan-key');
+    return new Response(JSON.stringify({
+      bars:Object.fromEntries(symbols.map(symbol=>[symbol,[{t:'2026-11-13T00:00:00Z',o:100,h:101,l:99,c:100,v:1000}]])),
+      next_page_token:null
+    }),{status:200,headers:{'Content-Type':'application/json'}});
+  };
+  try {
+    const request=()=>new Request(base+'/api/stocks/scan?feed=iex',{headers:{Origin:allowed,'CF-Connecting-IP':'198.51.100.88'}});
+    const env={ALPACA_API_KEY:'scan-key',ALPACA_API_SECRET:'scan-secret',ALPACA_DATA_FEED:'iex',ALLOWED_ORIGINS:allowed};
+    const expectedBatches=Math.ceil(LIVE_UNIVERSE.length/ALPACA_BATCH_SIZE);
+    const first=await worker.fetch(request(),env),body=await first.json();
+    assert.equal(first.status,200);
+    assert.equal(first.headers.get('X-Scan-Cache'),'MISS');
+    assert.equal(body.requested,LIVE_UNIVERSE.length);
+    assert.equal(body.returned,LIVE_UNIVERSE.length);
+    assert.ok(body.bars.VXX?.length);
+    assert.equal(upstreamCalls,expectedBatches);
+    assert.ok(batches.every(batch=>batch.length<=ALPACA_BATCH_SIZE));
+    assert.deepEqual(batches.flat(),LIVE_UNIVERSE);
+    const second=await worker.fetch(request(),env);
+    assert.equal(second.status,200);
+    assert.equal(second.headers.get('X-Scan-Cache'),'HIT');
+    assert.equal(upstreamCalls,expectedBatches,'a cached scan must not make more Alpaca requests');
+  } finally {
+    globalThis.fetch=originalFetch;
+    if(originalCaches===undefined)delete globalThis.caches;else globalThis.caches=originalCaches;
+  }
+});
+
+test('market scan refuses to run without server-side Alpaca credentials', async () => {
+  const response=await worker.fetch(new Request(base+'/api/stocks/scan',{headers:{Origin:allowed,'CF-Connecting-IP':'198.51.100.89'}}),{
+    ALLOWED_ORIGINS:allowed
+  });
+  assert.equal(response.status,503);
+  assert.match((await response.json()).error,/not configured/i);
 });
