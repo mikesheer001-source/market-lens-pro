@@ -138,7 +138,34 @@ test('real Alpaca scan exposes latest-bar freshness and dated computed strategy 
   await page.reload();
   await page.locator('.mode-switch [data-action="mode-live"]').click();
   await expect(page.locator('#scan-status')).toContainText('133/133 symbols loaded',{timeout:150000});
-  await expect(page.locator('#scan-freshness')).toContainText('expected NYSE session '+payload.freshness.expected);
+  const barDates=Object.values(payload.bars).map(bars=>bars?.at(-1)?.t?.slice(0,10)).filter(Boolean);
+  const counts=new Map();
+  for(const day of barDates)counts.set(day,(counts.get(day)||0)+1);
+  const observedReference=[...counts].sort((a,b)=>b[1]-a[1]||b[0].localeCompare(a[0]))[0][0];
+  expect(payload.freshness.expected).toBe(observedReference);
+  await expect(page.locator('#scan-freshness')).toContainText('reference latest-bar session '+observedReference);
+  await expect(page.locator('#scan-freshness')).toContainText(
+    String(payload.freshness.checked-payload.freshness.stale.length)+'/133 current'
+  );
+  // If the real Worker still observes a VXZ gap, verify the actual asset/bar
+  // diagnosis on every page. This conditional avoids failing when Alpaca
+  // eventually publishes VXZ's delayed bar.
+  const vxzLag=payload.freshness.stale.find(x=>x.symbol==='VXZ');
+  if(vxzLag&&payload.diagnostics?.VXZ?.barsAfterLatest===false){
+    const human=new Intl.DateTimeFormat('en-US',{
+      timeZone:'UTC',month:'short',day:'numeric',year:'numeric'
+    }).format(new Date(vxzLag.latest+'T00:00:00Z'));
+    const warning='Alpaca returns no bars after '+human+' ('+vxzLag.latest+') on this feed';
+    await expect(page.locator('tr[data-symbol="VXZ"] .fresh-date')).toContainText(warning);
+    await page.locator('.sidebar [data-tab="data"]').click();
+    await expect(page.locator('#data-freshness [data-data-stale-symbol="VXZ"]')).toContainText(warning);
+    await page.locator('.sidebar [data-tab="charts"]').click();
+    await page.locator('[data-option="symbol"]').selectOption('VXZ');
+    await expect(page.locator('#chart-stale-warning')).toContainText(warning);
+    await page.locator('.sidebar [data-tab="volatility"]').click();
+    await expect(page.locator('tr[data-vol-symbol="VXZ"]')).toContainText(warning);
+    await page.locator('.sidebar [data-tab="screener"]').click();
+  }
   await expect(page.locator('tr[data-symbol="VXX"] .fresh-date')).toHaveText(rawVxx);
   await expect(page.locator('tbody tr[data-symbol]')).toHaveCount(133);
   await page.locator('[data-option="signal-strategy"]').selectOption('preset:ema-cross');
