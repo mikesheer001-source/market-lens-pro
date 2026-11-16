@@ -122,6 +122,7 @@ async function initApp(){
     return alertsBanner;
   }
   function activeSnapshotBanner(){
+    const loaded=S.savedScanView;
     const snapshotNote=loaded?'<div class="info-strip warning" role="status">Showing saved scan snapshot: '+esc(loaded.name)+' from '+esc(loaded.savedAt)+' ('+esc(loaded.source)+'). These are archived values, not live quotes. Select Scan/Refresh to replace the snapshot.</div>':'';
     return snapshotNote;
   }
