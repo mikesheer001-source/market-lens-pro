@@ -295,3 +295,12 @@ tr[data-vol-symbol] td:nth-child(3){min-width:138px}
 .result-range{font-weight:600;margin-top:6px;color:var(--text)}
 #portfolio-methodology{margin-top:16px}
 @media(max-width:720px){.bt-date-window input[type=date]{width:100%}}
+
+/* Round 16: out-of-sample validation is a meaningful status, not a decoration. */
+.oos-validated{display:inline-block;font-size:11px;font-weight:700;line-height:1.35;
+  border:1px solid #3e986e;background:rgba(46,160,104,.12);color:#61d6a1;
+  padding:3px 7px;border-radius:5px;white-space:nowrap}
+.oos-note{display:block;color:#e0b970;font-size:11px;line-height:1.45;
+  min-width:135px;max-width:225px;overflow-wrap:anywhere}
+.leaderboard-table th,.fit-table th,#portfolio-breakdown th{white-space:normal;min-width:82px}
+#walk-forward-summary{margin:12px 0 0;line-height:1.6}
