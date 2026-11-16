@@ -72,14 +72,14 @@ test('saved scan restores exact rule set and archived filtered rows after reload
   await page.locator('[data-action="save-scan"]').click();
   await expect(page.locator('[data-option="saved-scan-select"] option')).toHaveCount(2);
   await page.locator('[data-option="preset"]').selectOption('all');
-  await expect(page.locator('tbody tr[data-symbol]')).toHaveCount(1); // only-matches still checked
+  await expect(page.locator('tbody tr[data-symbol]')).toHaveCount(4); // no rules: every symbol is a match
   await page.locator('[data-option="matches"]').uncheck();
   await expect(page.locator('tbody tr[data-symbol]')).toHaveCount(4);
   const id=await page.locator('[data-option="saved-scan-select"] option').last().getAttribute('value');
   await page.locator('[data-option="saved-scan-select"]').selectOption(id);
   await expect(page.locator('tbody tr[data-symbol]')).toHaveCount(1);
   await expect(page.locator('tbody tr[data-symbol="DEMO-COIN"]')).toBeVisible();
-  await expect(page.getByText(/Showing saved scan snapshot:/)).toContainText('Historical');
+  await expect(page.getByText(/Showing saved scan snapshot:/)).toContainText('archived values');
   await page.reload();
   await page.locator('[data-option="saved-scan-select"]').selectOption(id);
   await expect(page.locator('tbody tr[data-symbol="DEMO-COIN"]')).toBeVisible();
