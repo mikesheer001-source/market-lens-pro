@@ -100,7 +100,46 @@ async function initApp(){
   async function loadStored(){try{const db=await openDb(),tx=db.transaction('symbols','readonly'),req=tx.objectStore('symbols').getAll();const rows=await new Promise((res,rej)=>{req.onsuccess=()=>res(req.result);req.onerror=()=>rej(req.error);});for(const item of rows){S.data.set(item.symbol,item.bars);S.sources.set(item.symbol,'IMPORTED');}db.close();if(rows.length){S.symbol=rows[0].symbol;render();}}catch{notice('Local database unavailable. Imports still work until this tab closes.');}}
   async function storeDataset(symbol,bars){try{const db=await openDb(),tx=db.transaction('symbols','readwrite');tx.objectStore('symbols').put({symbol,bars});await new Promise((res,rej)=>{tx.oncomplete=res;tx.onerror=()=>rej(tx.error);});db.close();}catch{notice('Import loaded, but this browser could not save it for future visits.');}}
   async function removeImports(){try{const db=await openDb(),tx=db.transaction('symbols','readwrite');tx.objectStore('symbols').clear();await new Promise((res,rej)=>{tx.oncomplete=res;tx.onerror=()=>rej(tx.error);});db.close();}catch{}S.data=new Map(Object.entries(sampleData()));S.sources=new Map([...S.data.keys()].map(x=>[x,'SIMULATED']));S.symbol='DEMO-SPY';S.result=null;S.sweep=null;render();}
-  const bars=()=>aggregate(S.data.get(S.symbol)||[],S.chart.tf);
+  const intradayTf=tf=>tf==='15m'||tf==='2H';
+  const intradayKey=symbol=>symbol+'|'+String(S.liveFeed||'iex');
+  const barsFor=(symbol,tf)=>{
+    const daily=S.data.get(symbol)||[];
+    if(!intradayTf(tf))return aggregate(daily,tf);
+    const source=S.sources.get(symbol);
+    const raw=source==='ALPACA'?S.intraday.get(intradayKey(symbol))?.bars||[]:
+      daily.filter(b=>typeof b.time==='number');
+    // No daily-to-intraday interpolation: empty is an explicit unavailable state.
+    return aggregate(raw,tf);
+  };
+  const bars=()=>barsFor(S.symbol,S.chart.tf);
+  async function loadLiveIntraday(symbol,force=false){
+    if(S.mode!=='live'||S.sources.get(symbol)!=='ALPACA')return;
+    const key=intradayKey(symbol),current=S.intraday.get(key),status=S.intradayStatus.get(key);
+    if(status?.status==='loading')return;
+    if(!force&&current&&Date.now()-current.fetchedAt<300000)return;
+    if(!force&&status?.status==='error')return;
+    S.intradayStatus.set(key,{status:'loading'});
+    if(S.tab==='charts'&&S.symbol===symbol)render();
+    try{
+      const base=S.apiBaseUrl.replace(/\/$/,'');
+      if(!base.startsWith('https://'))throw Error('Configure an HTTPS Worker URL in Data Center.');
+      const response=await fetch(base+'/api/stocks/intraday?symbol='+encodeURIComponent(symbol)+
+        '&feed='+encodeURIComponent(S.liveFeed),{headers:{Accept:'application/json'}});
+      const payload=await response.json().catch(()=>({}));
+      if(!response.ok)throw Error(payload.detail||payload.error||'Alpaca intraday request failed.');
+      const received=alpacaBars(payload.bars||[],'15Min');
+      if(!received.length)throw Error('Alpaca '+String(payload.feed||S.liveFeed).toUpperCase()+' returned no real 15-minute candles for '+symbol+'.');
+      S.intraday.set(key,{bars:received,source:'ALPACA',feed:payload.feed||S.liveFeed,
+        fetchedAt:Date.now(),start:payload.start,end:payload.end});
+      S.intradayStatus.set(key,{status:'ready',bars:received.length});
+    }catch(err){
+      S.intraday.delete(key);
+      S.intradayStatus.set(key,{status:'error',error:err.message});
+      notice('Real 15-minute Alpaca candles unavailable: '+err.message);
+    }
+    if(S.tab==='charts'&&S.symbol===symbol)render();
+  }
+
   const status=()=>S.mode==='live'?'ALPACA LIVE · '+String(S.liveFeed||'iex').toUpperCase():S.sources.get(S.symbol)==='SIMULATED'?'SIMULATED SAMPLE':S.sources.get(S.symbol)==='IMPORTED'?'IMPORTED OHLCV':'NO DATA';
   const isVisibleSymbol=symbol=>modeSymbol(symbol)&&(S.universeFilter!=='volatility'||VOLATILITY_UNIVERSE.includes(symbol));
   function destroyCharts(){if(chart){chart.remove();chart=null;}if(equityChart){equityChart.remove();equityChart=null;}}
@@ -111,7 +150,7 @@ async function initApp(){
   const head=(name,desc,tools='')=>'<div class="headrow"><div><div class="eyebrow">Market Lens / '+name+'</div><h1>'+name+'</h1><p class="subtle">'+desc+'</p></div><div class="flex">'+tools+'</div></div>';
   const button=(label,action,variant='')=>'<button type="button" class="btn '+variant+'" data-action="'+action+'">'+label+'</button>';
   const select=(items,value,attr)=>'<select '+attr+'>'+items.map(([v,t])=>'<option value="'+esc(v)+'"'+(v===value?' selected':'')+'>'+esc(t)+'</option>').join('')+'</select>';
-  const timeframes=[['D','1 Day'],['W','1 Week'],['M','1 Month'],['2H','2 Hours']];
+  const timeframes=[['D','1 Day · daily OHLCV'],['W','1 Week · daily aggregation'],['M','1 Month · daily aggregation'],['2H','2 Hours · true 15m bars'],['15m','15 Minutes · true 15m bars']];
   const symbolSelect=()=>{
     const options=[...S.data.keys()].filter(modeSymbol).sort(),selected=options.includes(S.symbol)?S.symbol:options[0]||'';
     return '<div class="symbol-picker"><label class="control">Find symbol <input type="search" class="symbol-search" data-input="symbol-search" aria-label="Find symbol" placeholder="Search all '+options.length+' loaded tickers" value="'+esc(S.symbolQuery)+'"/></label>'+
@@ -120,7 +159,15 @@ async function initApp(){
   const tfSelect=()=>'<label class="control">Timeframe '+select(timeframes,S.chart.tf,'data-option="tf"')+'</label>';
   const field=(name,key,type='number',min='',max='',step='any')=>'<label class="field">'+name+'<input type="'+type+'" data-bt="'+key+'" value="'+esc(S.bt[key])+'" '+(min!==''?'min="'+min+'"':'')+' '+(max!==''?'max="'+max+'"':'')+' step="'+step+'"/></label>';
   function metric(label,value,foot='',type=''){return '<div class="metric"><label>'+label+'</label><strong class="'+type+'">'+value+'</strong><small>'+foot+'</small></div>';}
-  const sourceStrip=()=>S.sources.get(S.symbol)==='ALPACA'?'<div class="info-strip">Alpaca market data · '+esc(String(S.liveFeed||'IEX').toUpperCase())+' feed · REST refresh on demand. This is not a tick-by-tick WebSocket stream.</div>':S.sources.get(S.symbol)==='SIMULATED'?'<div class="info-strip warning"><strong>Simulated prices.</strong> These are generated examples for testing the interface; no price, return, or trading result represents a real ticker.</div>':(S.data.get(S.symbol)||[]).some(b=>b.approximateOhlc)?'<div class="info-strip warning">The imported CSV has Close-only bars. Open/high/low are approximated. Stop, target, and next-open fills are unreliable until full OHLCV data is imported.</div>':'';
+  const sourceStrip=()=>intradayTf(S.chart.tf)?(
+    S.sources.get(S.symbol)==='ALPACA'?
+      '<div class="info-strip '+(S.intradayStatus.get(intradayKey(S.symbol))?.status==='error'?'warning':'')+'">Real '+esc(S.chart.tf)+' candles · '+esc(String(S.liveFeed).toUpperCase())+' Alpaca 15-minute trade-bar OHLCV'+
+      (S.chart.tf==='2H'?' aggregated by NYSE 09:30–16:00 ET session buckets, including a partial final 30-minute bucket.':' (no aggregation beyond 15 minutes).')+
+      ' · '+(S.intradayStatus.get(intradayKey(S.symbol))?.status==='error'?esc(S.intradayStatus.get(intradayKey(S.symbol)).error):
+      S.intradayStatus.get(intradayKey(S.symbol))?.status==='loading'?'Fetching real intraday bars…':
+      S.intraday.get(intradayKey(S.symbol))?.bars.length+' confirmed 15-minute bars')+'</div>':
+      '<div class="info-strip warning">Only genuine timestamped CSV bars are eligible for intraday charts. Daily Demo candles are never expanded into fake 15m or 2H candles.</div>'
+  ):S.sources.get(S.symbol)==='ALPACA'?'<div class="info-strip">Alpaca market data · '+esc(String(S.liveFeed||'IEX').toUpperCase())+' feed · REST refresh on demand. This is not a tick-by-tick WebSocket stream.</div>':S.sources.get(S.symbol)==='SIMULATED'?'<div class="info-strip warning"><strong>Simulated prices.</strong> These are generated examples for testing the interface; no price, return, or trading result represents a real ticker.</div>':(S.data.get(S.symbol)||[]).some(b=>b.approximateOhlc)?'<div class="info-strip warning">The imported CSV has Close-only bars. Open/high/low are approximated. Stop, target, and next-open fills are unreliable until full OHLCV data is imported.</div>':'';
   function screenerRows(){
     if(S.savedScanView)return S.savedScanView.rows;
     const list=[];
@@ -195,8 +242,10 @@ async function initApp(){
   }
   function chartsView(){
     const b=bars(),source=S.sources.get(S.symbol);
-    return head('Chart Lab','Drag to pan, wheel/pinch to zoom, and drag the price or time axes. Customize indicators below.',button('Backtest this symbol','view-backtest','primary'))+
-      '<div class="panel">'+chartControls()+'</div><div id="pine-chart-error" role="alert"></div>'+sourceStrip()+
+    return head('Chart Lab','Drag to pan, wheel/pinch to zoom. Daily charts use Alpaca 1Day bars; 15m and 2H require real 15Min bars.',button('Backtest this symbol','view-backtest','primary'))+
+      '<div class="panel">'+chartControls()+'<div class="chart-intraday-control">'+
+      (intradayTf(S.chart.tf)?button('Refresh Alpaca 15m candles','refresh-intraday','small'):'')+
+      '</div></div><div id="pine-chart-error" role="alert"></div>'+sourceStrip()+
       '<div class="info-strip">Data: <strong>'+esc(S.symbol)+'</strong> · '+(source==='SIMULATED'?'simulated':source==='ALPACA'?'Alpaca '+String(S.liveFeed).toUpperCase():'imported')+' · '+b.length+' '+S.chart.tf+' bars. Price scaling, crosshair, volume, indicator panes, and annotations are interactive. Charts use TradingView Lightweight Charts, not the full TradingView platform.</div>';
   }
   function btOptions(){
@@ -274,7 +323,12 @@ async function initApp(){
     destroyCharts();shell();
     const views={screener:screenerView,charts:chartsView,backtest:backtestView,optimize:optimizeView,scripts:scriptView,data:dataView};
     $('#main').innerHTML=views[S.tab]();
-    if(S.tab==='charts')mountPriceChart();
+    if(S.tab==='charts'){
+      mountPriceChart();
+      if(intradayTf(S.chart.tf)&&S.mode==='live'&&S.sources.get(S.symbol)==='ALPACA'&&
+        !S.intraday.get(intradayKey(S.symbol))&&!S.intradayStatus.get(intradayKey(S.symbol)))
+        void loadLiveIntraday(S.symbol);
+    }
     if(S.tab==='backtest'&&S.result?.curve?.length)mountEquity();
     saveSettings();
   }
@@ -283,7 +337,9 @@ async function initApp(){
     return createChart(el,{autoSize:true,height,layout:{background:{type:'solid',color:colors.background},textColor:colors.text,fontFamily:'system-ui, sans-serif',fontSize:11,panes:{separatorColor:'#314459',separatorHoverColor:'#456278'}},grid:{vertLines:{color:colors.grid},horzLines:{color:colors.grid}},crosshair:{mode:0},rightPriceScale:{borderColor:'#304357',minimumWidth:priceScaleWidth},timeScale:{borderColor:'#304357',rightOffset:10,barSpacing:8},handleScale:{mouseWheel:true,pinch:true,axisPressedMouseMove:{time:true,price:true}},handleScroll:{mouseWheel:true,pressedMouseMove:true,horzTouchDrag:true,vertTouchDrag:false}});
   }
   function mountPriceChart(){
-    const b=bars(),el=$('#price-chart');if(!b.length){el.innerHTML='<div class="empty"><strong>No bars for this timeframe</strong>Import intraday OHLCV data to use 2-hour charts or filters.</div>';return;}
+    const b=bars(),el=$('#price-chart');if(!b.length){const state=S.intradayStatus.get(intradayKey(S.symbol));
+      el.innerHTML='<div class="empty"><strong>'+ (state?.status==='loading'?'Loading real Alpaca intraday bars':state?.status==='error'?'Live intraday unavailable':'No genuine '+esc(S.chart.tf)+' bars available')+
+        '</strong>'+esc(state?.error||'Select a daily timeframe or import timestamped intraday OHLCV. We do not simulate market data.')+'</div>';return;}
     chart=newChart(el);
     const baseOptions={priceLineVisible:false,lastValueVisible:true};
     const type=S.chart.style==='line'?LineSeries:S.chart.style==='area'?AreaSeries:S.chart.style==='bars'?BarSeries:CandlestickSeries;
@@ -581,6 +637,8 @@ async function initApp(){
     'scan-universe':()=>{clearSavedScanView();return S.mode==='live'?switchToLive():runDemoScan();},
     'test-live':()=>testLiveBackend().catch(err=>notice('Backend test failed: '+err.message)),
     'view-charts':()=>{S.tab='charts';render();},
+    'refresh-intraday':()=>{if(S.mode==='live')void loadLiveIntraday(S.symbol,true);
+      else notice('Only Alpaca Live mode can refresh real intraday bars.');},
     'view-backtest':()=>{S.tab='backtest';render();},
     'view-optimize':()=>{S.tab='optimize';render();},
     'add-rule':()=>{clearSavedScanView();S.universeFilter='all';S.rules.push({metric:'rsi',tf:'D',op:'<',value:50});S.scan={status:'idle'};render();},
