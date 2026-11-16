@@ -1,11 +1,20 @@
 // Research-only strategy fit: same execution engine and cost assumptions per symbol.
 import {barDate} from './freshness.js';
-export const FIT_COLUMNS=Object.freeze(['symbol','returnPct','cagrPct','sharpe','maxDD','winPct','trades','source','barDate']);
+import {assessHoldout} from './validation.js';
+export const FIT_COLUMNS=Object.freeze(['symbol','returnPct','cagrPct','sharpe','maxDD','winPct','trades',
+  'trainReturnPct','trainSharpe','testReturnPct','testSharpe','source','barDate']);
 const metricKeys=new Set(['returnPct','cagrPct','sharpe','maxDD','winPct','trades']);
+export function fitMetric(row,key){
+  if(key==='trainReturnPct')return row.trainMetrics?.returnPct??null;
+  if(key==='trainSharpe'||key==='sharpe')return row.trainMetrics?.sharpe??row.metrics?.sharpe??null;
+  if(key==='testReturnPct')return row.testMetrics?.returnPct??null;
+  if(key==='testSharpe')return row.validation?.enoughTestBars?row.testMetrics?.sharpe??null:null;
+  return metricKeys.has(key)?row.metrics?.[key]??null:row[key];
+}
 export function sortUniverseFit(rows,key='sharpe',descending=key!=='symbol'&&key!=='maxDD'){
   if(!FIT_COLUMNS.includes(key))throw Error('Unknown fit column: '+key);
   return [...rows].sort((a,b)=>{
-    const x=metricKeys.has(key)?a.metrics?.[key]:a[key],y=metricKeys.has(key)?b.metrics?.[key]:b[key];
+    const x=fitMetric(a,key),y=fitMetric(b,key);
     const missing=v=>v==null||(typeof v==='number'&&!Number.isFinite(v))||v==='';
     if(missing(x)!==missing(y))return missing(x)?1:-1;
     if(!missing(x)){
@@ -43,10 +52,11 @@ export function fitAcrossUniverse({symbols,data,options,backtest,compilePine,exe
       const result=backtest(history,cfg);
       if(!result?.metrics||!result.curve?.length)throw Error(result?.notice||'No equity curve');
       row.metrics=result.metrics;
+      Object.assign(row,assessHoldout(history,cfg,backtest));
     }catch(e){row.error=String(e.message||e);}
     rows.push(row);
   }
-  return {version:1,settings,script:pine?{...strategyScript}:null,
+  return {version:2,settings,script:pine?{...strategyScript}:null,
     expectedBarDate,runAt:new Date().toISOString(),requested:symbols.length,
     completed:rows.filter(x=>x.metrics).length,rows:sortUniverseFit(rows)};
 }
