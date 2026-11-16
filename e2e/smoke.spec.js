@@ -21,6 +21,13 @@ test('desktop screener, chart, backtest, optimization and CSV import',async ({pa
   await expect(page.locator('#price-chart canvas').first()).toBeVisible();
   await page.locator('[data-option="tf"]').selectOption('W');
   await expect(page.locator('#price-chart canvas').first()).toBeVisible();
+  await page.locator('.sidebar [data-tab="screener"]').click();
+  await page.locator('[data-option="preset"]').selectOption('volatility');
+  await expect(page.locator('tr[data-symbol]')).toHaveCount(1);
+  await expect(page.locator('tr[data-symbol="DEMO-VXX"] .pill')).toHaveText('MATCH');
+  await page.locator('[data-action="scan-universe"]').click();
+  await expect(page.locator('#scan-status')).toContainText('Demo scan complete');
+  await expect(page.locator('#scan-status')).toContainText('1 matches');
   await page.locator('.sidebar [data-tab="backtest"]').click();
   await page.locator('[data-action="run-backtest"]').click();
   await expect(page.getByText('Completed trades')).toBeVisible();
