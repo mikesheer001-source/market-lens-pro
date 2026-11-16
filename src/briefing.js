@@ -6,6 +6,7 @@ import {barDate,explainStaleSymbol} from './freshness.js';
 
 export const BRIEFING_HISTORY_DAYS=7;
 const validDate=value=>typeof value==='string'&&/^\d{4}-\d{2}-\d{2}$/.test(value)&&
+  Number.isFinite(Date.parse(value+'T00:00:00Z'))&&
   new Date(value+'T00:00:00Z').toISOString().slice(0,10)===value;
 const finite=value=>typeof value==='number'&&Number.isFinite(value);
 export function briefingMarketDate(at=new Date().toISOString()){
