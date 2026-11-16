@@ -29,6 +29,10 @@ for(const width of [1440,1024,768,390]){
    await page.locator(nav+' [data-tab="data"]').click();
    await expect(page.locator('[data-setting="apiBaseUrl"]')).toBeVisible();
    await check();
+   await page.locator(nav+' [data-tab="scripts"]').click();
+   await expect(page.getByRole('heading',{name:'Script Lab'})).toBeVisible();
+   await expect(page.locator('#pine-editor')).toBeVisible();
+   await check();
    await page.locator(nav+' [data-tab="screener"]').click();
    await page.locator('[data-option="preset"]').selectOption('volatility');
    await page.locator('[data-action="scan-universe"]').click();
