@@ -13,6 +13,7 @@ import {windowBacktestBars,windowPortfolioData,validateBacktestRange,actualPortf
 import {runBestFitPortfolio} from './best-fit-portfolio.js';
 import {holdoutSummary} from './validation.js';
 import {compareStrategiesInRange,leaderboardRangeStatus,rangeLabel} from './leaderboard-range.js';
+import {rollingPositiveText,rollingWindowDates,ROLLING_WINDOW_COUNT} from './rolling-validation.js';
 import {VOL_TICKERS,volatilityRow,contangoPriceProxies} from './volatility.js';
 import {restoreWatchlists,watchlistChange,validateAlert,checkAlerts,makeScanSnapshot,analysisSnapshot,restoreAnalysis,WATCHLIST_LIMIT,SCAN_LIMIT,ALERT_LIMIT} from './workspace.js';
 import { LIVE_UNIVERSE, DEMO_UNIVERSE, VOLATILITY_UNIVERSE, LIVE_EQUITY_COUNT, LIVE_ETF_COUNT, LIVE_VOLATILITY_COUNT, ALPACA_BATCH_SIZE } from './universe.js';
@@ -722,7 +723,11 @@ async function initApp(){
     }
     const definitions=[['name','Strategy'],['trainReturnPct','Train return (70%)'],
       ['sharpe','Train Sharpe (rank)'],['testReturnPct','OOS return (30%)'],
-      ['testSharpe','OOS Sharpe (30%)'],['validation','Validation'],
+      ['testSharpe','OOS Sharpe (30%)'],
+      ['rollingMean','Rolling mean OOS Sharpe (5)'],
+      ['rollingMedian','Rolling median OOS Sharpe (5)'],
+      ['rollingPositive','Rolling positive windows (5)'],
+      ['validation','Validation'],
       ['returnPct','Full return'],['cagrPct','Full CAGR'],['maxDD','Full max DD'],
       ['winPct','Full win rate'],['trades','Full trades'],['profitFactor','Full profit factor']];
     const headers=definitions.map(([key,title])=>{
@@ -751,6 +756,11 @@ async function initApp(){
         (best?' <strong class="best-note">Best Sharpe</strong>':'')+'</td>'+
         '<td>'+pct(train.returnPct)+'</td><td>'+format(train.sharpe,3)+'</td>'+
         '<td>'+pct(row.testMetrics?.returnPct)+'</td><td>'+holdoutSharpe(row)+'</td>'+
+        '<td>'+format(row.rolling?.meanSharpe,2)+'</td>'+
+        '<td>'+format(row.rolling?.medianSharpe,2)+'</td>'+
+        '<td>'+esc(rollingPositiveText(row.rolling))+
+          (row.rolling?.note?'<small class="oos-note">'+esc(row.rolling.note)+'</small>':'')+
+        '</td>'+
         '<td>'+holdoutLabel(row)+'</td>'+
         '<td class="'+priceColor(m.returnPct)+'">'+pct(m.returnPct)+'</td>'+
         '<td>'+pct(m.cagrPct)+'</td><td>'+pct(-m.maxDD)+'</td>'+
@@ -764,7 +774,7 @@ async function initApp(){
       (i+1)+'. '+esc(entry.name)+'</span>').join('')+
       '<span class="leaderboard-legend-item"><i class="leaderboard-swatch" style="--swatch:#91a0a7"></i>Buy &amp; hold</span>';
     const assessment=holdoutSummary(lb.rows),split=lb.rows.find(x=>x.validation)?.validation;
-    const walk='<div class="info-strip" id="walk-forward-summary">Walk-forward summary (single 70/30 chronological holdout, not repeated rolling windows): '+
+    const walk='<div class="info-strip" id="walk-forward-summary">Single-split walk-forward summary (70/30 chronological holdout): '+
       assessment.positive+' of '+assessment.assessable+' assessable strategies retained positive OOS Sharpe'+
       (assessment.assessable<assessment.total?' ('+(assessment.total-assessment.assessable)+
         ' had insufficient/unmeasurable test Sharpe)':'')+'. '+
@@ -774,6 +784,11 @@ async function initApp(){
       ' · Source: '+esc(lb.source)+' · bar date: '+esc(readableBarDate(lb.asOf))+
       (split?' · holdout '+esc(split.testStart||'—')+' to '+esc(split.testEnd||'—'):'')+
       ' · '+esc(rangeLabel(lb.range||{}))+
+      '<div class="rolling-wf-dates" id="rolling-window-dates"><strong>Repeated rolling OOS ('+
+      (lb.rollingWindowCount||ROLLING_WINDOW_COUNT)+' sliding 70/30 windows):</strong> '+
+      (lb.rollingWindows?.length?esc(rollingWindowDates(lb.rollingWindows)):
+        'Not calculated — rerun comparison')+'</div>'+
+      '<div class="rolling-wf-note">A strategy positive in most windows is steadier evidence than a single holdout, but these overlapping training windows are not independent proof.</div>'+
       '</div>';
     return '<section class="panel" aria-label="Strategy comparison"><div class="panel-header"><h2>Strategy leaderboard</h2><div class="flex">'+
       '<span class="source-badge" id="leaderboard-window">'+esc(rangeLabel(lb.range||{}))+'</span>'+
@@ -784,7 +799,7 @@ async function initApp(){
         ' scripts unavailable: '+lb.skipped.map(x=>esc(x.name)+': '+esc(x.reason)).join('; ')+'</div>':'')+
       '<div class="table-wrap"><table class="data-table leaderboard-table"><thead><tr>'+
       headers+'</tr></thead><tbody>'+cells+'</tbody></table></div>'+walk+
-      '<p class="section-note">Rank remains by <strong>training Sharpe</strong>, not OOS Sharpe. Train first 70%; test last 30%. Training and test each start with independent capital. Prior bars warm up indicators, not equity. Test Sharpe needs at least 30 bars; positive OOS Sharpe earns the descriptive Validated badge, not statistical proof. Full-period equity overlay is preserved. '+esc(definitions.find(x=>x[0]===S.leaderboardSort)?.[1]||'Train Sharpe')+
+      '<p class="section-note">Rank remains by <strong>training Sharpe</strong>, not OOS or rolling Sharpe. The original single 70/30 split, its Validated badge and Full-period equity overlay are unchanged. Rolling uses five windows, each 40% of selected history and stepped 15% forward, with disjoint test periods; the fixed strategy is tested on the final 30% of each window after indicator warm-up. Rolling mean/median use only windows with at least 30 test bars and finite Sharpe; missing windows are disclosed, never counted as losses. '+esc(definitions.find(x=>x[0]===S.leaderboardSort)?.[1]||'Train Sharpe')+
       ' is currently selected for table sorting. Rerun older saved comparisons to populate holdout values.</p>'+
       '</div></section><div class="panel"><div class="panel-header"><h2>Top 3 equity curves vs. buy-and-hold</h2>'+
       '<span class="source-badge">Same source · '+esc(lb.timeframe)+'</span></div>'+
@@ -1375,7 +1390,8 @@ async function initApp(){
   function refreshLeaderboardIfRangeChanged(){
     if(S.tab!=='backtest'||S.portfolioMode||S.leaderboard?.symbol!==S.symbol)return;
     const context=comparisonContext(),status=leaderboardRangeStatus(S.leaderboard,context);
-    if(status.matches)return;
+    if(status.matches&&S.leaderboard?.rollingWindowCount===ROLLING_WINDOW_COUNT&&
+      S.leaderboard?.rows.every(row=>!row.strategy||row.rolling))return;
     const key=JSON.stringify([S.symbol,S.chart.tf,S.btRange.startDate,S.btRange.endDate,
       context.bars.length,context.bars.at(-1)?.time,context.source,
       S.leaderboard?.runAt]);
