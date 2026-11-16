@@ -18,8 +18,9 @@ export function nyIntradaySession(value){
   const n=typeof raw==='number'?raw:Date.parse(raw);
   const ms=typeof raw==='number'?(n<1e12?n*1000:n):n;
   if(!Number.isFinite(ms))return null;
-  return new Intl.DateTimeFormat('en-CA',{timeZone:'America/New_York',year:'numeric',
-    month:'2-digit',day:'2-digit'}).format(new Date(ms));
+  const parts=Object.fromEntries(new Intl.DateTimeFormat('en-US',{timeZone:'America/New_York',
+    year:'numeric',month:'2-digit',day:'2-digit'}).formatToParts(new Date(ms)).map(p=>[p.type,p.value]));
+  return parts.year+'-'+parts.month+'-'+parts.day;
 }
 export function normalizeStartupPreferences(saved={}){
   const mode=saved.mode==='live'?'live':'demo';
@@ -32,8 +33,9 @@ export function normalizeStartupPreferences(saved={}){
   const lastSymbol=typeof saved.lastSymbol==='string'&&saved.lastSymbol?saved.lastSymbol:null;
   const tab=['screener','charts','backtest','optimize','scripts','data','volatility'].includes(saved.tab)?
     saved.tab:'screener';
+  const liveCandidate=[lastBacktestSymbol,lastSymbol,lastLiveSymbol].find(x=>x&&!x.startsWith('DEMO-'));
   return {mode,tab,lastDemoSymbol,lastLiveSymbol,lastBacktestSymbol,lastSymbol,
-    selectedSymbol:mode==='live'?(lastBacktestSymbol||lastSymbol||lastLiveSymbol):
+    selectedSymbol:mode==='live'?(liveCandidate||lastLiveSymbol):
       (lastBacktestSymbol?.startsWith('DEMO-')?lastBacktestSymbol:
        lastSymbol?.startsWith('DEMO-')?lastSymbol:lastDemoSymbol)};
 }
