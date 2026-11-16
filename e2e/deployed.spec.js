@@ -132,7 +132,7 @@ test('published Round 17 leaderboard auto-follows selected dates and resets to F
   await page.locator('.sidebar [data-tab="backtest"]').click();
   await page.locator('[data-action="compare-strategies"]').first().click();
   await expect(page.locator('#leaderboard-window')).toHaveText('Full range');
-  const oldReturn=await page.locator('tr[data-leaderboard-id="preset:ema-cross"] td').nth(6).textContent();
+  const oldReturn=await page.locator('tr[data-leaderboard-id="preset:ema-cross"] td').nth(9).textContent();
   // Date changes alone must trigger a full comparison and a new holdout split.
   await page.locator('[data-bt-range="startDate"]').fill('2025-01-02');
   await page.locator('[data-bt-range="endDate"]').fill('2025-12-31');
@@ -141,11 +141,11 @@ test('published Round 17 leaderboard auto-follows selected dates and resets to F
   await expect(page.locator('.leaderboard-table tbody tr')).toHaveCount(12);
   await expect(page.locator('#walk-forward-summary')).toContainText('holdout');
   await expect(page.locator('#walk-forward-summary')).toContainText('Selected range: 2025-01-02 to 2025-12-31');
-  const updated=await page.locator('tr[data-leaderboard-id="preset:ema-cross"] td').nth(6).textContent();
+  const updated=await page.locator('tr[data-leaderboard-id="preset:ema-cross"] td').nth(9).textContent();
   expect(updated).not.toBe(oldReturn);
   await page.locator('[data-action="clear-bt-dates"]').click();
   await expect(page.locator('#leaderboard-window')).toHaveText('Full range');
-  await expect(page.locator('tr[data-leaderboard-id="preset:ema-cross"] td').nth(6)).toHaveText(oldReturn.trim());
+  await expect(page.locator('tr[data-leaderboard-id="preset:ema-cross"] td').nth(9)).toHaveText(oldReturn.trim());
   await expect(page.locator('#leaderboard-chart canvas').first()).toBeVisible();
   expect(errors).toEqual([]);
 });
