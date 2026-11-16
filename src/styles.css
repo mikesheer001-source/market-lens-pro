@@ -164,3 +164,29 @@ a:hover{text-decoration-color:currentColor}
   font:12px/1.55 ui-monospace,Consolas,monospace;white-space:pre-wrap;overflow-wrap:anywhere}
 @media(max-width:900px){.pine-settings{grid-template-columns:repeat(2,minmax(0,1fr))}}
 @media(max-width:600px){.pine-editor-actions,.pine-settings{grid-template-columns:minmax(0,1fr)}.pine-editor{min-height:330px;font-size:12px}.pine-actions .btn{flex:1 1 130px}}
+
+/* Round 7 - dense, accessible terminal controls without dashboard overflow. */
+.symbol-picker{display:inline-flex;align-items:end;flex-wrap:wrap;gap:9px;min-width:0;max-width:100%}
+.symbol-picker .control{display:flex;flex-direction:column;gap:4px;min-width:115px;max-width:100%}
+.symbol-picker .symbol-search{background:#101915;color:var(--text);border:1px solid var(--border-strong);border-radius:var(--radius);min-height:44px;padding:8px 10px;width:155px;max-width:100%}
+.symbol-picker select{width:150px;max-width:100%}
+.workspace-actions{display:flex;flex-wrap:wrap;align-items:end;gap:9px;max-width:100%}
+.workspace-actions .control{display:flex;flex-direction:column;gap:5px;min-width:120px;max-width:100%}
+.workspace-actions .textinput,.workspace-actions select{min-height:44px;max-width:100%;width:195px}
+.workspace-actions .btn{min-height:44px}
+.alert-banner{display:grid;gap:9px;margin:14px 0;padding:14px 16px;border:1px solid var(--gold);border-left:4px solid var(--gold);border-radius:var(--radius);color:#f9e7b9;background:#2d271a}
+.alert-banner strong{font-size:13px}
+.alert-banner div{display:flex;flex-wrap:wrap;align-items:center;gap:12px;font-size:12px}
+.alert-banner .btn{margin-left:auto}
+@media(max-width:800px){
+  .symbol-picker{width:100%;gap:8px}
+  .symbol-picker .control{flex:1 1 140px}
+  .symbol-picker select,.symbol-picker .symbol-search{width:100%}
+  .workspace-actions .control{flex:1 1 165px}
+  .workspace-actions .textinput,.workspace-actions select{width:100%}
+}
+@media(max-width:480px){
+  .workspace-actions .btn{flex:1 1 120px}
+  .symbol-picker .control{flex:1 1 100%}
+  .workspace-actions .control{flex:1 1 100%}
+}
