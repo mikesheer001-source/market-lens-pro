@@ -232,3 +232,36 @@ test('published Round 23 validated universe fit mode can be selected without los
   await expect(page.locator('#universe-fit h2')).toContainText('In-sample ranking');
   expect(errors).toEqual([]);
 });
+
+
+test('published Round 24 validated-only best-fit portfolio qualifies or plainly excludes symbols',async({page})=>{
+  test.setTimeout(120000);
+  const errors=[];page.on('pageerror',error=>errors.push(error.message));
+  await page.goto('./');
+  await page.locator('[data-option="preset"]').selectOption('volatility');
+  await page.locator('.sidebar [data-tab="backtest"]').click();
+  await page.locator('[data-option="portfolio-mode"]').selectOption('best-fit');
+  await expect(page.locator('#best-fit-validated-only')).not.toBeChecked();
+  await page.locator('#best-fit-validated-only').check();
+  await page.locator('[data-action="run-best-fit"]').click();
+  await expect(page.locator('#best-fit-validation-count')).toContainText(
+    /[01] of 1 selected symbols qualify/,{timeout:110000});
+  const n=await page.locator('#portfolio-breakdown tbody tr').count();
+  await expect(page.locator('#best-fit-validation-count')).toContainText(n+' of 1 selected symbols qualify');
+  if(n) {
+    await expect(page.locator('#portfolio-breakdown')).toContainText('Rolling mean OOS Sharpe');
+    await expect(page.locator('#portfolio-breakdown')).toContainText('Rolling positive windows');
+    await expect(page.locator('#equity-chart canvas').first()).toBeVisible();
+  }else {
+    await expect(page.locator('#best-fit-validated-empty')).toHaveText(
+      'No symbol has a validated strategy on this window');
+    await expect(page.locator('#equity-chart')).toHaveCount(0);
+  }
+  const prices=(await import('../src/engine.js')).sampleData()['DEMO-SPY'];
+  await page.locator('[data-bt-range="startDate"]').fill(prices[280].time);
+  await page.locator('[data-bt-range="endDate"]').fill(prices[339].time);
+  await expect(page.locator('#best-fit-validation-count')).toContainText(
+    '0 of 1 selected symbols qualify',{timeout:110000});
+  await expect(page.locator('#best-fit-validated-empty')).toBeVisible();
+  expect(errors).toEqual([]);
+});

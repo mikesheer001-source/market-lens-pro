@@ -80,7 +80,7 @@ async function initApp(){
     signalHistory:priorSignalHistory,signalAsOf:null,freshness:null,staleDiagnostics:{},
     lastSignalFlips:[],lastSignalFlipBaseline:false,lastSignalFlipStrategy:null,
     rules:saved.rules||preset.trend.map(x=>({...x})),sort:'symbol',ascending:true,showOnlyMatches:false,showWatch:false,chart:(()=>{const restored={...defaultSettings,...saved.chart};if(!saved.chart?.style||saved.chart.style==='line')restored.style='candles';return restored;})(),bt:{...defaultBacktest,...saved.bt},result:previousAnalysis?.result||null,sweep:previousAnalysis?.sweep||null,lastAnalysis:previousAnalysis,resultSymbol:previousAnalysis?.symbol||null,resultTf:previousAnalysis?.tf||null,
-    portfolioMode:!!saved.portfolioMode,bestFitMode:!!saved.bestFitMode,
+    portfolioMode:!!saved.portfolioMode,bestFitMode:!!saved.bestFitMode,bestFitValidatedOnly:!!saved.bestFitValidatedOnly,
     btRange:{startDate:String(saved.btRange?.startDate||''),endDate:String(saved.btRange?.endDate||'')},
     backtestError:'',portfolioScope:saved.portfolioScope==='watchlist'?'watchlist':'matches',
     portfolioWatchlistId:saved.portfolioWatchlistId||workspaceLists.watchlistId,
@@ -111,7 +111,7 @@ async function initApp(){
   let chart=null,equityChart=null,leaderboardChart=null;
   const saveSettings=()=>{try{localStorage.setItem('market-lens-pro-settings',JSON.stringify({mode:S.preferredMode==='live'?'live':S.mode,
     tab:S.tab,lastSymbol:S.symbol,lastBacktestSymbol:S.lastBacktestSymbol,
-    lastLiveSymbol:S.lastLiveSymbol,lastDemoSymbol:S.lastDemoSymbol,watch:[...S.watch],watchlists:S.watchlists,watchlistId:S.watchlistId,alerts:S.alerts,savedScans:S.savedScans,rules:S.rules,chart:S.chart,bt:S.bt,portfolioMode:S.portfolioMode,bestFitMode:S.bestFitMode,btRange:S.btRange,portfolioScope:S.portfolioScope,portfolioWatchlistId:S.portfolioWatchlistId,signalSelection:S.signalSelection,signalsOnly:S.signalsOnly,
+    lastLiveSymbol:S.lastLiveSymbol,lastDemoSymbol:S.lastDemoSymbol,watch:[...S.watch],watchlists:S.watchlists,watchlistId:S.watchlistId,alerts:S.alerts,savedScans:S.savedScans,rules:S.rules,chart:S.chart,bt:S.bt,portfolioMode:S.portfolioMode,bestFitMode:S.bestFitMode,bestFitValidatedOnly:S.bestFitValidatedOnly,btRange:S.btRange,portfolioScope:S.portfolioScope,portfolioWatchlistId:S.portfolioWatchlistId,signalSelection:S.signalSelection,signalsOnly:S.signalsOnly,
     leaderboardValidatedOnly:S.leaderboardValidatedOnly,fitValidatedOnly:S.fitValidatedOnly,apiBaseUrl:S.apiBaseUrl,universeFilter:S.universeFilter}));}catch{}};
   function rememberPortfolio(){
     S.portfolioTimestamp=new Date().toISOString();
@@ -750,8 +750,13 @@ async function initApp(){
       S.portfolioMode?(S.bestFitMode?'best-fit':'portfolio'):'single','data-option="portfolio-mode"')+
     '</label><span class="muted">Portfolios use daily aligned OHLCV, equal initial allocations and independent next-open trades. Best-fit selects each symbol from the first 70% training bars only; the final 30% is untouched holdout data.</span></div>';
   function activePortfolioResult(){
-    return S.portfolioResult&&((S.bestFitMode&&S.portfolioResult.mode==='best-fit')||
-      (!S.bestFitMode&&S.portfolioResult.mode!=='best-fit'))?S.portfolioResult:null;
+    const report=S.portfolioResult;
+    if(!report)return null;
+    if(!S.bestFitMode)return report.mode==='best-fit'?null:report;
+    const fitMode=S.bestFitValidatedOnly?'validated':'training';
+    return report.mode==='best-fit'&&(report.fitMode||'training')===fitMode&&
+      report.range?.startDate===S.btRange.startDate&&
+      report.range?.endDate===S.btRange.endDate?report:null;
   }
   function portfolioSelection(){
     if(S.portfolioScope==='watchlist'){
@@ -761,42 +766,67 @@ async function initApp(){
     return [...S.data.keys()].filter(isVisibleSymbol).filter(sym=>screenSymbol(S.data.get(sym),S.rules).pass);
   }
   function portfolioBacktestView(){
-    const isBest=S.bestFitMode,selections=portfolioSelection(),result=activePortfolioResult();
+    const isBest=S.bestFitMode,validated=isBest&&S.bestFitValidatedOnly;
+    const selections=portfolioSelection(),result=activePortfolioResult();
+    const noValidated=validated&&result?.noValidated;
+    const qualified=result?.ranked??null,selectedCount=result?.selectedCount??selections.length;
+    const qualifier=validated?' · '+(qualified===null?'—':qualified)+' of '+
+      selectedCount+' selected qualified':'';
     const sourceName=S.mode==='live'?'Alpaca '+String(S.liveFeed).toUpperCase()+' 1Day bars':
       'Simulated Demo or imported daily OHLCV';
     const namedLists=S.watchlists.map(w=>[w.id,w.name+' · '+w.symbols.length+' symbols']);
     const controls='<div class="panel"><div class="panel-header"><h2>'+
-      (isBest?'Best-fit portfolio selection':'Portfolio selection & strategy')+'</h2><div class="flex">'+
+      (isBest?'Best-fit portfolio selection · '+(validated?'Validated OOS':'In-sample')+qualifier:
+        'Portfolio selection & strategy')+'</h2><div class="flex">'+
       button(S.portfolioLoading?'Evaluating portfolio…':(isBest?'Run best-fit portfolio':'Run equal-weight portfolio'),
         isBest?'run-best-fit':'run-portfolio','primary')+
       (isBest?'':button('Sweep portfolio parameters','view-optimize','small'))+
       button('Export portfolio breakdown','export-portfolio','small')+'</div></div><div class="panel-body">'+
       '<div class="portfolio-pick"><label class="control">Symbol source '+
-      select([['matches','All current scan matches'],['watchlist','Named watchlist']],S.portfolioScope,'data-option="portfolio-scope"')+'</label>'+
+      select([['matches','All current scan matches'],['watchlist','Named watchlist']],
+        S.portfolioScope,'data-option="portfolio-scope"')+'</label>'+
       (S.portfolioScope==='watchlist'?'<label class="control">Watchlist '+
         select(namedLists,S.portfolioWatchlistId,'data-option="portfolio-watchlist"')+'</label>':'')+
       '<strong>'+selections.length+' selected</strong></div>'+
+      (isBest?'<div class="leaderboard-validation-controls">'+
+        '<label class="inline-check"><input type="checkbox" id="best-fit-validated-only" '+
+        'data-option="best-fit-validated-only" '+(S.bestFitValidatedOnly?'checked':'')+
+        '/> Validated only</label>'+
+        '<span id="best-fit-validation-count" role="status">'+
+        (validated?(qualified===null?'Not calculated · ':qualified+' of ')+
+          selectedCount+' selected symbols qualify':
+          'In-sample strategy selection (default)')+'</span></div>':'')+
       (S.portfolioScope==='matches'?'<p class="section-note">Current Screener rule matches, including the volatility-universe restriction; saved scan snapshots are never reused.</p>':
         '<p class="section-note">Currently loaded symbols on the chosen named watchlist; unavailable or insufficient-history symbols are reported as omitted.</p>')+
       '<div class="info-strip">Data source: '+esc(sourceName)+
       '. Each included symbol receives the same initial capital fraction. Costs, stops and fills use the existing engine.</div>'+
-      (isBest?'<p class="section-note"><strong>Strategy selection:</strong> Evaluate each executable preset, saved Pine and built-in example strategy on the first 70% of aligned daily bars. Choose the highest training Sharpe for each symbol without inspecting test performance. The remaining 30% is scored separately. A positive holdout Sharpe earns a descriptive Validated label, not proof of predictive ability. Ranking is strictly in-sample; symbols without a finite training Sharpe are excluded.</p>':
-        btOptions())+
+      (isBest?'<p class="section-note"><strong>Strategy selection:</strong> '+
+        (validated?'Only strategies passing the exact leaderboard 70/30 or 3-of-5 rolling OOS rule qualify. Each symbol uses the highest rolling mean OOS Sharpe among its validated strategies; symbols without one are excluded. Single-split validated strategies with an unavailable rolling mean rank last. OOS-based selection introduces selection bias; the combined full-period curve is not independent OOS evidence.':
+          'Evaluate each executable preset, saved Pine and built-in example strategy on the first 70% of aligned daily bars. Choose the highest training Sharpe for each symbol without inspecting test performance. The remaining 30% is scored separately. A positive holdout Sharpe earns a descriptive Validated label, not proof of predictive ability. Ranking is strictly in-sample; symbols without a finite training Sharpe are excluded.')+
+        '</p>':btOptions())+
       backtestDateControls()+'</div></div>';
-    const summary=result?'<div class="metrics">'+
-      metric('Total return',pct(result.metrics.returnPct),'Equal initial capital',priceColor(result.metrics.returnPct))+
-      metric('CAGR',pct(result.metrics.cagrPct),'Calendar time, aligned dates')+
-      metric('Sharpe',format(result.metrics.sharpe,2),'252 sessions, RF = 0')+
-      metric('Maximum DD',pct(-result.metrics.maxDD),'Peak-to-trough portfolio equity')+
-      '</div>':'<div class="empty">Select symbols and a date range, then run the portfolio.</div>';
+    const summary=noValidated?
+      '<div class="empty" role="status" id="best-fit-validated-empty">No symbol has a validated strategy on this window</div>':
+      result?'<div class="metrics">'+
+        metric('Total return',pct(result.metrics.returnPct),'Equal initial capital',priceColor(result.metrics.returnPct))+
+        metric('CAGR',pct(result.metrics.cagrPct),'Calendar time, aligned dates')+
+        metric('Sharpe',format(result.metrics.sharpe,2),'252 sessions, RF = 0')+
+        metric('Maximum DD',pct(-result.metrics.maxDD),'Peak-to-trough portfolio equity')+
+        '</div>':'<div class="empty">Select symbols and a date range, then run the portfolio.</div>';
     const rows=result?.breakdown||[];
     const table='<div class="table-wrap"><table class="data-table" id="portfolio-breakdown"><thead><tr>'+
-      '<th>Symbol</th><th>Strategy</th><th>Source</th><th>Bar date</th><th>Weight</th>'+
+      '<th>Symbol</th><th>Strategy</th>'+
+      (validated?'<th>Rolling mean OOS Sharpe</th><th>Rolling positive windows</th>':'')+
+      '<th>Source</th><th>Bar date</th><th>Weight</th>'+
       (isBest?'<th>Train return</th><th>Train Sharpe</th><th>OOS return</th><th>OOS Sharpe</th><th>Validation</th>':'')+
       '<th>Full return</th><th>Trades</th><th>Win rate</th><th>Max DD</th><th>Full Sharpe</th></tr></thead><tbody>'+
       rows.map(r=>'<tr data-portfolio-symbol="'+esc(r.symbol)+'"><td>'+esc(r.symbol)+'</td>'+
         '<td>'+esc(r.strategyName||r.strategy||'—')+
-        (isBest?'<small class="fit-stale">Fit Sharpe: '+format(r.fitSharpe,2)+'</small>':'')+'</td>'+
+        (isBest&&!validated?'<small class="fit-stale">Fit Sharpe: '+format(r.fitSharpe,2)+'</small>':'')+'</td>'+
+        (validated?'<td>'+format(r.rollingMeanSharpe,3)+'</td><td>'+
+          (r.rollingPositiveCount??0)+'/'+(r.rollingWindowCount??5)+
+          (r.rollingAssessableCount<r.rollingWindowCount?' ('+r.rollingAssessableCount+
+            '/'+r.rollingWindowCount+' assessable)':'')+'</td>':'')+
         '<td>'+esc(r.source==='ALPACA'?'ALPACA '+String(S.liveFeed).toUpperCase()+' 1Day':r.source)+'</td>'+
         '<td>'+esc(String(r.barDate||'—').slice(0,10))+'</td>'+
         '<td>'+pct(result.weights[r.symbol]*100)+'</td>'+
@@ -808,7 +838,7 @@ async function initApp(){
         '<td>'+format(r.trades,0)+'</td><td>'+pct(r.winPct)+'</td>'+
         '<td>'+pct(-r.maxDD)+'</td><td>'+format(r.sharpe,2)+'</td></tr>').join('')+
       '</tbody></table></div>';
-    return head('Backtest · '+(isBest?'Best-fit portfolio':'Portfolio'),
+    return head('Backtest · '+(isBest?'Best-fit portfolio'+(validated?' · validated only':''):'Portfolio'),
       'Equal initial allocations on a shared daily calendar; no live orders.')+
       portfolioModeControl()+controls+
       (S.portfolioError?'<div class="warning info-strip" role="alert">'+esc(S.portfolioError)+'</div>':'')+
@@ -818,19 +848,25 @@ async function initApp(){
         ' · '+result.symbols.length+' symbols · '+result.curve.length+' daily equity points · run '+
         esc(S.portfolioTimestamp||'')+
         '<div class="result-range">'+esc(displayBacktestRange(result.range))+'</div>'+
-        (result.omitted?.length?' · excluded '+esc(result.omitted.join(', '))+' (insufficient bars or no rankable strategy)':'')+
+        (isBest?' · '+result.ranked+' of '+result.selectedCount+' selected qualified':'')+
+        (result.omitted?.length?' · excluded '+result.omitted.length+
+          ' symbols (insufficient bars or no '+(validated?'validated':'rankable')+' strategy)':'')+
         '</div>':'')+
       summary+
-      '<div class="panel"><div class="panel-header"><h2>Combined portfolio equity vs. equal-weight buy &amp; hold</h2></div>'+
-      (result?.curve?.length?'<div class="equity-legend"><span><i class="equity-swatch strategy"></i>'+
-        (isBest?'Best-fit strategies':'Equal-weight strategy')+'</span><span><i class="equity-swatch benchmark"></i>Equal-weight buy &amp; hold</span></div>'+
-        '<div id="equity-chart" class="equity-plot"></div>':
-        '<div class="empty">Run the portfolio to see the combined curve.</div>')+'</div>'+
-      '<div class="panel"><div class="panel-header"><h2>Per-symbol breakdown</h2><span class="muted">'+rows.length+' symbols</span></div>'+
-      (rows.length?table:'<div class="empty">No portfolio results yet.</div>')+
-      (isBest?'<p class="section-note">Train = first 70%; OOS = untouched final 30%. Full portfolio return and equity curve cover both periods. OOS runs reset capital at the split, with prior bars used only for indicator warmup; minimum 30 holdout bars to judge Sharpe. Per-symbol dates and sources appear in the rows.</p>':'')+'</div>'+
-      (result?.unranked?.length?'<div class="info-strip warning" id="best-fit-unranked">No finite-Sharpe candidate for: '+
-        esc(result.unranked.map(x=>x.symbol+' ('+x.reason+')').join('; '))+'</div>':'')+
+      (noValidated?'':'<div class="panel"><div class="panel-header"><h2>Combined portfolio equity vs. equal-weight buy &amp; hold</h2></div>'+
+        (result?.curve?.length?'<div class="equity-legend"><span><i class="equity-swatch strategy"></i>'+
+          (isBest?'Best-fit strategies':'Equal-weight strategy')+'</span><span><i class="equity-swatch benchmark"></i>Equal-weight buy &amp; hold</span></div>'+
+          '<div id="equity-chart" class="equity-plot"></div>':
+          '<div class="empty">Run the portfolio to see the combined curve.</div>')+'</div>')+
+      (noValidated?'':'<div class="panel"><div class="panel-header"><h2>Per-symbol breakdown</h2><span class="muted">'+rows.length+' symbols</span></div>'+
+        (rows.length?table:'<div class="empty">No portfolio results yet.</div>')+
+        (isBest?'<p class="section-note">Train = first 70%; OOS = final 30% of the selected date range. Full portfolio return and equity curve cover both periods. OOS runs reset capital at the split, with prior bars used only for indicator warmup; minimum 30 holdout bars to judge Sharpe. '+
+          (validated?'Validation-selected strategies use the test period for selection and are not independently validated by the combined curve. ':'')+
+          'Per-symbol dates and sources appear in the rows.</p>':'')+'</div>')+
+      (result?.unranked?.length?'<div class="info-strip warning" id="best-fit-unranked">'+
+        (validated?'Excluded for validation: ':'No finite-Sharpe candidate for: ')+
+        esc(result.unranked.slice(0,10).map(x=>x.symbol+' ('+x.reason+')').join('; '))+
+        (result.unranked.length>10?' · +'+(result.unranked.length-10)+' more':'')+'</div>':'')+
       (result?.methodology?'<p class="section-note" id="portfolio-methodology">'+esc(result.methodology)+'</p>':'');
   }
   function portfolioOptimizeView(){
@@ -1557,8 +1593,10 @@ async function initApp(){
       S.portfolioError='';rememberPortfolio();S.tab='backtest';render();
     }catch(error){S.portfolioError=String(error.message||error);S.tab='backtest';render();notice(S.portfolioError);}
   }
+  let bestFitRunSerial=0,bestFitAttempted=S.portfolioResult?.mode==='best-fit';
   async function runBestFitCurrent(){
-    if(S.portfolioLoading)return;
+    const runId=++bestFitRunSerial;
+    bestFitAttempted=true;
     let symbols,window;
     try{
       symbols=portfolioSelection();
@@ -1566,18 +1604,21 @@ async function initApp(){
       if(!symbols.length)throw Error('No symbols selected. Choose scan matches or a populated watchlist.');
     }catch(error){S.portfolioError=String(error.message||error);S.tab='backtest';render();return;}
     S.portfolioError='';S.portfolioLoading=true;S.tab='backtest';render();
-    // Yield to render the progress status before comparing many strategies.
+    // Yield to render progress; an edited date or toggle supersedes an obsolete run.
     await new Promise(resolve=>setTimeout(resolve,0));
+    if(runId!==bestFitRunSerial)return;
     try{
       const result=runBestFitPortfolio({data:S.data,symbols,range:window,options:{...S.bt,timeframe:'D'},
+        validatedOnly:S.bestFitValidatedOnly,
         backtest,compilePine,executePine,sources:S.sources,
         savedScripts:S.scriptLibrary,builtInExamples:PINE_EXAMPLES,
         sourceSummary:S.mode==='live'?
           'ALPACA '+String(S.liveFeed).toUpperCase()+' 1Day bars · Worker scan '+(S.scan.at||'not available'):
           'SIMULATED Demo / imported daily OHLCV'});
+      if(runId!==bestFitRunSerial)return;
       S.portfolioResult=result;S.portfolioError='';rememberPortfolio();
-    }catch(error){S.portfolioError=String(error.message||error);notice(S.portfolioError);}
-    finally{S.portfolioLoading=false;S.tab='backtest';render();}
+    }catch(error){if(runId===bestFitRunSerial){S.portfolioError=String(error.message||error);notice(S.portfolioError);}}
+    finally{if(runId===bestFitRunSerial){S.portfolioLoading=false;S.tab='backtest';render();}}
   }
   function runPortfolioOptimization(){
     try{
@@ -1742,12 +1783,20 @@ async function initApp(){
     'export-screener':()=>exportScreenerCsv(),
     'run-portfolio':()=>runPortfolioCurrent(),
     'run-best-fit':()=>void runBestFitCurrent(),
-    'clear-bt-dates':()=>{S.btRange={startDate:'',endDate:''};S.backtestError='';S.portfolioError='';saveSettings();if(fitEverStarted)void runUniverseFitCurrent({reuseData:true});else render();},
+    'clear-bt-dates':()=>{S.btRange={startDate:'',endDate:''};S.backtestError='';S.portfolioError='';saveSettings();
+      if(S.portfolioMode&&S.bestFitMode&&bestFitAttempted)void runBestFitCurrent();
+      else if(fitEverStarted)void runUniverseFitCurrent({reuseData:true});else render();},
     'refresh-volatility':async ()=>{await switchToLive();if(S.mode==='live'){S.tab='volatility';render();}},
     'export-portfolio':()=>{if(!activePortfolioResult()){notice('Run this portfolio mode before exporting its results.');return;}
       const p=activePortfolioResult();
-      exportFile((S.bestFitMode?'best-fit':'equal-weight')+'-portfolio-breakdown.csv',
+      if(!p.breakdown?.length){notice('No qualifying symbols to export.');return;}
+      exportFile((S.bestFitMode?(S.bestFitValidatedOnly?'best-fit-validated':'best-fit'):'equal-weight')+'-portfolio-breakdown.csv',
         csvDownload(p.breakdown.map(r=>({symbol:r.symbol,strategy:r.strategyName||r.strategy,
+          fitMode:p.fitMode||'training',rollingMeanOosSharpe:r.rollingMeanSharpe??'',
+          rollingMedianOosSharpe:r.rollingMedianSharpe??'',
+          rollingPositiveWindows:r.rollingPositiveCount??'',
+          rollingTotalWindows:r.rollingWindowCount??'',
+          validationReasons:r.validationReasons?.join(' OR ')||'',
           fitSharpe:r.fitSharpe??'',trainReturnPct:r.trainMetrics?.returnPct??'',
           trainSharpe:r.trainMetrics?.sharpe??'',oosReturnPct:r.testMetrics?.returnPct??'',
           oosSharpe:r.validation?.enoughTestBars?r.testMetrics?.sharpe??'':'',
@@ -1983,8 +2032,17 @@ async function initApp(){
       if(opt==='fit-validated-only'){
         S.fitValidatedOnly=el.checked;saveSettings();render();return;
       }
+      if(opt==='best-fit-validated-only'){
+        S.bestFitValidatedOnly=el.checked;saveSettings();
+        if(bestFitAttempted)void runBestFitCurrent();else render();
+        return;
+      }
       if(opt==='watchlist-select'){selectWatchlist(val);render();return;}
-      if(opt==='portfolio-mode'){S.portfolioMode=val!=='single';S.bestFitMode=val==='best-fit';S.portfolioError='';saveSettings();render();return;}
+      if(opt==='portfolio-mode'){
+        ++bestFitRunSerial;S.portfolioLoading=false;
+        S.portfolioMode=val!=='single';S.bestFitMode=val==='best-fit';
+        S.portfolioError='';saveSettings();render();return;
+      }
       if(opt==='portfolio-scope'){S.portfolioScope=val;saveSettings();render();return;}
       if(opt==='portfolio-watchlist'){S.portfolioWatchlistId=val;saveSettings();render();return;}
       if(opt==='saved-scan-select'){if(val)loadSavedScan(val);else{clearSavedScanView();render();}return;}
@@ -2005,7 +2063,8 @@ async function initApp(){
     if(el.dataset.btRange){
       S.btRange={...S.btRange,[el.dataset.btRange]:el.value};
       S.backtestError='';S.portfolioError='';saveSettings();
-      if(fitEverStarted)void runUniverseFitCurrent({reuseData:true});else render();return;
+      if(S.portfolioMode&&S.bestFitMode&&bestFitAttempted)void runBestFitCurrent();
+      else if(fitEverStarted)void runUniverseFitCurrent({reuseData:true});else render();return;
     }
     if(el.dataset.bt){const key=el.dataset.bt;S.bt[key]=el.type==='number'?Number(el.value):el.value;S.result=null;S.sweep=null;saveSettings();return;}
   });

@@ -201,3 +201,28 @@ Nothing here submits live orders.
 - **Validated only** is an optional, saved Backtester leaderboard checkbox. When active it displays just executable strategies that (a) earned a positive finite Sharpe on the single chronological 70/30 OOS holdout with **at least 30 test bars**, **or** (b) had positive OOS Sharpe in **at least 3 of the 5** rolling windows, with at least three windows actually assessable. The header shows the filtered row count out of the complete comparison and the exact OR definition; the toggle applies to the leaderboard computed for the current selected Backtester dates and symbol. Zero qualifying rows display *No strategy validated on this window*, without manufacturing a numerical zero or dropping the existing unfiltered equity overlay. The original single-holdout **Validated** badge remains, with a distinct rolling-only badge when the rolling rule alone passes. The **Validation** sort uses the same rule.
 - **Daily Briefing** now shows two unambiguous independent research highlights for the selected Live symbol and Backtester dates, computed from actual daily Alpaca OHLCV, not from demo data: **Top validated strategy (rolling OOS)** picks the validated executable strategy with the highest finite *rolling mean* OOS Sharpe, and states its numerical mean plus rolling positive/assessable window counts. If no validated strategy has a numeric rolling mean, it says so explicitly. **Full-period best (full-period Sharpe)** separately names the highest full-period Sharpe, even when that strategy did not validate. Neither headline silently changes the separately selected Screener/Briefing strategy used for LONG/FLAT and flip alerts. Both lines are included in copied plain-text briefings and locally retained seven-day snapshots.
 - The 133-symbol Alpaca universe, Round 21 live-history versioning and bar-count checks, existing 70/30 and rolling computation, dates, equity overlays, backtesting, Chart Lab, and all earlier behavior remain intact.
+
+
+### Round 24 — Validated-only best-fit portfolio
+
+Best-fit portfolio retains its original **in-sample training Sharpe** selection as the default.
+When the **Validated only** checkbox is enabled, each selected, aligned symbol evaluates
+executable preset, saved Pine, and built-in example strategies using the same single
+70/30 holdout + five rolling OOS windows as the leaderboard and Round 23 Fit view.
+A strategy qualifies if its single holdout Sharpe is positive with 30+ test bars
+**OR** at least 3 of 5 rolling OOS windows have positive Sharpe. From the qualifying
+strategies, the strategy with the highest numeric rolling mean OOS Sharpe is chosen;
+a single-split-qualified strategy lacking a numeric rolling mean remains eligible,
+but ranks below numeric candidates. Symbols without a qualifying strategy are excluded
+and the combined equal-capital portfolio is reallocated only among survivors.
+
+The header reports qualified symbols **out of the actual selected set**. The per-symbol
+table includes the validating strategy, rolling mean OOS Sharpe and positive-window
+count; zero matches show "No symbol has a validated strategy on this window" with
+no invented holdings, curve, or performance. Date changes recalculate the mode,
+and the toggle survives reload. Saved in-sample results do not masquerade as
+validated ones. Export includes validation metrics.
+
+**Statistical caveat:** this mode selects strategies *using* OOS performance, so
+the full-period combined equity curve is **not** an independent out-of-sample
+validation of the portfolio. The rolling training windows overlap. Research only.
