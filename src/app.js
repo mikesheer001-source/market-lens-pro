@@ -78,7 +78,6 @@ async function initApp(){
   // Restore the default symbol's own run. Never mislabel a different symbol's global last analysis.
   restoreSymbolState(S.symbol);
   parseCurrentPine();
-  if(S.signalSelection!=='none')evaluateScreenerSignals(false);
   let chart=null,equityChart=null,leaderboardChart=null;
   const saveSettings=()=>{try{localStorage.setItem('market-lens-pro-settings',JSON.stringify({watch:[...S.watch],watchlists:S.watchlists,watchlistId:S.watchlistId,alerts:S.alerts,savedScans:S.savedScans,rules:S.rules,chart:S.chart,bt:S.bt,portfolioMode:S.portfolioMode,portfolioScope:S.portfolioScope,portfolioWatchlistId:S.portfolioWatchlistId,signalSelection:S.signalSelection,signalsOnly:S.signalsOnly,apiBaseUrl:S.apiBaseUrl,universeFilter:S.universeFilter}));}catch{}};
   function rememberPortfolio(){
@@ -1143,6 +1142,7 @@ async function initApp(){
   });
   document.addEventListener('dragover',ev=>{if(ev.target.closest('#dropzone')){ev.preventDefault();ev.target.closest('#dropzone').classList.add('dragging');}});
   document.addEventListener('drop',async ev=>{const drop=ev.target.closest('#dropzone');if(drop){ev.preventDefault();drop.classList.remove('dragging');await importFiles([...ev.dataTransfer.files].filter(f=>f.name.toLowerCase().endsWith('.csv')));}});
+  if(S.signalSelection!=='none')evaluateScreenerSignals(false);
   render();
   await loadStored();
 }
