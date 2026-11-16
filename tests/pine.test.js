@@ -177,3 +177,28 @@ test('history references and series arithmetic use only past bar values',()=>{
   assert.equal(computed.plots[0].values[0],null);
   assert.equal(computed.plots[0].values[1],bars[1].close-bars[0].close);
 });
+
+test('TRUE hidden bullish divergence triggers only after price higher low and RSI lower low',()=>{
+  const close=[];
+  for(let i=0;i<220;i++)close.push(100+i*.2);
+  const up=1.2,downs=13,downStep=-(8+7*up)/downs;
+  for(let j=0;j<20;j++)close.push(close.at(-1)+(j%3===0?up:downStep));
+  for(let j=0;j<25;j++)close.push(close.at(-1)+35/25);
+  for(let j=0;j<7;j++)close.push(close.at(-1)-31/7);
+  for(let j=0;j<12;j++)close.push(close.at(-1)+10/12);
+  const bars=close.map((value,i)=>({
+    time:new Date(Date.UTC(2025,0,1+i)).toISOString().slice(0,10),
+    open:value,high:value+.1,low:value-.05,close:value,volume:1000
+  }));
+  assert.ok(bars[271].low>bars[239].low,'higher price low is present');
+  const program=compilePine(example('hidden-rsi-divergence'));
+  assert.equal(program.mode,'strategy');
+  const result=executePine(program,bars,{pivotBars:5,trendLength:200});
+  assert.equal(result.signals.buy[271],false,'cannot know pivot until future five candles finish');
+  assert.equal(result.signals.buy[276],true,'hidden bullish divergence enters on confirmation bar');
+  assert.ok(result.shapes.some(shape=>shape.values[276]),'must draw entry marker');
+  assert.ok(result.signals.sell.every(v=>!v),'this is a long-only script');
+  const backtested=backtest(bars,{strategy:'pine-custom',customSignals:result.signals,feeBps:1,slipBps:2});
+  assert.ok(backtested.trades.length>0,'hidden divergence genuinely places trades');
+  assert.equal(backtested.trades[0].entry,bars[277].time,'entry fills at next bar open');
+});
