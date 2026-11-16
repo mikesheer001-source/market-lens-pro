@@ -77,10 +77,12 @@ export function compareStrategies({symbol,bars,options,source,backtest,compilePi
     }
   }
   const sorted=sortLeaderboard(rows),best=leaderboardBest(rows);
-  return {version:1,symbol,timeframe,source:source||'UNKNOWN',
+  const run={version:1,symbol,timeframe,source:source||'UNKNOWN',
     asOf:bars.at(-1)?.time||null,runAt:new Date().toISOString(),capital:Number(base.capital||10000),
     compared:sorted.length,savedPineStrategies:sorted.filter(x=>x.kind==='pine').length,
     settings:{...base},rows:sorted,bestId:best?.id||null,skipped};
+  run.overlay=buildEquityOverlay(run,bars);
+  return run;
 }
 export function updateSymbolMemory(memory,symbol,change,now=Date.now()){
   if(!symbol||typeof symbol!=='string')throw Error('Cannot save analysis without a symbol.');
