@@ -35,13 +35,11 @@ function normalizeBars(bars){
 
 function alpacaBars(items,timeframe='1Day') {
   const daily=/^(?:1Day|1Week|1Month)$/.test(timeframe);
-  const bars=(items||[]).map(b=>{
-    const timestamp=Date.parse(b.t);
-    return {
-      time:daily?new Date(timestamp).toISOString().slice(0,10):Math.floor(timestamp/1000),
-      open:Number(b.o),high:Number(b.h),low:Number(b.l),close:Number(b.c),volume:Number(b.v)||0
-    };
-  }).filter(b=>Number.isFinite(stamp(b.time))&&[b.open,b.high,b.low,b.close].every(Number.isFinite));
+  const bars=(items||[]).flatMap(b=>{
+    const timestamp=Date.parse(b.t),open=Number(b.o),high=Number(b.h),low=Number(b.l),close=Number(b.c);
+    if(!Number.isFinite(timestamp)||![open,high,low,close].every(Number.isFinite))return [];
+    return [{time:daily?new Date(timestamp).toISOString().slice(0,10):Math.floor(timestamp/1000),open,high,low,close,volume:Number(b.v)||0}];
+  });
   return normalizeBars(bars);
 }
 
