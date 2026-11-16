@@ -17,6 +17,8 @@ import {rollingPositiveText,rollingWindowDates,ROLLING_WINDOW_COUNT} from './rol
 import {VOL_TICKERS,volatilityRow,contangoPriceProxies} from './volatility.js';
 import {restoreWatchlists,watchlistChange,validateAlert,checkAlerts,makeScanSnapshot,analysisSnapshot,restoreAnalysis,WATCHLIST_LIMIT,SCAN_LIMIT,ALERT_LIMIT} from './workspace.js';
 import { LIVE_UNIVERSE, DEMO_UNIVERSE, VOLATILITY_UNIVERSE, LIVE_EQUITY_COUNT, LIVE_ETF_COUNT, LIVE_VOLATILITY_COUNT, ALPACA_BATCH_SIZE, ALPACA_SCAN_LOOKBACK_DAYS } from './universe.js';
+import {INDICATOR_SETTINGS,activeIndicatorReadings,updateChartField,updateIndicatorSetting,
+  nextFullscreenState,chartScaleOptions,resetPriceScale,macdSeries,bollingerSeries} from './chart-usability.js';
 async function initApp(){
   const {
     parseCsv,normalizeBars,alpacaBars,aggregate,ema,sma,rsi,indicators,statsFor,screenSymbol,backtest,parameterSweep,sampleData,csvDownload,stamp
@@ -39,7 +41,7 @@ async function initApp(){
     volatility:[{metric:'rsi',tf:'D',op:'<',value:60},{metric:'drawdown',tf:'D',op:'<',value:-5},{metric:'emaDist',tf:'D',op:'<',value:0}],
     all:[]
   };
-  const defaultSettings={tf:'D',style:'candles',log:false,ema20:true,ema50:false,ema200:true,sma20:false,bollinger:false,volume:true,rsi:true,macd:false,rsiPeriod:14,bollPeriod:20,ema20Len:20,ema50Len:50,ema200Len:200,sma20Len:20,lines:{}};
+  const defaultSettings={tf:'D',style:'candles',log:false,ema20:true,ema50:false,ema200:true,sma20:false,bollinger:false,volume:true,rsi:true,macd:false,rsiPeriod:14,bollPeriod:20,ema20Len:20,ema50Len:50,ema200Len:200,sma20Len:20,macdFast:12,macdSlow:26,macdSignal:9,lines:{}};
   const defaultBacktest={strategy:'ema-cross',side:'long',borrowAnnualPct:0,fast:20,slow:100,rsiPeriod:14,buyLevel:30,sellLevel:65,period:20,multiplier:2,capital:10000,allocation:100,feeBps:1,slipBps:2,stopPct:0,targetPct:0};
   let saved={};try{saved=JSON.parse(localStorage.getItem('market-lens-pro-settings')||'{}')||{};}catch{}
   const startupPrefs=normalizeStartupPreferences(saved);
@@ -83,6 +85,7 @@ async function initApp(){
     analysisLoading:'',analysisError:'',
     symbolMemory:previousSymbolMemory,leaderboard:null,leaderboardSort:'sharpe',leaderboardDescending:true,leaderboardError:'',fitReport:null,fitSort:'sharpe',fitDescending:true,fitStatus:'',fitError:'',
     briefing:null,briefingHistory:savedBriefings,briefingLoading:false,briefingError:'',drawLine:false,
+    chartFullscreen:false,indicatorEditor:null,pendingChartRange:null,fullscreenScrollY:0,
     scriptCode:typeof draft.code==='string'?draft.code:PINE_EXAMPLES[0].code,
     scriptName:typeof draft.name==='string'?draft.name:'EMA crossover',
     scriptId:draft.id||null,
@@ -550,21 +553,81 @@ async function initApp(){
         button('Add alert','alert-create','small primary')+
         '</div><div class="data-list">'+alertRows+'</div></div></div>';
   }
+  function preserveChartViewport(){
+    try{S.pendingChartRange=chart?.timeScale().getVisibleLogicalRange()||null;}
+    catch{S.pendingChartRange=null;}
+  }
+  function setChartFullscreen(enabled){
+    if(S.tab!=='charts')return;
+    preserveChartViewport();
+    const next=nextFullscreenState(S.chartFullscreen,enabled);
+    if(next&&!S.chartFullscreen)S.fullscreenScrollY=window.scrollY;
+    S.chartFullscreen=next;
+    render();
+    if(!next){
+      window.scrollTo(0,S.fullscreenScrollY);
+      document.querySelector('[data-action="chart-fullscreen"]')?.focus();
+    }else document.querySelector('[data-action="chart-exit-fullscreen"]')?.focus();
+  }
+  function chartIndicatorLegend(b){
+    const rows=activeIndicatorReadings(b,S.chart);
+    const num=n=>format(n,2);
+    return '<div class="chart-indicator-legend" id="chart-indicator-legend" role="group" aria-label="Active chart indicators">'+
+      '<div class="chart-indicator-legend-title">Active indicators</div>'+
+      (rows.length?rows.map(row=>{
+        const spec=INDICATOR_SETTINGS[row.key],editing=S.indicatorEditor===row.key;
+        const details=row.key==='bollinger'?' · U '+num(row.details[0])+' · L '+num(row.details[1]):
+          row.key==='macd'?' · Signal '+num(row.details[0]):'';
+        const fields=spec.periods.map(([field,label,min,max])=>
+          '<label class="chart-indicator-param" for="chart-indicator-'+esc(field)+'">'+esc(label)+
+          '<input id="chart-indicator-'+esc(field)+'" type="number" min="'+min+'" max="'+max+
+          '" step="1" data-indicator-key="'+esc(row.key)+'" data-indicator-field="'+esc(field)+
+          '" value="'+esc(S.chart[field])+'"/></label>').join('');
+        return '<div class="chart-indicator-row" data-indicator-row="'+esc(row.key)+'">'+
+          '<span class="chart-indicator-name">'+esc(row.label)+'</span>'+
+          '<span class="chart-indicator-value">'+num(row.value)+esc(details)+'</span>'+
+          '<button type="button" class="chart-indicator-gear" data-action="indicator-settings" '+
+          'data-indicator-key="'+esc(row.key)+'" aria-label="Settings for '+esc(row.label)+
+          '" aria-expanded="'+editing+'" aria-controls="indicator-settings-'+esc(row.key)+'">'+
+          '<span aria-hidden="true">⚙</span></button></div>'+
+          (editing?'<div class="chart-indicator-editor" id="indicator-settings-'+esc(row.key)+
+            '" aria-label="'+esc(row.label)+' settings">'+
+            '<label class="chart-indicator-visibility"><input type="checkbox" '+
+            'data-indicator-key="'+esc(row.key)+'" data-indicator-field="enabled" checked/> Show</label>'+
+            (fields||'<span class="chart-indicator-static">Raw volume · no period</span>')+
+            '<button type="button" class="chart-indicator-close" data-action="indicator-close" '+
+            'aria-label="Close '+esc(row.label)+' settings">Close</button></div>':'');
+      }).join(''):'<span class="chart-indicator-static">No active indicators. Use the toggles below.</span>')+
+    '</div>';
+  }
   function chartControls(){
     const styles=[['candles','Candlesticks'],['bars','OHLC bars'],['line','Line'],['area','Area']];
     const box=(k,label)=>'<label><input type="checkbox" data-chart="'+k+'" '+(S.chart[k]?'checked':'')+'/>'+label+'</label>';
-    return '<div class="chart-toolbar">'+symbolSelect()+tfSelect()+'<label class="control">Style '+select(styles,S.chart.style,'data-option="style"')+'</label><label class="control">Scale '+select([['false','Linear'],['true','Log']],String(S.chart.log),'data-option="log"')+'</label><div class="flex chart-actions">'+button('1M','range-1m','small')+button('3M','range-3m','small')+button('1Y','range-1y','small')+button('Show all bars','range-all','small')+button('Fit chart','range-fit','small')+'</div></div><div class="chart-readout" id="readout">Move over the chart to inspect OHLCV and indicators.</div><div class="chart-area" id="price-chart"></div><div class="chart-footer"><div class="indicator-options">'+box('ema20','EMA 20')+box('ema50','EMA 50')+box('ema200','EMA 200')+box('sma20','SMA 20')+box('bollinger','Bollinger')+box('volume','Volume')+box('rsi','RSI')+box('macd','MACD')+'<label>EMA A <input type="number" data-chart="ema20Len" min="2" max="500" value="'+S.chart.ema20Len+'"/></label><label>EMA B <input type="number" data-chart="ema50Len" min="2" max="500" value="'+S.chart.ema50Len+'"/></label><label>EMA C <input type="number" data-chart="ema200Len" min="2" max="500" value="'+S.chart.ema200Len+'"/></label><label>SMA <input type="number" data-chart="sma20Len" min="2" max="500" value="'+S.chart.sma20Len+'"/></label><label>Boll <input type="number" data-chart="bollPeriod" min="2" max="500" value="'+S.chart.bollPeriod+'"/></label><label>RSI period <input type="number" data-chart="rsiPeriod" min="2" max="100" value="'+S.chart.rsiPeriod+'"/></label></div><div class="flex">'+button(S.drawLine?'Click price to draw…':'Horizontal line','draw-line',S.drawLine?'selected small':'small')+button('Clear price levels','clear-lines','small')+button('Export PNG','chart-png','small')+'</div></div>';
+    return '<div class="chart-toolbar">'+symbolSelect()+tfSelect()+'<label class="control">Style '+select(styles,S.chart.style,'data-option="style"')+'</label><label class="control">Scale '+select([['false','Linear'],['true','Log']],String(S.chart.log),'data-option="log"')+'</label><div class="flex chart-actions">'+button('1M','range-1m','small')+button('3M','range-3m','small')+button('1Y','range-1y','small')+button('Show all bars','range-all','small')+button('Fit chart','range-fit','small')+button('Reset scale','reset-price-scale','small')+button(S.chartFullscreen?'Exit fullscreen':'Fullscreen',S.chartFullscreen?'chart-exit-fullscreen':'chart-fullscreen','small primary')+'</div></div><div class="chart-readout" id="readout">Move over the chart to inspect OHLCV and indicators.</div><div class="chart-area" id="price-chart"></div><div class="chart-footer"><div class="indicator-options">'+box('ema20','EMA 20')+box('ema50','EMA 50')+box('ema200','EMA 200')+box('sma20','SMA 20')+box('bollinger','Bollinger')+box('volume','Volume')+box('rsi','RSI')+box('macd','MACD')+'<label>EMA A <input type="number" data-chart="ema20Len" min="2" max="500" value="'+S.chart.ema20Len+'"/></label><label>EMA B <input type="number" data-chart="ema50Len" min="2" max="500" value="'+S.chart.ema50Len+'"/></label><label>EMA C <input type="number" data-chart="ema200Len" min="2" max="500" value="'+S.chart.ema200Len+'"/></label><label>SMA <input type="number" data-chart="sma20Len" min="2" max="500" value="'+S.chart.sma20Len+'"/></label><label>Boll <input type="number" data-chart="bollPeriod" min="2" max="500" value="'+S.chart.bollPeriod+'"/></label><label>RSI period <input type="number" data-chart="rsiPeriod" min="2" max="100" value="'+S.chart.rsiPeriod+'"/></label></div><div class="flex">'+button(S.drawLine?'Click price to draw…':'Horizontal line','draw-line',S.drawLine?'selected small':'small')+button('Clear price levels','clear-lines','small')+button('Export PNG','chart-png','small')+'</div></div>';
   }
   function chartsView(){
     const b=bars(),source=S.sources.get(S.symbol);
-    return head('Chart Lab','Drag to pan, wheel/pinch to zoom. Daily charts use Alpaca 1Day bars; 15m and 2H require real 15Min bars.',button('Backtest this symbol','view-backtest','primary'))+
-      (staleReason(S.symbol)?'<div class="info-strip warning" id="chart-stale-warning" role="status">'+
-        '<strong>'+esc(S.symbol)+' daily bars lag the observed universe reference '+esc(S.freshness.expected)+'</strong>'+
-        staleNote(S.symbol)+'</div>':'')+
-      '<div class="panel">'+chartControls()+'<div class="chart-intraday-control">'+
+    const intro=S.chartFullscreen?'':head('Chart Lab','Drag to pan, wheel/pinch to zoom. Daily charts use Alpaca 1Day bars; 15m and 2H require real 15Min bars.',button('Backtest this symbol','view-backtest','primary'));
+    const stale=!S.chartFullscreen&&staleReason(S.symbol)?
+      '<div class="info-strip warning" id="chart-stale-warning" role="status">'+
+      '<strong>'+esc(S.symbol)+' daily bars lag the observed universe reference '+esc(S.freshness.expected)+'</strong>'+
+      staleNote(S.symbol)+'</div>':'';
+    const panel='<div class="panel '+(S.chartFullscreen?'chart-is-fullscreen':'')+
+      '" id="chart-lab-panel" data-fullscreen="'+S.chartFullscreen+'">'+
+      chartControls()+'<div class="chart-stage" id="chart-stage">'+
+      '<div class="chart-axis-hint" id="chart-axis-hint">Drag the price scale to rescale · double-click the axis to reset</div>'+
+      '<div class="chart-area" id="price-chart"></div>'+
+      chartIndicatorLegend(b)+'</div>'+
+      '<div class="chart-intraday-control">'+
       (intradayTf(S.chart.tf)?button('Refresh Alpaca 15m candles','refresh-intraday','small'):'')+
-      '</div></div><div id="pine-chart-error" role="alert"></div>'+sourceStrip()+
-      '<div class="info-strip">Data: <strong>'+esc(S.symbol)+'</strong> · '+(source==='SIMULATED'?'simulated':source==='ALPACA'?'Alpaca '+String(S.liveFeed).toUpperCase():'imported')+' · '+b.length+' '+S.chart.tf+' bars. Price scaling, crosshair, volume, indicator panes, and annotations are interactive. Charts use TradingView Lightweight Charts, not the full TradingView platform.</div>';
+      '</div></div>';
+    const footer=S.chartFullscreen?'':'<div class="info-strip">Data: <strong>'+
+      esc(S.symbol)+'</strong> · '+
+      (source==='SIMULATED'?'simulated':source==='ALPACA'?'Alpaca '+String(S.liveFeed).toUpperCase():'imported')+
+      ' · '+b.length+' '+S.chart.tf+
+      ' bars. Price scaling, crosshair, volume, indicator panes, and annotations are interactive. Charts use TradingView Lightweight Charts, not the full TradingView platform.</div>';
+    return intro+stale+panel+(S.chartFullscreen?'':'<div id="pine-chart-error" role="alert"></div>')+
+      (S.chartFullscreen?'':sourceStrip())+footer;
   }
   function btOptions(){
     if(S.bt.strategy==='pine-custom'){
@@ -961,6 +1024,7 @@ async function initApp(){
   function render(){
     refreshLeaderboardIfRangeChanged();
     destroyCharts();shell();
+    document.body.classList.toggle('chart-fullscreen-active',S.chartFullscreen&&S.tab==='charts');
     const views={screener:screenerView,briefing:briefingView,charts:chartsView,backtest:backtestView,optimize:optimizeView,volatility:volatilityView,scripts:scriptView,data:dataView};
     $('#main').innerHTML=views[S.tab]();
     if(S.tab==='charts'){
@@ -979,7 +1043,7 @@ async function initApp(){
   }
   const colors={background:'#101515',text:'#a8b7b0',grid:'#23302b',up:'#46d69b',down:'#f08480',yellow:'#e9bd68',blue:'#71b8b3',indicator:'#d69c65'};
   function newChart(el,height=535,priceScaleWidth=55){
-    return createChart(el,{autoSize:true,height,layout:{background:{type:'solid',color:colors.background},textColor:colors.text,fontFamily:'system-ui, sans-serif',fontSize:11,panes:{separatorColor:'#314459',separatorHoverColor:'#456278'}},grid:{vertLines:{color:colors.grid},horzLines:{color:colors.grid}},crosshair:{mode:0},rightPriceScale:{borderColor:'#304357',minimumWidth:priceScaleWidth},timeScale:{borderColor:'#304357',rightOffset:10,barSpacing:8},handleScale:{mouseWheel:true,pinch:true,axisPressedMouseMove:{time:true,price:true}},handleScroll:{mouseWheel:true,pressedMouseMove:true,horzTouchDrag:true,vertTouchDrag:false}});
+    return createChart(el,{autoSize:true,height,layout:{background:{type:'solid',color:colors.background},textColor:colors.text,fontFamily:'system-ui, sans-serif',fontSize:11,panes:{separatorColor:'#314459',separatorHoverColor:'#456278'}},grid:{vertLines:{color:colors.grid},horzLines:{color:colors.grid}},crosshair:{mode:0},rightPriceScale:{borderColor:'#304357',visible:true,autoScale:true,minimumWidth:priceScaleWidth},timeScale:{borderColor:'#304357',rightOffset:10,barSpacing:8},handleScale:chartScaleOptions(),handleScroll:{mouseWheel:true,pressedMouseMove:true,horzTouchDrag:true,vertTouchDrag:false}});
   }
   function mountPriceChart(){
     const b=bars(),el=$('#price-chart');if(!b.length){const state=S.intradayStatus.get(intradayKey(S.symbol));
@@ -992,15 +1056,17 @@ async function initApp(){
     const base=chart.addSeries(type,{...baseOptions,...style});
     const datapoints=b.map(x=>S.chart.style==='line'||S.chart.style==='area'?{time:x.time,value:x.close}:{time:x.time,open:x.open,high:x.high,low:x.low,close:x.close});
     base.setData(datapoints);
-    const c=b.map(x=>x.close),ind=indicators(b,{rsiPeriod:S.chart.rsiPeriod,period:S.chart.bollPeriod});
+    const c=b.map(x=>x.close);
     for(const [name,vals,color] of [['ema20',ema(c,S.chart.ema20Len),colors.yellow],['ema50',ema(c,S.chart.ema50Len),colors.blue],['ema200',ema(c,S.chart.ema200Len),colors.indicator],['sma20',sma(c,S.chart.sma20Len),'#f7a75c']]){
       if(!S.chart[name])continue;
       const series=chart.addSeries(LineSeries,{color,lineWidth:2,priceLineVisible:false,lastValueVisible:true,title:name.toUpperCase()+'('+S.chart[name+'Len']+')'});
       series.setData(vals.flatMap((v,i)=>v==null?[]:[{time:b[i].time,value:v}]));
     }
     if(S.chart.bollinger){
-      const basev=sma(c,S.chart.bollPeriod);
-      for(const direction of [-1,1]){const ln=chart.addSeries(LineSeries,{color:'#758ead',lineWidth:1,priceLineVisible:false,title:direction>0?'Upper BB':'Lower BB'});ln.setData(basev.flatMap((v,i)=>{if(v==null)return [];const win=c.slice(i-S.chart.bollPeriod+1,i+1),std=Math.sqrt(win.reduce((sum,x)=>sum+(x-v)**2,0)/win.length);return [{time:b[i].time,value:v+direction*2*std}];}));}
+      const bb=bollingerSeries(c,S.chart.bollPeriod);
+      for(const direction of [-1,1]){const ln=chart.addSeries(LineSeries,{color:'#758ead',lineWidth:1,priceLineVisible:false,title:direction>0?'Upper BB':'Lower BB'});
+        const values=direction>0?bb.upper:bb.lower;
+        ln.setData(values.flatMap((v,i)=>v==null?[]:[{time:b[i].time,value:v}]));}
     }
     if(S.chart.volume){const vol=chart.addSeries(HistogramSeries,{priceScaleId:'volume',priceLineVisible:false,lastValueVisible:false,priceFormat:{type:'volume'}});vol.setData(b.map(x=>({time:x.time,value:x.volume||0,color:x.close>=x.open?'#317c6c88':'#8a3c5388'})));vol.priceScale().applyOptions({scaleMargins:{top:.83,bottom:0}});}
     let pane=1;
@@ -1012,8 +1078,9 @@ async function initApp(){
     if(S.chart.macd){
       const m=chart.addSeries(LineSeries,{color:colors.blue,lineWidth:2,priceLineVisible:false,title:'MACD'},pane);
       const sig=chart.addSeries(LineSeries,{color:colors.yellow,lineWidth:1,priceLineVisible:false,title:'Signal'},pane);
-      m.setData(ind.macd.flatMap((v,i)=>v==null?[]:[{time:b[i].time,value:v}]));
-      sig.setData(ind.signal.flatMap((v,i)=>v==null?[]:[{time:b[i].time,value:v}]));
+      const macdValues=macdSeries(c,S.chart);
+      m.setData(macdValues.macd.flatMap((v,i)=>v==null?[]:[{time:b[i].time,value:v}]));
+      sig.setData(macdValues.signal.flatMap((v,i)=>v==null?[]:[{time:b[i].time,value:v}]));
     }
     if(pane>1){try{chart.panes()[0].setHeight(S.chart.macd?310:360);}catch{}}
     if(S.chart.log)base.priceScale().applyOptions({mode:PriceScaleMode.Logarithmic});
@@ -1058,6 +1125,10 @@ async function initApp(){
     chart.subscribeCrosshairMove(param=>{const d=param.seriesData.get(base),el=$('#readout');if(!el||!d)return;const v=('close' in d?d.close:d.value),o='open'in d?d.open:null;
       el.innerHTML='<b>'+dateLabel(param.time||b.at(-1).time)+'</b><span>Open '+format(o)+'</span><span>High '+format('high' in d?d.high:null)+'</span><span>Low '+format('low' in d?d.low:null)+'</span><span>Close <b>'+format(v)+'</b></span>';});
     showRange(180);
+    if(S.pendingChartRange){
+      try{chart.timeScale().setVisibleLogicalRange(S.pendingChartRange);}catch{}
+      S.pendingChartRange=null;
+    }
   }
   function showRange(n){
     if(!chart)return;const total=bars().length;
