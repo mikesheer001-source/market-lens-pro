@@ -398,7 +398,7 @@ async function initApp(){
         !S.intraday.get(intradayKey(S.symbol))&&!S.intradayStatus.get(intradayKey(S.symbol)))
         void loadLiveIntraday(S.symbol);
     }
-    if(S.tab==='backtest'&&S.result?.curve?.length)mountEquity();
+    if(S.tab==='backtest'&&(S.portfolioMode?S.portfolioResult?.curve?.length:S.result?.curve?.length))mountEquity();
     saveSettings();
   }
   const colors={background:'#101515',text:'#a8b7b0',grid:'#23302b',up:'#46d69b',down:'#f08480',yellow:'#e9bd68',blue:'#71b8b3',indicator:'#d69c65'};
@@ -490,10 +490,14 @@ async function initApp(){
   function mountEquity(){
     const el=$('#equity-chart');if(!el)return;equityChart=newChart(el,275,92);
     const line=equityChart.addSeries(AreaSeries,{lineColor:colors.up,topColor:'#2aac765a',bottomColor:'#2aac7610',lineWidth:2,priceLineVisible:false,lastValueVisible:false,title:'Strategy'});
-    line.setData(S.result.curve);
+    const active=S.portfolioMode?S.portfolioResult:S.result;
+    line.setData(active.curve);
     const bb=equityChart.addSeries(LineSeries,{color:'#6c89a4',lineWidth:1,priceLineVisible:false,lastValueVisible:false,title:'Buy & hold'});
-    const all=bars(),byTime=new Map(all.map(b=>[stamp(b.time),b])),first=byTime.get(stamp(S.result.curve[0].time));
-    if(first)bb.setData(S.result.curve.map(p=>({time:p.time,value:S.bt.capital*(byTime.get(stamp(p.time))?.close||first.open)/first.open})));
+    if(S.portfolioMode&&active.benchmarkCurve?.length)bb.setData(active.benchmarkCurve);
+    else {
+      const all=bars(),byTime=new Map(all.map(b=>[stamp(b.time),b])),first=byTime.get(stamp(active.curve[0].time));
+      if(first)bb.setData(active.curve.map(p=>({time:p.time,value:S.bt.capital*(byTime.get(stamp(p.time))?.close||first.open)/first.open})));
+    }
     equityChart.timeScale().fitContent();
   }
   async function importFiles(files){
@@ -679,8 +683,43 @@ async function initApp(){
     S.savedScans.push(snapshot);S.savedScanId=id;S.scanDraft='';saveSettings();render();
     notice('Saved '+snapshot.rows.length+' screener rows and rules as "'+name+'".');
   }
+  function portfolioStrategyContext(){
+    const option={...S.bt,timeframe:'D'},active=S.activeStrategy||{code:S.scriptCode,settings:S.scriptSettings};
+    if(option.strategy!=='pine-custom')return {option,signals:null,inputs:null};
+    const compiled=compilePine(active.code);
+    if(compiled.mode!=='strategy')throw Error('Load a strategy() Pine script in Script Lab before running the portfolio.');
+    option.pineParams={...(active.settings||{})};
+    return {option,inputs:compiled.inputs,
+      signals:(symbol,bars,params)=>executePine(compiled,bars,{...option.pineParams,...params}).signals};
+  }
+  function runPortfolioCurrent(){
+    try{
+      const symbols=portfolioSelection(),{option,signals}=portfolioStrategyContext();
+      S.portfolioResult=runPortfolio(S.data,symbols,option,backtest,signals,{
+        sources:S.sources,sourceSummary:S.mode==='live'?
+          'ALPACA '+String(S.liveFeed).toUpperCase()+' 1Day bars · Worker scan '+(S.scan.at||'not available'):
+          'SIMULATED Demo / imported OHLCV daily bars'
+      });
+      S.portfolioError='';rememberPortfolio();S.tab='backtest';render();
+    }catch(error){S.portfolioError=error.message;S.tab='backtest';render();notice(error.message);}
+  }
+  function runPortfolioOptimization(){
+    try{
+      const symbols=portfolioSelection(),{option,signals,inputs}=portfolioStrategyContext();
+      S.portfolioSweep=runPortfolioSweep(S.data,symbols,option,backtest,signals,{pineInputs:inputs,sources:S.sources});
+      S.portfolioError='';rememberPortfolio();S.tab='optimize';render();
+    }catch(error){S.portfolioError=error.message;S.tab='optimize';render();notice(error.message);}
+  }
+
   const action={
     'export-screener':()=>exportScreenerCsv(),
+    'run-portfolio':()=>runPortfolioCurrent(),
+    'refresh-volatility':async ()=>{await switchToLive();if(S.mode==='live'){S.tab='volatility';render();}},
+    'export-portfolio':()=>{if(!S.portfolioResult){notice('Run an equal-weight portfolio before exporting its results.');return;}
+      const p=S.portfolioResult;
+      exportFile('equal-weight-portfolio-breakdown.csv',csvDownload(p.breakdown.map(r=>({symbol:r.symbol,source:r.source,weight:p.weights[r.symbol],
+        returnPct:r.returnPct,trades:r.trades,winRatePct:r.winPct,maxDrawdownPct:r.maxDD,sharpe:r.sharpe,
+        portfolioSource:p.sourceSummary,runAt:S.portfolioTimestamp}))));},
     'watchlist-create':()=>changeWatchlist('create'),
     'watchlist-rename':()=>changeWatchlist('rename'),
     'watchlist-delete':()=>changeWatchlist('delete'),
@@ -725,11 +764,28 @@ async function initApp(){
     'draw-line':()=>{S.drawLine=!S.drawLine;render();},
     'clear-lines':()=>{S.chart.lines[S.symbol]=[];render();},
     'chart-png':()=>{if(!chart)return;try{const canvas=chart.takeScreenshot();canvas.toBlob(blob=>{if(!blob)return;const url=URL.createObjectURL(blob),a=document.createElement('a');a.href=url;a.download='market-lens-'+S.symbol+'.png';a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);});}catch{notice('Chart image export is unsupported in this browser.');}},
-    'run-backtest':()=>{if(runBt())render();},
-    'run-sweep':()=>{if(bars().length<60){notice('A parameter sweep needs at least 60 bars.');return;}if(S.bt.strategy==='pine-custom'){sweepCurrentPine();return;}S.sweep=parameterSweep(bars(),{...S.bt,timeframe:S.chart.tf});rememberAnalysis();render();},
-    'apply-sweep':el=>{const params=S.sweep[Number(el.dataset.index)].params;if(S.bt.strategy==='pine-custom'){S.scriptSettings={...S.scriptSettings,...params};if(S.activeStrategy)S.activeStrategy.settings={...S.activeStrategy.settings,...params};persistPineDraft();}else Object.assign(S.bt,params);if(runBt()){S.tab='backtest';render();}},
+    'run-backtest':()=>{if(S.portfolioMode){runPortfolioCurrent();return;}if(runBt())render();},
+    'run-sweep':()=>{if(S.portfolioMode){runPortfolioOptimization();return;}if(bars().length<60){notice('A parameter sweep needs at least 60 bars.');return;}if(S.bt.strategy==='pine-custom'){sweepCurrentPine();return;}S.sweep=parameterSweep(bars(),{...S.bt,timeframe:S.chart.tf});rememberAnalysis();render();},
+    'apply-sweep':el=>{
+      if(S.portfolioMode){
+        const params=S.portfolioSweep?.[Number(el.dataset.index)]?.params;
+        if(!params){notice('Run a portfolio sweep first.');return;}
+        if(S.bt.strategy==='pine-custom'){
+          S.scriptSettings={...S.scriptSettings,...params};
+          if(S.activeStrategy)S.activeStrategy.settings={...S.activeStrategy.settings,...params};
+          persistPineDraft();
+        }else Object.assign(S.bt,params);
+        runPortfolioCurrent();return;
+      }
+      const params=S.sweep[Number(el.dataset.index)].params;if(S.bt.strategy==='pine-custom'){S.scriptSettings={...S.scriptSettings,...params};if(S.activeStrategy)S.activeStrategy.settings={...S.activeStrategy.settings,...params};persistPineDraft();}else Object.assign(S.bt,params);if(runBt()){S.tab='backtest';render();}},
     'export-trades':()=>{if(!S.result){notice('Run a backtest before exporting.');return;}exportFile(S.symbol+'-trades.csv',csvDownload(S.result.trades.map(t=>({symbol:S.symbol,strategy:S.bt.strategy,...t}))));},
-    'export-sweep':()=>{if(!S.sweep){notice('Run a parameter sweep first.');return;}exportFile(S.symbol+'-sweep.csv',csvDownload(S.sweep.map(r=>({params:JSON.stringify(r.params),trainReturn:r.train.returnPct,trainDrawdown:r.train.maxDD,trainTrades:r.train.trades,testReturn:r.test.returnPct,testDrawdown:r.test.maxDD,testTrades:r.test.trades,testProfitFactor:r.test.profitFactor}))));},
+    'export-sweep':()=>{const sweep=S.portfolioMode?S.portfolioSweep:S.sweep;
+      if(!sweep){notice('Run a parameter sweep first.');return;}
+      exportFile((S.portfolioMode?'equal-weight-portfolio':S.symbol)+'-sweep.csv',csvDownload(sweep.map(r=>({
+        params:JSON.stringify(r.params),source:S.portfolioMode?'Equal-weight daily sourced bars':S.sources.get(S.symbol),
+        symbolCount:r.n??1,trainReturn:r.train.returnPct,trainDrawdown:r.train.maxDD,
+        trainTrades:r.train.trades,testReturn:r.test.returnPct,testDrawdown:r.test.maxDD,
+        testTrades:r.test.trades,testSharpe:r.test.sharpe,testProfitFactor:r.test.profitFactor}))));},
     'export-sample':()=>{const b=S.data.get('DEMO-SPY');exportFile('SIMULATED-DEMO-SPY.csv',csvDownload(b.map(x=>({Date:x.time,Symbol:'DEMO-SPY',Open:x.open,High:x.high,Low:x.low,Close:x.close,Volume:x.volume}))));},
     'clear-imports':()=>removeImports(),
     'choose-symbol':el=>{S.symbol=el.dataset.symbol;S.tab='charts';S.result=null;S.sweep=null;render();}
@@ -778,6 +834,9 @@ async function initApp(){
     if(el.dataset.option){
       const opt=el.dataset.option,val=el.value;
       if(opt==='watchlist-select'){selectWatchlist(val);render();return;}
+      if(opt==='portfolio-mode'){S.portfolioMode=val==='portfolio';saveSettings();render();return;}
+      if(opt==='portfolio-scope'){S.portfolioScope=val;saveSettings();render();return;}
+      if(opt==='portfolio-watchlist'){S.portfolioWatchlistId=val;saveSettings();render();return;}
       if(opt==='saved-scan-select'){if(val)loadSavedScan(val);else{clearSavedScanView();render();}return;}
       if(opt==='preset'){if(val==='custom')return;clearSavedScanView();S.rules=(preset[val]||[]).map(x=>({...x}));S.universeFilter=val==='volatility'?'volatility':'all';S.scan={status:'idle'};}
       else if(opt==='symbol'){S.symbol=val;S.result=null;S.sweep=null;S.symbolQuery='';}
