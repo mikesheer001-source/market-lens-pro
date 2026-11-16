@@ -4,6 +4,7 @@
 import {windowBacktestBars} from './date-window.js';
 import {barDate} from './freshness.js';
 import {compareStrategies} from './leaderboard.js';
+import {attachRollingValidation} from './rolling-validation.js';
 
 export function compareStrategiesInRange({bars,range={},...config}){
   const selected=windowBacktestBars(bars,range);
@@ -12,7 +13,8 @@ export function compareStrategiesInRange({bars,range={},...config}){
   // Do not impose the full-history research gate on its leaderboard.
   // At least five bars are needed for a 3-bar train and 2-bar test split.
   const report=compareStrategies({...config,bars:selected.bars,minBars:explicit?5:40});
-  return {...report,range:selected.range};
+  const withRolling=attachRollingValidation(report,selected.bars,config);
+  return {...withRolling,range:selected.range};
 }
 
 // Check BOTH the dates requested in the controls and the bars actually used.
