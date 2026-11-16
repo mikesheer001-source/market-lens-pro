@@ -136,6 +136,34 @@ async function initApp(){
       '<div class="panel"><div class="panel-header"><h2>Run sweep</h2><div class="flex"><label class="control">Strategy '+select([['ema-cross','EMA cross'],['rsi-revert','RSI reversion'],['trend-rsi','Trend + RSI'],['bollinger','Bollinger'],['breakout','Breakout']],S.bt.strategy,'data-bt="strategy"')+'</label>'+button('Run 5–9 variations','run-sweep','primary')+button('Export CSV','export-sweep','small')+'</div></div><div class="panel-body"><p class="section-note">Each variation is trained on the first 70% of the dataset and independently simulated on the last 30%, using earlier bars only for indicator warm-up. The table sorts by holdout return. Choosing the best holdout result itself introduces selection bias; confirm on unseen data.</p></div></div>'+
       '<div class="panel"><div class="panel-header"><h2>Parameter ranking</h2><span class="muted">'+rows.length+' variations</span></div><div class="table-wrap">'+(rows.length?'<table class="data-table"><thead><tr><th>Parameters</th><th>Train return</th><th>Train DD</th><th>Test return</th><th>Test DD</th><th>Test trades</th><th>Test PF</th><th></th></tr></thead><tbody>'+rows.map((r,i)=>'<tr class="'+(i===0?'sweep-best':'')+'"><td>'+esc(Object.entries(r.params).map(([k,v])=>k+'='+v).join(', '))+'</td><td class="'+priceColor(r.train.returnPct)+'">'+pct(r.train.returnPct)+'</td><td>-'+format(r.train.maxDD)+'%</td><td class="'+priceColor(r.test.returnPct)+'">'+pct(r.test.returnPct)+'</td><td>-'+format(r.test.maxDD)+'%</td><td>'+r.test.trades+'</td><td>'+format(r.test.profitFactor)+'</td><td><button class="btn small" data-action="apply-sweep" data-index="'+i+'">Apply & test</button></td></tr>').join('')+'</tbody></table>':'<div class="empty"><strong>No sweep yet</strong>Choose a strategy and run a parameter sweep.</div>')+'</div></div>';
   }
+  function scriptView(){
+    const parsed=S.scriptParsed,inputs=parsed?.inputs||[];
+    const examples=PINE_EXAMPLES.map(ex=>button(ex.label,'pine-example','small').replace('data-action="pine-example"','data-action="pine-example" data-example="'+esc(ex.id)+'"')).join('');
+    const library=S.scriptLibrary.length?S.scriptLibrary.map(item=>
+      '<option value="'+esc(item.id)+'"'+(S.scriptId===item.id?' selected':'')+'>'+esc(item.name)+'</option>').join(''):'';
+    const settings=inputs.length?'<div class="pine-settings">'+inputs.map(spec=>{
+      const value=Object.hasOwn(S.scriptSettings,spec.name)?S.scriptSettings[spec.name]:spec.default;
+      const input=spec.type==='bool'?'<input type="checkbox" data-pine-input="'+esc(spec.name)+'" '+(value?'checked':'')+'/>':
+        '<input type="number" data-pine-input="'+esc(spec.name)+'" value="'+esc(value)+'" step="'+esc(spec.step|| (spec.type==='int'?1:.1))+'"'+(spec.min!==undefined?' min="'+esc(spec.min)+'"':'')+(spec.max!==undefined?' max="'+esc(spec.max)+'"':'')+'/>';
+      return '<label class="field">'+esc(spec.title)+' <small>('+esc(spec.name)+')</small>'+input+'</label>';
+    }).join('')+'</div>':'<div class="section-note">This script has no editable input.int(), input.float(), or input.bool() controls.</div>';
+    const status=S.scriptError?'<div class="pine-error" role="alert">'+esc(S.scriptError)+'</div>':
+      S.scriptOutput?'<div class="info-strip" role="status">'+esc(S.scriptOutput)+'</div>':
+      parsed?'<div class="info-strip" role="status">'+esc(parsed.mode.toUpperCase())+' · '+esc(parsed.title)+' · '+(parsed.overlay?'Price overlay':'Own indicator pane')+'</div>':'';
+    return head('Script Lab','Write and run the supported Pine Script v5 subset locally. Scripts never leave this device.',symbolSelect()+tfSelect())+
+      '<div class="panel"><div class="panel-header"><h2>Example scripts</h2><span class="muted">Load to edit</span></div><div class="panel-body"><div class="pine-examples">'+examples+'</div></div></div>'+
+      '<div class="panel"><div class="panel-header"><h2>Source editor</h2><span class="source-badge">Pine v5 subset · local only</span></div><div class="panel-body">'+
+        '<div class="pine-editor-actions"><label class="field">Script name<input id="pine-name" maxlength="100" value="'+esc(S.scriptName)+'" aria-label="Script name"/></label><label class="field">Saved scripts<select id="pine-library"><option value="">Choose saved script</option>'+library+'</select></label></div>'+
+        '<label class="field" for="pine-editor">Pine Script source</label><textarea id="pine-editor" class="pine-editor" spellcheck="false" aria-label="Pine Script v5 source" rows="21">'+esc(S.scriptCode)+'</textarea>'+
+        '<div class="flex pine-actions">'+button('Check syntax','pine-check','small')+button('Run script','pine-run','primary')+button('Sweep script inputs','pine-sweep','small')+button('Save script','pine-save','small')+button('Save copy','pine-copy','small')+button('Rename saved script','pine-rename','small')+button('Delete saved script','pine-delete','small')+'</div>'+status+
+        '<p class="section-note">Execution is a bounded JavaScript interpreter, not TradingView itself. It supports v5 declarations, common ta.* functions, history references, input controls, conditional assignments, plot/plotshape, and strategy orders with when=. Unsupported Pine language features return line-numbered errors. Script exits use next-bar order fills, and the existing backtest cost model.</p>'+
+      '</div></div>'+
+      '<div class="panel"><div class="panel-header"><h2>Input settings</h2><span class="muted">'+inputs.length+' controls</span></div><div class="panel-body">'+settings+'</div></div>'+
+      '<div class="panel"><div class="panel-header"><h2>Active chart indicators</h2>'+button('Clear Pine plots','pine-clear-plots','small')+'</div><div class="panel-body"><p class="section-note">'+
+        (S.activeIndicators.length?S.activeIndicators.map(x=>esc(x.name)).join(', '):'No custom indicators applied to Chart Lab yet.')+
+        '</p></div></div>';
+  }
+
   function dataView(){
     const imported=[...S.data].filter(([k])=>S.sources.get(k)==='IMPORTED');
     return head('Data Center','Import historical prices or configure the secure Alpaca market-wide scanner.',button('Import CSV files','import','primary'))+
