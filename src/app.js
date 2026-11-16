@@ -3,7 +3,7 @@ import {compilePine, executePine, sweepPine, PineError} from './pine.js';
 import {PINE_EXAMPLES} from './pine-examples.js';
 import {readableBarDate,normalizeStartupPreferences,intradayCacheFresh,intradayFetchDecision} from './intraday-session.js';
 import {availableStrategySignals,evaluateStrategySignals,scanSignalFlips} from './signals.js';
-import {expectedNyseBarDate,scanFreshness,explainStaleSymbol} from './freshness.js';
+import {expectedNyseBarDate,scanFreshness,staleReasonForSymbol} from './freshness.js';
 import {FIT_COLUMNS,sortUniverseFit,bestUniverseFit,fitAcrossUniverse} from './fit.js';
 import {compileDailyBriefing,briefingToText,pruneBriefingHistory,saveBriefingHistory} from './briefing.js';
 import {renderBriefingView} from './briefing-view.js';
@@ -425,6 +425,33 @@ async function initApp(){
     list.sort((a,b)=>{const x=value(a),y=value(b);if(x==null)return 1;if(y==null)return -1;return (typeof x==='string'?x.localeCompare(y):x-y)*(S.ascending?1:-1);});
     return list;
   }
+  function staleReason(symbol){
+    return S.mode==='live'&&S.scan.status==='complete'&&S.sources.get(symbol)==='ALPACA'?
+      staleReasonForSymbol(symbol,S.freshness,S.staleDiagnostics):null;
+  }
+  function staleNote(symbol){
+    const reason=staleReason(symbol);
+    return reason?'<small class="stale-reason" role="status" data-stale-symbol="'+esc(symbol)+
+      '">'+esc(reason)+'</small>':'';
+  }
+  function freshnessPanel(){
+    if(S.mode!=='live'||S.scan.status!=='complete'||!S.freshness)
+      return '<section class="panel" id="data-freshness"><div class="panel-header"><h2>Alpaca daily-bar freshness</h2></div><div class="panel-body"><p class="section-note">Run a live scan to compare actual latest daily bar dates across all '+LIVE_UNIVERSE.length+' symbols.</p></div></section>';
+    const f=S.freshness,stale=f.stale||[];
+    return '<section class="panel" id="data-freshness"><div class="panel-header"><h2>Alpaca daily-bar freshness</h2>'+
+      '<span class="source-badge">'+(f.checked-stale.length)+'/'+f.checked+' current</span></div>'+
+      '<div class="panel-body"><div class="info-strip '+(stale.length?'warning':'')+'">'+
+      (stale.length?'Stale daily bars':'Fresh daily bars')+
+      ' · reference latest-bar session <strong>'+esc(f.expected)+'</strong>'+
+      ' · reference selected by most common date across loaded Alpaca symbols · feed '+
+      esc(String(S.liveFeed).toUpperCase())+' · '+esc(S.scan.cached?'15-minute cached scan':'live scan')+
+      '</div>'+(stale.length?'<div class="freshness-details">'+stale.map(x=>
+        '<div class="data-item" data-data-stale-symbol="'+esc(x.symbol)+'"><strong>'+
+        esc(x.symbol)+'</strong> · actual latest bar '+esc(x.latest||'missing')+
+        staleNote(x.symbol)+'</div>').join('')+'</div>':
+      '<p class="section-note">All loaded ticker bar dates match the observed reference session.</p>')+
+      '</div></section>';
+  }
   function activeAlertBanner(){
     const unread=S.alerts.filter(a=>a.unread);
     const alertsBanner=unread.length?'<div class="alert-banner" role="alert"><strong>'+unread.length+' in-app alert'+(unread.length===1?'':'s')+' triggered</strong>'+
@@ -448,7 +475,7 @@ async function initApp(){
     const rules=S.rules.map((r,i)=>'<div class="rule"><span class="visually-hidden" id="rule-label-'+i+'">Filter condition '+(i+1)+'</span>'+select([['D','D'],['W','W'],['M','M'],['2H','2H']],r.tf,'aria-label="Filter '+(i+1)+' timeframe" data-rule="'+i+'" data-key="tf"')+select([['rsi','RSI'],['emaDist','% vs EMA200'],['ret20','20-bar %'],['drawdown','Drawdown %'],['atrPct','ATR %'],['price','Price'],['volume','Volume']],r.metric,'aria-label="Filter '+(i+1)+' indicator" data-rule="'+i+'" data-key="metric"')+select([['<','<'],['<=','≤'],['>','>'],['>=','≥']],r.op,'aria-label="Filter '+(i+1)+' comparison" data-rule="'+i+'" data-key="op"')+'<input aria-label="Filter threshold '+(i+1)+'" type="number" step="any" data-rule="'+i+'" data-key="value" value="'+esc(r.value)+'"/><button data-action="remove-rule" data-index="'+i+'" aria-label="Remove filter">×</button></div>').join('');
     const table=rows.map(r=>{const dd=r.d.ema200==null?null:(r.d.price/r.d.ema200-1)*100;
       return '<tr tabindex="0" role="button" aria-label="Open chart for '+esc(r.symbol)+'" class="'+(r.symbol===S.symbol?'chosen':'')+'" data-symbol="'+r.symbol+'"><td><button class="star '+(S.watch.has(r.symbol)?'on':'')+'" data-action="watch" data-symbol="'+r.symbol+'" aria-label="Toggle watchlist">'+(S.watch.has(r.symbol)?'★':'☆')+'</button><span class="table-table-label">'+r.symbol+'</span> <span class="muted">'+(r.source==='ALPACA'?'LIVE':r.source==='SIMULATED'?'DEMO':'CSV')+'</span></td><td>'+format(r.d.price)+'</td><td>'+format(r.d.rsi,1)+'</td><td>'+format(r.w.rsi,1)+'</td><td>'+format(r.d.rsi5,1)+'</td><td class="'+priceColor(dd)+'">'+pct(dd)+'</td><td class="'+priceColor(r.d.ret20)+'">'+pct(r.d.ret20)+'</td><td class="'+priceColor(r.d.drawdown)+'">'+pct(r.d.drawdown)+'</td><td>'+r.d.bars+'</td><td><span class="pill '+(r.evalResult.pass?'':'dim')+'" title="'+esc(r.evalResult.fails.join('; '))+'">'+(r.evalResult.pass?'MATCH':'NO MATCH')+'</span></td>'+
-        '<td class="fresh-date">'+esc(r.latestBar||'—')+'</td>'+
+        '<td class="fresh-date">'+esc(r.latestBar||'—')+staleNote(r.symbol)+'</td>'+
         '<td><span class="signal-status '+(r.signal?.status==='LONG'?'signal-long':r.signal?.status==='EXIT'?'signal-exit':'signal-flat')+
         '" title="'+esc((r.signal?.reason||r.signal?.exitReason||'')+' · '+(r.signal?.source||r.source||'unknown'))+
         '">'+esc(r.signal?.status||'—')+'</span><small class="signal-date">'+esc(r.signal?.barDate||'')+'</small></td></tr>';
@@ -457,11 +484,11 @@ async function initApp(){
     const freshness=S.mode==='live'&&S.scan.status==='complete'?S.freshness:null;
     const stale=freshness?.stale||[];
     const freshnessBadge=freshness?'<div id="scan-freshness" class="freshness-strip '+(freshness.allFresh?'fresh-ok':'fresh-warning')+
-      '" role="status"><strong>'+(freshness.allFresh?'Fresh daily bars':'Stale daily bars')+'</strong> · expected NYSE session '+
+      '" role="status"><strong>'+(freshness.allFresh?'Fresh daily bars':'Stale daily bars')+'</strong> · reference latest-bar session '+
       esc(freshness.expected)+' · '+(freshness.checked-stale.length)+'/'+freshness.checked+' current'+
       (stale.length?'<details class="freshness-details" open><summary>'+stale.length+' older or missing symbol(s)</summary>'+
-        '<span>'+stale.map(x=>esc(x.symbol)+' ('+esc(x.latest||'missing')+'): '+esc(explainStaleSymbol(x,S.staleDiagnostics[x.symbol]))).join(' · ')+'</span></details>':'')+
-      '<small>Actual ALPACA '+esc(String(S.liveFeed).toUpperCase())+' 1Day bars · NYSE trading calendar; expect a new daily bar only after 16:30 ET. '+
+        '<span>'+stale.map(x=>esc(x.symbol)+' ('+esc(x.latest||'missing')+'): '+esc(staleReason(x.symbol))).join(' · ')+'</span></details>':'')+
+      '<small>Actual ALPACA '+esc(String(S.liveFeed).toUpperCase())+' 1Day bars · reference is the most common observed last-bar date (not the clock cutoff). '+
       (S.scan.retry?.attempted?.length?'Worker retried '+S.scan.retry.attempted.length+' stale tickers once.':'')+
       '</small></div>':'';
     const selectedStrategy=screenerStrategies().find(x=>x.id===S.signalSelection);
@@ -522,6 +549,9 @@ async function initApp(){
   function chartsView(){
     const b=bars(),source=S.sources.get(S.symbol);
     return head('Chart Lab','Drag to pan, wheel/pinch to zoom. Daily charts use Alpaca 1Day bars; 15m and 2H require real 15Min bars.',button('Backtest this symbol','view-backtest','primary'))+
+      (staleReason(S.symbol)?'<div class="info-strip warning" id="chart-stale-warning" role="status">'+
+        '<strong>'+esc(S.symbol)+' daily bars lag the observed universe reference '+esc(S.freshness.expected)+'</strong>'+
+        staleNote(S.symbol)+'</div>':'')+
       '<div class="panel">'+chartControls()+'<div class="chart-intraday-control">'+
       (intradayTf(S.chart.tf)?button('Refresh Alpaca 15m candles','refresh-intraday','small'):'')+
       '</div></div><div id="pine-chart-error" role="alert"></div>'+sourceStrip()+
@@ -737,7 +767,7 @@ async function initApp(){
         ' Source: '+esc(proxy.sources||'No ticker data loaded')+'. No VIX futures maturities, options implied volatility or actual roll yield are available in this feed.</p></div></div>'+
       '<div class="panel"><div class="panel-header"><h2>Volatility product metrics</h2><span class="muted">'+available.size+' of '+VOL_TICKERS.length+' products with daily bars</span></div>'+
       '<div class="table-wrap"><table class="data-table"><thead><tr><th>Symbol</th><th>OHLCV source</th><th>Bar date</th><th>Close</th><th>20D return</th><th>RV 20D</th><th>RV 60D</th><th>252D high DD</th><th>Bars</th></tr></thead><tbody>'+
-      rows.map(r=>'<tr data-vol-symbol="'+esc(r.symbol)+'"><td>'+esc(r.symbol)+'</td><td>'+esc(r.source)+'</td><td>'+esc(r.asOf||'—')+'</td>'+
+      rows.map(r=>'<tr data-vol-symbol="'+esc(r.symbol)+'"><td>'+esc(r.symbol)+'</td><td>'+esc(r.source)+'</td><td>'+esc(r.asOf||'—')+staleNote(r.symbol)+'</td>'+
         '<td>'+format(r.close)+'</td><td class="'+priceColor(r.return20)+'">'+pct(r.return20)+'</td><td>'+pct(r.rv20)+'</td><td>'+pct(r.rv60)+'</td>'+
         '<td class="'+priceColor(r.drawdown252)+'">'+pct(r.drawdown252)+'</td><td>'+format(r.bars,0)+'</td></tr>').join('')+'</tbody></table></div></div>'+
       '<div class="info-strip">Method: 20D return = Close(t)/Close(t−20)−1. RV 20D/60D = sample standard deviation of 20/60 daily logarithmic returns × sqrt(252), annualized. High DD = Close / maximum daily HIGH across the last 252 sessions − 1. Values shown only with sufficient history.</div>';
@@ -774,6 +804,7 @@ async function initApp(){
   function dataView(){
     const imported=[...S.data].filter(([k])=>S.sources.get(k)==='IMPORTED');
     return head('Data Center','Import historical prices or configure the secure Alpaca market-wide scanner.',button('Import CSV files','import','primary'))+
+      freshnessPanel()+
       '<div class="panel"><div class="panel-header"><h2>Live market scanner · Alpaca</h2><span class="source-badge">Keys stay server-side</span></div><div class="panel-body"><label class="field">Cloudflare Worker API URL<input type="url" data-setting="apiBaseUrl" placeholder="https://market-lens-pro-api.your-subdomain.workers.dev" value="'+esc(S.apiBaseUrl)+'"/></label><div class="flex" style="margin-top:13px">'+button('Test backend','test-live','small')+button('Scan live universe & switch to Live','mode-live','primary')+button('Switch to Demo','mode-demo','small')+'</div><div class="info-strip">The live universe is '+LIVE_UNIVERSE.length+' curated symbols — not a full S&P 500 constituent list: '+LIVE_EQUITY_COUNT+' liquid US equities, '+LIVE_ETF_COUNT+' broad-market ETFs and '+LIVE_VOLATILITY_COUNT+' live volatility tickers. The volatility filter list has '+VOLATILITY_UNIVERSE.length+' entries, including the synthetic DEMO-VXX proxy; Demo mode scans '+DEMO_UNIVERSE.length+' synthetic symbols. Live volatility tickers include VXX, UVXY, SVXY, VIXY, VIXM, VXZ, SVIX, UVIX, SVOL and ZVOL. The Worker requests 550 calendar days of daily bars in batches of '+ALPACA_BATCH_SIZE+' symbols ('+Math.ceil(LIVE_UNIVERSE.length/ALPACA_BATCH_SIZE)+' batches for the current universe), paginates if necessary, and caches completed scans for 15 minutes. The default feed is IEX; consolidated SIP data requires an eligible Alpaca subscription.</div><p class="section-note">Alpaca credentials remain in encrypted Cloudflare Worker secrets. The browser receives OHLCV only. If the live request fails, the app returns to Demo mode automatically. The market-wide scanner uses daily bars over REST. Chart Lab fetches genuine Alpaca 15Min bars for the selected Live symbol when 15m or 2H is chosen; it never fabricates intraday from daily. No streaming WebSocket.</p><p class="section-note">The setup guide is in <code>docs/ALPACA_SETUP.md</code>. No keys belong in this website, browser storage, or chat.</p></div></div>'+
       '<div class="panel"><div class="panel-header"><h2>Import historical data</h2><span class="source-badge">Browser only · IndexedDB</span></div><div class="panel-body"><div class="upload" id="dropzone"><strong>Drop one or more CSV files here</strong><p class="subtle">Or tap to browse. Multiple symbols are supported in a single file.</p>'+button('Choose CSV files','import')+'</div><div class="info-strip">Required columns: <code>Date,Open,High,Low,Close</code>. Optional: <code>Symbol,Volume</code>. For daily files, enter ISO dates like 2026-01-05. Chart Lab in Live mode fetches real 15Min bars, aggregates them into 2H OHLCV, and labels the IEX source. Market-wide 2H screener rules still require timestamped intraday inputs. Imported CSV prices should be split-adjusted consistently. Close-only files are permitted but weaken fill accuracy.</div></div></div>'+
       '<div class="panel"><div class="panel-header"><h2>Saved imported symbols</h2><div class="flex">'+button('Reset to demo data','clear-imports','small')+button('Export sample CSV','export-sample','small')+'</div></div><div class="panel-body"><div class="data-list">'+(imported.length?imported.map(([symbol,b])=>'<div class="data-item"><div><strong>'+esc(symbol)+'</strong><br/><small>'+b.length+' bars · '+dateLabel(b[0].time)+' to '+dateLabel(b.at(-1).time)+'</small></div><button class="btn small" data-action="choose-symbol" data-symbol="'+esc(symbol)+'">Open chart</button></div>').join(''):'<div class="empty"><strong>No imported data yet.</strong>Four clearly labeled synthetic symbols are included to demonstrate the interface.</div>')+'</div></div></div>'+
