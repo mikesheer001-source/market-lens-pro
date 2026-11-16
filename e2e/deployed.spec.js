@@ -65,6 +65,9 @@ test('published strategy leaderboard compares presets, renders top three, and re
   await page.locator('.sidebar [data-tab="backtest"]').click();
   await page.locator('[data-action="compare-strategies"]').first().click();
   await expect(page.locator('.leaderboard-table tbody tr')).toHaveCount(12);
+  await expect(page.locator('.leaderboard-table')).toContainText('Train Sharpe (rank)');
+  await expect(page.locator('.leaderboard-table')).toContainText('OOS Sharpe (30%)');
+  await expect(page.locator('#walk-forward-summary')).toContainText('Source: SIMULATED');
   await expect(page.locator('.leaderboard-best')).toHaveCount(1);
   await expect(page.locator('.leaderboard-table')).toContainText('Hidden bullish RSI divergence');
   await expect(page.locator('.leaderboard-table')).toContainText('Indicator · N/A');
@@ -114,6 +117,9 @@ test('published Round 15 best-fit portfolio and date-range controls work on depl
   await expect(page.locator('#portfolio-source')).toContainText('Saved best-fit portfolio',{timeout:80000});
   await expect(page.locator('#portfolio-source')).toContainText('Full available range');
   await expect(page.locator('#portfolio-breakdown tr[data-portfolio-symbol="DEMO-VXX"]')).toContainText('Fit Sharpe:');
+  await expect(page.locator('#portfolio-breakdown')).toContainText('Train return');
+  await expect(page.locator('#portfolio-breakdown')).toContainText('OOS return');
+  await expect(page.locator('#portfolio-breakdown')).toContainText('OOS Sharpe');
   await expect(page.locator('#portfolio-methodology')).toContainText('selection bias');
   await expect(page.locator('#equity-chart canvas').first()).toBeVisible();
   expect(errors).toEqual([]);
