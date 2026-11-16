@@ -10,7 +10,7 @@ This connection is read-only: it retrieves stock bars and does not place trades.
 2. A Cloudflare account with the Workers workers.dev hostname enabled.
 3. Permission to add GitHub repository Actions secrets and run workflows.
 
-The default feed is IEX. Alpaca Basic market data is IEX-only for real-time equities. SIP is consolidated US exchange data and requires the appropriate Alpaca subscription. Live mode scans a bundled universe of 100+ liquid US stocks, broad-market ETFs, and volatility products. It requests 550 calendar days of daily bars in batches of 15 symbols, paginates when needed, and caches the completed scan at Cloudflare's edge for 15 minutes. It uses REST; it does not open a WebSocket or stream every tick.
+The default feed is IEX. Alpaca Basic market data is IEX-only for real-time equities. SIP is consolidated US exchange data and requires the appropriate Alpaca subscription. Live mode scans exactly 133 curated symbols: 105 liquid US equities, 18 broad-market ETFs, and 10 live volatility tickers. This is not a full S&P 500 constituent list. The volatility filter list has 11 entries, including the synthetic DEMO-VXX proxy used only in Demo mode. Demo mode contains exactly 4 synthetic symbols. The Worker requests 550 calendar days of daily bars in batches of 15 symbols (9 batches for the current 133-symbol universe), paginates when needed, and caches the completed scan at Cloudflare's edge for 15 minutes. It uses REST; it does not open a WebSocket or stream every tick.
 
 ## 1. Create the Cloudflare deployment credentials
 
@@ -68,7 +68,7 @@ If it reports a missing secret, add the exact missing name above and rerun it. T
 5. Click **Test backend** to confirm the Worker and its encrypted Alpaca secrets are ready.
 6. Click **Scan live universe & switch to Live**, or use the top-bar **Live** switch. The app fetches the bundled universe and displays the symbols with returned bars.
 7. Use **Refresh live scan** in the Screener to refresh the universe. Repeated scans within 15 minutes are served from the Worker cache rather than sending another batch of Alpaca requests.
-8. Use the **VXX / Volatility** screener preset to restrict results to VXX, UVXY, SVXY, VIXY, VIXM, VXZ, SVIX, UVIX, ZIVB and ZVOL. It applies daily RSI below 60, 252-session drawdown below -5%, and price below daily EMA200.
+8. Use the **VXX / Volatility** screener preset to restrict results to 11 entries: the 10 live tickers VXX, UVXY, SVXY, VIXY, VIXM, VXZ, SVIX, UVIX, ZIVB and ZVOL, plus the synthetic DEMO-VXX proxy in Demo mode. It applies daily RSI below 60, 252-session drawdown below -5%, and price below daily EMA200. Demo mode scans 4 synthetic symbols; with the Oversold preset it returns one match, DEMO-COIN.
 
 The Worker health endpoint reports only whether credentials are configured and which feed is selected; it never returns the keys. The browser sends requests to the Worker, not directly to Alpaca.
 
@@ -79,4 +79,4 @@ The Worker health endpoint reports only whether credentials are configured and w
 - .github/workflows/deploy-worker.yml: manual deployment using GitHub Secrets and Cloudflare Wrangler.
 - ALPACA_API_KEY and ALPACA_API_SECRET: encrypted Worker secrets after deployment.
 
-The Cloudflare Worker is **not deployed until the four GitHub secrets are added and the workflow is run**. The GitHub Pages front end can be deployed and used in Demo mode without any of those credentials. Demo scanning uses the four deterministic synthetic sample symbols; the VXX preset can return a rule match for DEMO-VXX, but that is a simulated test case, not a real market quote.
+The Cloudflare Worker is **not deployed until the four GitHub secrets are added and the workflow is run**. The GitHub Pages front end can be deployed and used in Demo mode without any of those credentials. Demo scanning uses exactly four deterministic synthetic sample symbols. With the Oversold preset it currently returns one match, DEMO-COIN. The VXX preset can return a match for DEMO-VXX, but that is a simulated test case, not a real market quote.
