@@ -144,6 +144,39 @@ async function initApp(){
       try{return compilePine(selection.code).mode==='strategy';}catch{return false;}
     });
   }
+
+  function captureBriefing(){
+    if(S.mode!=='live'||S.scan.status!=='complete'||S.scan.source!=='ALPACA')return null;
+    const selection=screenerStrategies().find(x=>x.id===S.signalSelection)||null;
+    const symbols=LIVE_UNIVERSE.filter(sym=>S.universeFilter!=='volatility'||VOLATILITY_UNIVERSE.includes(sym));
+    const briefing=compileDailyBriefing({
+      generatedAt:new Date().toISOString(),scan:S.scan,data:S.data,sources:S.sources,
+      rules:S.rules,symbols,feed:S.liveFeed,signalSelection:selection?.id||'none',
+      strategyName:selection?.name||null,signals:S.signalRows,
+      flips:S.lastSignalFlipStrategy===selection?.id?S.lastSignalFlips:[],
+      hasFlipBaseline:!!selection&&S.lastSignalFlipStrategy===selection.id&&S.lastSignalFlipBaseline,
+      alerts:S.alerts,freshness:S.freshness,diagnostics:S.staleDiagnostics
+    });
+    S.briefing=briefing;S.briefingHistory=saveBriefingHistory(S.briefingHistory,briefing);
+    try{localStorage.setItem(briefingStorageKey,JSON.stringify(S.briefingHistory));}
+    catch{notice('Briefing generated but browser storage could not save seven-day history.');}
+    return briefing;
+  }
+  async function generateBriefing(){
+    if(S.briefingLoading)return;
+    S.briefingLoading=true;S.briefingError='';S.tab='briefing';render();
+    try{await fetchLiveUniverse({restoreTab:'briefing',restoreSymbol:S.lastLiveSymbol});}
+    catch(error){S.briefingError=String(error.message||error);
+      S.scan={status:'fallback',source:'ALPACA',error:S.briefingError};}
+    finally{S.briefingLoading=false;S.tab='briefing';render();}
+  }
+  function briefingView(){
+    return renderBriefingView({
+      snapshot:S.briefing,history:S.briefingHistory,loading:S.briefingLoading,error:S.briefingError,
+      strategies:screenerStrategies(),selection:S.signalSelection,
+      head,button,select,metric,esc,format,pct
+    });
+  }
   function persistSignalHistory(){
     try{
       const keys=Object.keys(S.signalHistory);
@@ -748,7 +781,7 @@ async function initApp(){
   }
   function render(){
     destroyCharts();shell();
-    const views={screener:screenerView,charts:chartsView,backtest:backtestView,optimize:optimizeView,volatility:volatilityView,scripts:scriptView,data:dataView};
+    const views={screener:screenerView,briefing:briefingView,charts:chartsView,backtest:backtestView,optimize:optimizeView,volatility:volatilityView,scripts:scriptView,data:dataView};
     $('#main').innerHTML=views[S.tab]();
     if(S.tab==='charts'){
       mountPriceChart();
@@ -910,7 +943,7 @@ async function initApp(){
   async function fetchLiveUniverse(options={}){
     let base=S.apiBaseUrl.trim();while(base.endsWith('/'))base=base.slice(0,-1);
     if(!base.startsWith('https://'))throw new Error('Enter the Cloudflare Worker URL in Data Center first.');
-    clearSavedScanView();S.scan={status:'loading',source:'ALPACA'};S.tab='screener';render();
+    clearSavedScanView();S.scan={status:'loading',source:'ALPACA'};S.tab=options.restoreTab||'screener';render();
     const response=await fetch(base+'/api/stocks/scan?feed='+encodeURIComponent(S.liveFeed||'iex'),{headers:{Accept:'application/json'}});
     const payload=await response.json().catch(()=>({}));
     if(!response.ok)throw new Error(payload.error||payload.detail||'Alpaca market scan failed ('+response.status+').');
@@ -940,7 +973,9 @@ async function initApp(){
       matched,missing:payload.missing||[],cached:response.headers.get('X-Scan-Cache')==='HIT',
       retry:payload.retry||null,at:new Date().toISOString()};
     evaluateScreenerSignals(true);
-    evaluateLocalAlerts();S.tab=options.restoreTab||'screener';render();
+    evaluateLocalAlerts();S.tab=options.restoreTab||'screener';
+    if(S.tab==='briefing')captureBriefing();
+    render();
     notice('Live scan complete: '+matched+' '+(matched===1?'match':'matches')+' across '+visible.length+' visible symbols ('+loaded.length+'/'+S.scan.requested+' returned).');
   }
   async function switchToLive(options={}){
