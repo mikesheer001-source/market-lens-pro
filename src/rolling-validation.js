@@ -52,6 +52,20 @@ export function summarizeRollingSharpe(windows){
     insufficientBars,unmeasurable,note};
 }
 
+// Count exactly the same numeric metrics that the leaderboard table renders.
+// The single-split 70/30 holdout is a different statistic and must not be
+// labeled or implied to be a repeated rolling result.
+export function rollingLeaderboardSummary(rows){
+  const strategies=(rows||[]).filter(row=>row?.strategy&&row.kind!=='example-indicator');
+  const assessable=strategies.filter(row=>Number.isFinite(row.rolling?.meanSharpe)&&
+    Number.isFinite(row.rolling?.medianSharpe)&&row.rolling?.assessableCount>0);
+  const positive=assessable.filter(row=>row.rolling.meanSharpe>0);
+  const best=[...assessable].sort((a,b)=>b.rolling.meanSharpe-a.rolling.meanSharpe||
+    String(a.id).localeCompare(String(b.id)))[0]||null;
+  return {positive:positive.length,assessable:assessable.length,
+    total:strategies.length,unassessable:strategies.length-assessable.length,best};
+}
+
 export function rollingPositiveText(rolling){
   if(!rolling)return '—';
   if(rolling.assessableCount===0)return '0/'+rolling.totalWindows+' assessable';
