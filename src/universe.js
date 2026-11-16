@@ -36,5 +36,6 @@ export const LIVE_UNIVERSE = Object.freeze(
 );
 
 export const ALPACA_BATCH_SIZE = 15;
-export const ALPACA_SCAN_LOOKBACK_DAYS = 550;
+// Five calendar years of real Alpaca 1Day IEX bars, ~260 weekly candles.
+export const ALPACA_SCAN_LOOKBACK_DAYS = 1825;
 export const ALPACA_SCAN_CACHE_SECONDS = 900;
