@@ -76,3 +76,21 @@ test('published strategy leaderboard compares presets, renders top three, and re
   await expect(page.locator('#leaderboard-chart canvas').first()).toBeVisible();
   expect(errors).toEqual([]);
 });
+
+
+test('published Screener strategy signal picker sorts LONG states with real dates and reloads locally',async ({page})=>{
+  const errors=[];page.on('pageerror',e=>errors.push(e.message));
+  await page.goto('./');
+  await page.locator('[data-option="signal-strategy"]').selectOption('preset:ema-cross');
+  await expect(page.locator('thead th').last()).toContainText('EMA crossover');
+  await expect(page.locator('tbody .signal-status')).toHaveCount(4);
+  await expect(page.locator('tbody .signal-date').first()).toContainText(/^\d{4}-\d{2}-\d{2}$/);
+  await page.locator('[data-option="sort"]').selectOption('signal');
+  await page.locator('[data-option="signals-only"]').check();
+  const statuses=await page.locator('tbody .signal-status').allTextContents();
+  expect(statuses.every(x=>x.trim()==='LONG')).toBe(true);
+  await page.reload();
+  await expect(page.locator('[data-option="signal-strategy"]')).toHaveValue('preset:ema-cross');
+  await expect(page.locator('tbody tr[data-symbol]')).toHaveCount(4);
+  expect(errors).toEqual([]);
+});
