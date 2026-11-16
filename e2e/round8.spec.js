@@ -14,7 +14,7 @@ test('equal-weight portfolio accepts named watchlist, combines equity, sweeps an
   await expect(page.locator('#portfolio-source')).toContainText('2 symbols');
   await expect(page.locator('#equity-chart canvas').first()).toBeVisible();
   await expect(page.locator('.data-table tbody tr')).toHaveCount(2);
-  await expect(page.getByText('Equal-weight buy & hold')).toBeVisible();
+  await expect(page.getByText('Equal-weight buy & hold',{exact:true})).toBeVisible();
   await page.locator('.sidebar [data-tab="optimize"]').click();
   await page.locator('[data-action="run-sweep"]').click();
   await expect(page.locator('.data-table tbody tr')).toHaveCount(9);
@@ -32,7 +32,7 @@ test('volatility dashboard shows ten sourced ticker slots and discloses price-on
   const errors=[];page.on('pageerror',e=>errors.push(e.message));
   await page.goto('./');
   await page.locator('.sidebar [data-tab="volatility"]').click();
-  await expect(page.getByRole('heading',{name:'Volatility'})).toBeVisible();
+  await expect(page.getByRole('heading',{name:'Volatility',exact:true})).toBeVisible();
   await expect(page.locator('tr[data-vol-symbol]')).toHaveCount(10);
   await expect(page.locator('tr[data-vol-symbol="VXX"]')).toBeVisible();
   await expect(page.locator('tr[data-vol-symbol="SVOL"]')).toBeVisible();
@@ -50,7 +50,7 @@ test('no daily Demo OHLCV is faked into 2H or 15m candles',async ({page})=>{
   await page.locator('[data-option="tf"]').selectOption('2H');
   await expect(page.locator('#price-chart canvas')).toHaveCount(0);
   await expect(page.getByText(/No genuine 2H bars available/)).toBeVisible();
-  await expect(page.locator('.info-strip')).toContainText('never expanded');
+  await expect(page.locator('.info-strip.warning')).toContainText('never expanded');
   await page.locator('[data-option="tf"]').selectOption('15m');
   await expect(page.locator('#price-chart canvas')).toHaveCount(0);
   await expect(page.getByText(/No genuine 15m bars available/)).toBeVisible();
