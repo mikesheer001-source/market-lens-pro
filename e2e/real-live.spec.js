@@ -210,3 +210,24 @@ test('Round 11 live 2H comparison auto-fetches real Alpaca 15Min bars, caches in
     expect(intradayRequests.length).toBeGreaterThan(requestCount,'stale Alpaca data must be refetched on reload');
   expect(errors).toEqual([]);
 });
+
+
+test('Round 12: direct Alpaca asset status and most recent bars for legacy MMC, MRSH and VXZ',async ({request})=>{
+  test.skip(process.env.REAL_ALPACA_TEST!=='1','Read-only real Alpaca diagnostic runs after Pages deployment');
+  test.setTimeout(120000);
+  const response=await request.get(WORKER+'/api/stocks/diagnostics?symbols=MMC,MRSH,VXZ&feed=iex',
+    {timeout:90000});
+  expect(response.status(),'Round 12 credentialed live Worker diagnostics').toBe(200);
+  const payload=await response.json();
+  expect(payload.source).toBe('alpaca');
+  for(const symbol of ['MMC','MRSH','VXZ']){
+    const detail=payload.details[symbol];
+    expect(detail,'Alpaca diagnostic response for '+symbol).toBeTruthy();
+    expect(detail.asset).toBeTruthy();
+    expect(detail.barsSource).toBe('Alpaca IEX 1Day');
+    console.log('ROUND12_ALPACA_DIAGNOSTIC '+JSON.stringify({
+      symbol,asset:detail.asset,latestBarDate:detail.latestBarDate,
+      barCount:detail.barCount,barError:detail.barError,checkedAt:detail.checkedAt
+    }));
+  }
+});
