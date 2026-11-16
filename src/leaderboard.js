@@ -15,6 +15,9 @@ const instant=t=>typeof t==='number'?t:Date.parse(String(t).includes('T')?String
 export function sortLeaderboard(rows,key='sharpe',descending=key!=='name'){
   if(!LEADERBOARD_METRICS.includes(key))throw Error('Unknown leaderboard column: '+key);
   return [...rows].sort((a,b)=>{
+    // Non-tradable indicator examples are informative but never rankable.
+    if((a.kind==='example-indicator')!==(b.kind==='example-indicator'))
+      return a.kind==='example-indicator'?1:-1;
     const x=key==='name'?a.name:a.metrics?.[key],y=key==='name'?b.name:b.metrics?.[key];
     const absent=v=>v===null||v===undefined||(typeof v==='number'&&Number.isNaN(v));
     if(absent(x)!==absent(y))return absent(x)?1:-1;
