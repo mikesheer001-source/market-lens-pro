@@ -84,6 +84,15 @@ export function compareStrategies({symbol,bars,options,source,backtest,compilePi
   run.overlay=buildEquityOverlay(run,bars);
   return run;
 }
+// Persist rank metrics and the overlay for every strategy. Keep the best strategy's
+// full trades/curve so Load Best works offline, but do not duplicate dozens of
+// unused curve histories for the other saved Pine scripts in localStorage.
+export function compactLeaderboard(report){
+  if(!report?.rows)return report;
+  return {...report,rows:report.rows.map(row=>row.id===report.bestId?row:{
+    ...row,curve:[],trades:[]
+  })};
+}
 export function updateSymbolMemory(memory,symbol,change,now=Date.now()){
   if(!symbol||typeof symbol!=='string')throw Error('Cannot save analysis without a symbol.');
   const original=memory&&typeof memory==='object'&&!Array.isArray(memory)?memory:{};
@@ -98,7 +107,7 @@ export function pruneSymbolMemory(memory,maxEntries=SYMBOL_MEMORY_LIMIT,maxChars
   const output={};
   for(const [symbol,item] of ranked.slice(0,Math.max(0,maxEntries))){
     output[symbol]=item;
-    if(JSON.stringify(output).length>maxChars){delete output[symbol];break;}
+    if(JSON.stringify(output).length>maxChars){delete output[symbol];continue;}
   }
   return output;
 }
