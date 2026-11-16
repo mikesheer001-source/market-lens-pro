@@ -226,3 +226,26 @@ validated ones. Export includes validation metrics.
 **Statistical caveat:** this mode selects strategies *using* OOS performance, so
 the full-period combined equity curve is **not** an independent out-of-sample
 validation of the portfolio. The rolling training windows overlap. Research only.
+
+
+### Round 25 — rankings CSV downloads
+
+Each **Download CSV** button exports the precise rows and ordering shown in its
+current view, without changing the Screener CSV importer/exporter:
+- **Strategy leaderboard:** strategy, 70/30 train and OOS metrics, rolling mean/median
+  OOS Sharpe, positive rolling window count, validation status, and full-period
+  performance. The Validated-only filter and active table sort are honored.
+- **Fit across universe:** the in-sample sort or the validated rolling OOS rank,
+  with the corresponding selected strategy, validation rule, and the winning
+  strategy's actual training/OOS/full metrics where available.
+- **Best-fit portfolio:** the selected mode's per-symbol breakdown, including
+  dollar-allocation weights (fractions), train/OOS validation metrics, and
+  four numeric portfolio headline lines before the CSV data-header row.
+
+Names include the current mode and selected dates, or observed first/last dates for
+full-range results. All metrics are exported as **unlocalized numeric values**:
+percentages are percentage *points* (e.g. 12.5 means 12.5%),
+drawdowns are signed as on the leaderboard/portfolio screen, and weights
+are decimal fractions (0.25 = 25%). Unavailable values are empty, never
+fabricated as zero. Empty validated views produce column headers with no data rows.
+Only calculated results matching the active mode and date range can be exported.

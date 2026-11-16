@@ -5,6 +5,7 @@ import {readableBarDate,normalizeStartupPreferences,intradayCacheFresh,intradayF
 import {availableStrategySignals,evaluateStrategySignals,scanSignalFlips} from './signals.js';
 import {expectedNyseBarDate,scanFreshness,staleReasonForSymbol} from './freshness.js';
 import {FIT_COLUMNS,sortUniverseFit,bestUniverseFit,fitAcrossUniverse} from './fit.js';
+import {leaderboardDisplayRows,fitDisplayRows,leaderboardRankingCsv,fitRankingCsv,portfolioRankingCsv} from './ranking-export.js';
 import {fitValidatedAcrossUniverse,NO_VALIDATED_FIT} from './fit-validated.js';
 import {compileDailyBriefing,briefingToText,pruneBriefingHistory,saveBriefingHistory} from './briefing.js';
 import {renderBriefingView} from './briefing-view.js';
@@ -781,7 +782,7 @@ async function initApp(){
       button(S.portfolioLoading?'Evaluating portfolio…':(isBest?'Run best-fit portfolio':'Run equal-weight portfolio'),
         isBest?'run-best-fit':'run-portfolio','primary')+
       (isBest?'':button('Sweep portfolio parameters','view-optimize','small'))+
-      button('Export portfolio breakdown','export-portfolio','small')+'</div></div><div class="panel-body">'+
+      button('Download CSV','export-portfolio','small')+'</div></div><div class="panel-body">'+
       '<div class="portfolio-pick"><label class="control">Symbol source '+
       select([['matches','All current scan matches'],['watchlist','Named watchlist']],
         S.portfolioScope,'data-option="portfolio-scope"')+'</label>'+
@@ -920,7 +921,8 @@ async function initApp(){
         '" aria-label="Sort by '+esc(title)+'">'+esc(title)+arrow+'</button></th>';
     }).join('');
     const visibleRows=filterValidatedLeaderboard(lb.rows,S.leaderboardValidatedOnly);
-    const order=sortLeaderboard(visibleRows,S.leaderboardSort,S.leaderboardDescending);
+    const order=leaderboardDisplayRows(lb,{validatedOnly:S.leaderboardValidatedOnly,
+      sort:S.leaderboardSort,descending:S.leaderboardDescending});
     const top=lb.rows.find(row=>row.id===lb.bestId);
     const bestValidated=bestRollingValidatedStrategy(lb.rows)||
       sortLeaderboard(filterValidatedLeaderboard(lb.rows,true),'sharpe',true)[0]||null;
@@ -986,6 +988,7 @@ async function initApp(){
     return '<section class="panel" aria-label="Strategy comparison"><div class="panel-header"><h2>Strategy leaderboard</h2><div class="flex">'+
       '<span class="source-badge" id="leaderboard-window">'+esc(rangeLabel(lb.range||{}))+'</span>'+
       button('Compare all strategies','compare-strategies','small')+
+      button('Download CSV','export-leaderboard','small')+
       (S.leaderboardValidatedOnly?
         (bestValidated?button('Load best validated into Backtester','load-best-validated','primary'):''):
         (top?button('Load best into Backtester','load-best-strategy','primary'):''))+
@@ -1025,8 +1028,8 @@ async function initApp(){
       S.fitError?'<div id="fit-status" role="alert" class="info-strip warning">'+esc(S.fitError)+'</div>':'';
     const header='<div class="panel-header"><h2>Fit across universe · '+mode+' · '+esc(count)+'</h2><div class="flex">'+
       controls+(report&&(!validated||report.rows.length)?
-        button(validated?'Load best validated symbol':'Load best symbol','load-fit-best','primary')+
-        button('Export fit CSV','export-fit','small'):'')+'</div></div>';
+        button(validated?'Load best validated symbol':'Load best symbol','load-fit-best','primary'):'')+
+        (report?button('Download CSV','export-fit','small'):'')+'</div></div>';
     const range=report?.dateRange;
     if(!report)return '<section class="panel" id="universe-fit">'+header+
       '<div class="panel-body">'+status+'<div id="fit-validated-count" role="status">'+esc(count)+'</div>'+
@@ -1075,7 +1078,8 @@ async function initApp(){
       '"><button type="button" class="table-sort" data-action="sort-fit" data-key="'+key+'">'+
       name+(S.fitSort===key?(S.fitDescending?' ▼':' ▲'):'')+'</button></th>').join('');
     const best=bestUniverseFit(report.rows);
-    const cells=sortUniverseFit(report.rows,S.fitSort,S.fitDescending).map(row=>
+    const cells=fitDisplayRows(report,{validatedOnly:false,sort:S.fitSort,
+      descending:S.fitDescending}).map(row=>
       '<tr data-fit-symbol="'+esc(row.symbol)+'"'+(best?.symbol===row.symbol?' class="leaderboard-best"':'')+'>'+
       '<td>'+esc(row.symbol)+(row.stale?'<small class="fit-stale">Stale</small>':'')+'</td>'+
       '<td>'+pct(row.trainMetrics?.returnPct)+'</td>'+
@@ -1787,26 +1791,12 @@ async function initApp(){
       if(S.portfolioMode&&S.bestFitMode&&bestFitAttempted)void runBestFitCurrent();
       else if(fitEverStarted)void runUniverseFitCurrent({reuseData:true});else render();},
     'refresh-volatility':async ()=>{await switchToLive();if(S.mode==='live'){S.tab='volatility';render();}},
-    'export-portfolio':()=>{if(!activePortfolioResult()){notice('Run this portfolio mode before exporting its results.');return;}
-      const p=activePortfolioResult();
-      if(!p.breakdown?.length){notice('No qualifying symbols to export.');return;}
-      exportFile((S.bestFitMode?(S.bestFitValidatedOnly?'best-fit-validated':'best-fit'):'equal-weight')+'-portfolio-breakdown.csv',
-        csvDownload(p.breakdown.map(r=>({symbol:r.symbol,strategy:r.strategyName||r.strategy,
-          fitMode:p.fitMode||'training',rollingMeanOosSharpe:r.rollingMeanSharpe??'',
-          rollingMedianOosSharpe:r.rollingMedianSharpe??'',
-          rollingPositiveWindows:r.rollingPositiveCount??'',
-          rollingTotalWindows:r.rollingWindowCount??'',
-          validationReasons:r.validationReasons?.join(' OR ')||'',
-          fitSharpe:r.fitSharpe??'',trainReturnPct:r.trainMetrics?.returnPct??'',
-          trainSharpe:r.trainMetrics?.sharpe??'',oosReturnPct:r.testMetrics?.returnPct??'',
-          oosSharpe:r.validation?.enoughTestBars?r.testMetrics?.sharpe??'':'',
-          validated:r.validation?.validated??false,holdoutNote:r.validation?.note??'',
-          source:r.source,barDate:String(r.barDate||'').slice(0,10),
-          weight:p.weights[r.symbol],returnPct:r.returnPct,trades:r.trades,winRatePct:r.winPct,
-          maxDrawdownPct:r.maxDD,sharpe:r.sharpe,rangeStart:p.range?.startDate||'',
-          rangeEnd:p.range?.endDate||'',actualStart:p.range?.actualStart||'',
-          actualEnd:p.range?.actualEnd||'',portfolioSource:p.sourceSummary,
-          runAt:S.portfolioTimestamp}))));},
+    'export-portfolio':()=>{
+      const report=activePortfolioResult();
+      if(!report){notice('Run the selected portfolio and date range before downloading.');return;}
+      const result=portfolioRankingCsv(report,{validatedOnly:S.bestFitMode&&S.bestFitValidatedOnly});
+      exportFile(result.filename,result.csv);
+    },
     'watchlist-create':()=>changeWatchlist('create'),
     'watchlist-rename':()=>changeWatchlist('rename'),
     'watchlist-delete':()=>changeWatchlist('delete'),
@@ -1883,29 +1873,21 @@ async function initApp(){
       else{S.fitSort=key;S.fitDescending=!['symbol','source','barDate','maxDD'].includes(key);}
       render();},
     'export-fit':()=>{
-      const report=S.fitValidatedOnly?S.fitValidatedReport:S.fitReport;
-      if(!report)return;
-      if(S.fitValidatedOnly){
-        exportFile('market-lens-universe-fit-validated.csv',csvDownload(report.rows.map(r=>({
-          symbol:r.symbol,validatingStrategy:r.validatingStrategy.name,
-          rollingMeanOosSharpe:r.rollingMeanSharpe??'',
-          rollingMedianOosSharpe:r.rollingMedianSharpe??'',
-          positiveWindows:r.positiveWindows,totalWindows:r.totalWindows,
-          assessableWindows:r.assessableWindows,validation:r.validationReasons.join(' OR '),
-          source:r.source,barDate:r.barDate||''
-        }))));return;
+      const validatedOnly=S.fitValidatedOnly;
+      const report=validatedOnly?S.fitValidatedReport:S.fitReport;
+      if(!report){notice('Run Fit across universe before downloading.');return;}
+      const result=fitRankingCsv(report,{validatedOnly,sort:S.fitSort,
+        descending:S.fitDescending});
+      exportFile(result.filename,result.csv);
+    },
+    'export-leaderboard':()=>{
+      const report=S.leaderboard?.symbol===S.symbol?S.leaderboard:null;
+      if(!report||!leaderboardRangeStatus(report,comparisonContext()).matches){
+        notice('Recompute the strategy leaderboard on these dates before downloading.');return;
       }
-      exportFile('market-lens-universe-fit.csv',
-        csvDownload(report.rows.map(r=>({symbol:r.symbol,returnPct:r.metrics?.returnPct??'',
-          cagrPct:r.metrics?.cagrPct??'',sharpe:r.metrics?.sharpe??'',
-          trainReturnPct:r.trainMetrics?.returnPct??'',trainSharpe:r.trainMetrics?.sharpe??'',
-          oosReturnPct:r.testMetrics?.returnPct??'',
-          oosSharpe:r.validation?.enoughTestBars?r.testMetrics?.sharpe??'':'',
-          validated:r.validation?.validated??false,holdoutNote:r.validation?.note??'',
-          trainStart:r.validation?.trainStart||'',trainEnd:r.validation?.trainEnd||'',
-          testStart:r.validation?.testStart||'',testEnd:r.validation?.testEnd||'',
-          maxDD:r.metrics?.maxDD??'',winPct:r.metrics?.winPct??'',trades:r.metrics?.trades??'',
-          source:r.source,barDate:r.barDate||'',error:r.error||''}))));
+      const result=leaderboardRankingCsv(report,{validatedOnly:S.leaderboardValidatedOnly,
+        sort:S.leaderboardSort,descending:S.leaderboardDescending});
+      exportFile(result.filename,result.csv);
     },
     'compare-strategies':async ()=>{
       if(S.portfolioMode){notice('Switch to Single symbol mode to compare individual strategies.');return;}

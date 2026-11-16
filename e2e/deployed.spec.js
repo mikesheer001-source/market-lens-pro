@@ -265,3 +265,37 @@ test('published Round 24 validated-only best-fit portfolio qualifies or plainly 
   await expect(page.locator('#best-fit-validated-empty')).toBeVisible();
   expect(errors).toEqual([]);
 });
+
+
+test('published Round 25 rankings download CSV with correct mode and row counts',async({page})=>{
+  test.setTimeout(180000);
+  const {readFile}=await import('node:fs/promises');
+  const errors=[];page.on('pageerror',error=>errors.push(error.message));
+  await page.goto('./');
+  await page.locator('.sidebar [data-tab="backtest"]').click();
+  await page.locator('[data-action="compare-strategies"]').first().click();
+  let pending=page.waitForEvent('download');
+  await page.locator('[data-action="export-leaderboard"]').click();
+  let file=await pending,content=await readFile(await file.path(),'utf8');
+  expect(file.suggestedFilename()).toMatch(/^leaderboard-in-sample-/);
+  expect(content.trimEnd().split(/\r?\n/).length).toBe(
+    1+await page.locator('.leaderboard-table tbody tr').count());
+  await page.locator('#leaderboard-validated-only').check();
+  pending=page.waitForEvent('download');
+  await page.locator('[data-action="export-leaderboard"]').click();
+  file=await pending;content=await readFile(await file.path(),'utf8');
+  expect(file.suggestedFilename()).toMatch(/^leaderboard-validated-only-/);
+  expect(content.trimEnd().split(/\r?\n/).length).toBe(
+    1+await page.locator('.leaderboard-table tbody tr').count());
+  await page.locator('[data-option="portfolio-mode"]').selectOption('best-fit');
+  await page.locator('[data-action="run-best-fit"]').click();
+  await expect(page.locator('#portfolio-breakdown tbody tr').first()).toBeVisible({timeout:100000});
+  pending=page.waitForEvent('download');
+  await page.locator('[data-action="export-portfolio"]').click();
+  file=await pending;content=await readFile(await file.path(),'utf8');
+  expect(file.suggestedFilename()).toMatch(/^best-fit-portfolio-in-sample-/);
+  expect(content).toContain('Portfolio total return (%)');
+  expect(content.trimEnd().split(/\r?\n/).length).toBe(
+    6+await page.locator('#portfolio-breakdown tbody tr').count());
+  expect(errors).toEqual([]);
+});

@@ -42,6 +42,12 @@ export function validatedFitSymbolRow(symbol,leaderboard,meta={}){
       settings:choice.settings,script:choice.script
     },
     validationReasons:validationReasons(choice),
+    // Retain the winning strategy's actual train/OOS/full metrics so CSV
+    // exports match the validated symbol and never borrow in-sample picks.
+    trainMetrics:choice.trainMetrics||null,
+    testMetrics:choice.testMetrics||null,
+    metrics:choice.metrics||null,
+    validation:choice.validation||null,
     rollingMeanSharpe:Number.isFinite(rolling.meanSharpe)?rolling.meanSharpe:null,
     rollingMedianSharpe:Number.isFinite(rolling.medianSharpe)?rolling.medianSharpe:null,
     positiveWindows:rolling.positiveCount??0,
