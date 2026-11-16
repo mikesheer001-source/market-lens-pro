@@ -109,7 +109,7 @@ async function initApp(){
   function chartsView(){
     const b=bars(),source=S.sources.get(S.symbol);
     return head('Chart Lab','Drag to pan, wheel/pinch to zoom, and drag the price or time axes. Customize indicators below.',button('Backtest this symbol','view-backtest','primary'))+
-      '<div class="panel">'+chartControls()+'</div>'+sourceStrip()+
+      '<div class="panel">'+chartControls()+'</div><div id="pine-chart-error" role="alert"></div>'+sourceStrip()+
       '<div class="info-strip">Data: <strong>'+esc(S.symbol)+'</strong> · '+(source==='SIMULATED'?'simulated':'imported')+' · '+b.length+' '+S.chart.tf+' bars. Price scaling, crosshair, volume, indicator panes, and annotations are interactive. Charts use TradingView Lightweight Charts, not the full TradingView platform.</div>';
   }
   function btOptions(){
@@ -219,13 +219,37 @@ async function initApp(){
     if(pane>1){try{chart.panes()[0].setHeight(S.chart.macd?310:360);}catch{}}
     if(S.chart.log)base.priceScale().applyOptions({mode:PriceScaleMode.Logarithmic});
     for(const p of S.chart.lines[S.symbol]||[])base.createPriceLine({price:p,color:'#e4b766',lineWidth:1,lineStyle:2,axisLabelVisible:true,title:'Level'});
+    const pineMarkers=[];
     if(S.result&&S.resultSymbol===S.symbol&&S.resultTf===S.chart.tf){
-      const marks=S.result.trades.flatMap(t=>[
+      pineMarkers.push(...S.result.trades.flatMap(t=>[
         {time:t.entry,position:t.side==='short'?'aboveBar':'belowBar',color:t.side==='short'?colors.down:colors.up,shape:t.side==='short'?'arrowDown':'arrowUp',text:t.side==='short'?'SHORT':'BUY'},
         {time:t.exit,position:t.side==='short'?'belowBar':'aboveBar',color:t.pnl>=0?colors.up:colors.down,shape:t.side==='short'?'arrowUp':'arrowDown',text:'EXIT'}
-      ]).sort((a,b)=>stamp(a.time)-stamp(b.time));
-      createSeriesMarkers(base,marks);
+      ]));
     }
+    const custom=[...S.activeIndicators];
+    if(S.bt.strategy==='pine-custom'&&S.activeStrategy)custom.push({...S.activeStrategy,id:'strategy'});
+    const pineErrors=[];
+    for(const item of custom){
+      try{
+        const program=compilePine(item.code),evaluated=executePine(program,b,item.settings||{});
+        const paneIndex=program.overlay?0:chart.panes().length;
+        for(const p of evaluated.plots){
+          const data=p.values.flatMap((v,k)=>Number.isFinite(v)?[{time:b[k].time,value:v}]:[]);
+          if(!data.length)continue;
+          const series=chart.addSeries(LineSeries,{color:p.color,lineWidth:2,priceLineVisible:false,lastValueVisible:false,title:String(item.name||program.title)+' · '+p.title},paneIndex);
+          series.setData(data);
+        }
+        for(const shape of evaluated.shapes){
+          shape.values.forEach((active,k)=>{
+            if(active)pineMarkers.push({time:b[k].time,position:shape.position==='location.abovebar'?'aboveBar':'belowBar',shape:shape.position==='location.abovebar'?'arrowDown':'arrowUp',color:shape.color,text:shape.title.slice(0,20)});
+          });
+        }
+      }catch(error){pineErrors.push((item.name||'Custom script')+': '+error.message);}
+    }
+    if(pineMarkers.length)createSeriesMarkers(base,pineMarkers.sort((a,b)=>stamp(a.time)-stamp(b.time)));
+    const errorBox=$('#pine-chart-error');
+    if(errorBox&&pineErrors.length){errorBox.className='pine-error';errorBox.textContent=pineErrors.join(' | ');}
+
     chart.subscribeClick(param=>{if(!S.drawLine||!param.point)return;const p=base.coordinateToPrice(param.point.y);if(p==null||!Number.isFinite(p))return;const price=Number(p.toFixed(4));(S.chart.lines[S.symbol]??=[]).push(price);base.createPriceLine({price,color:'#e4b766',lineWidth:1,lineStyle:2,axisLabelVisible:true,title:'Level'});S.drawLine=false;saveSettings();notice('Added horizontal price level at '+format(price,4));});
     chart.subscribeCrosshairMove(param=>{const d=param.seriesData.get(base),el=$('#readout');if(!el||!d)return;const v=('close' in d?d.close:d.value),o='open'in d?d.open:null;
       el.innerHTML='<b>'+dateLabel(param.time||b.at(-1).time)+'</b><span>Open '+format(o)+'</span><span>High '+format('high' in d?d.high:null)+'</span><span>Low '+format('low' in d?d.low:null)+'</span><span>Close <b>'+format(v)+'</b></span>';});
