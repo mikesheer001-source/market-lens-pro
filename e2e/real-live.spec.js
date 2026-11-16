@@ -1,5 +1,6 @@
 import {test,expect} from '@playwright/test';
 import {LIVE_UNIVERSE} from '../src/universe.js';
+import {LIVE_SCAN_CACHE_REVISION} from '../src/live-history.js';
 import {nyIntradaySession} from '../src/intraday-session.js';
 import {expectedNyseBarDate} from '../src/freshness.js';
 
@@ -16,6 +17,20 @@ test('real Alpaca Worker scans entire 133-symbol universe and publishes VXX dail
   expect(healthData.ok).toBe(true);
   expect(healthData.configured).toBe(true);
   expect(healthData.provider).toBe('alpaca');
+  expect(healthData.daily_lookback_days,'deployed Worker /health version').toBe(1825);
+  expect(healthData.scan_cache_revision).toBe(LIVE_SCAN_CACHE_REVISION);
+  const direct=await request.get(WORKER+'/api/stocks/scan?feed=iex&history_revision='+LIVE_SCAN_CACHE_REVISION,
+    {timeout:180_000});
+  expect(direct.status(),'Direct Worker 133-symbol scan').toBe(200);
+  const directBars=await direct.json();
+  expect(directBars.lookback_days,'Worker response actual lookback').toBe(1825);
+  expect(directBars.scan_cache_revision,'Worker response scan cache revision').toBe(LIVE_SCAN_CACHE_REVISION);
+  const actualAbbv=directBars.bars?.ABBV?.length,actualSpy=directBars.bars?.SPY?.length;
+  expect(actualAbbv,'ABBV must have >900 actual IEX daily bars').toBeGreaterThan(900);
+  expect(actualSpy,'SPY must have >900 actual IEX daily bars').toBeGreaterThan(900);
+  console.info('Round 21 DIRECT WORKER: cache='+direct.headers()['x-scan-cache']+
+    ', lookback='+directBars.lookback_days+', revision='+directBars.scan_cache_revision+
+    ', ABBV='+actualAbbv+' daily bars, SPY='+actualSpy+' daily bars.');
   const errors=[];page.on('pageerror',err=>errors.push(err.message));
   await page.goto('./');
   await page.evaluate(url=>localStorage.setItem('market-lens-pro-settings',JSON.stringify({apiBaseUrl:url})),WORKER);
@@ -37,18 +52,29 @@ test('real Alpaca Worker scans entire 133-symbol universe and publishes VXX dail
   await expect(page.locator('thead th').nth(5)).toContainText('% vs D EMA200');
   await expect(page.getByRole('columnheader',{name:/% vs W EMA200/})).toBeVisible();
   const spyBars=Number((await page.locator('tr[data-symbol="SPY"] td').nth(8).innerText()).trim());
-  expect(spyBars,'Real SPY scan should supply more than the old ~378 daily candles').toBeGreaterThan(378);
+  const abbvBars=Number((await page.locator('tr[data-symbol="ABBV"] td').nth(8).innerText()).trim());
+  expect(spyBars,'Real SPY scan should supply five-year daily candles').toBeGreaterThan(900);
+  expect(abbvBars,'Real ABBV scan should supply five-year daily candles').toBeGreaterThan(900);
+  expect(spyBars).toBe(actualSpy);
+  expect(abbvBars).toBe(actualAbbv);
+  await expect(page.locator('[data-weekly-ema200="ABBV"]')).not.toHaveText('—');
   await expect(page.locator('[data-weekly-ema200="SPY"]')).not.toHaveText('—');
   const weeklyEmaPct=(await page.locator('[data-weekly-ema200="SPY"]').innerText()).trim();
   await page.locator('.sidebar [data-tab="charts"]').click();
+  await page.locator('[data-option="symbol"]').selectOption('ABBV');
+  await expect(page.getByText(abbvBars+' D bars',{exact:false})).toBeVisible();
+  await expect(page.locator('#price-chart canvas').first()).toBeVisible();
   await page.locator('[data-option="symbol"]').selectOption('SPY');
   await expect(page.getByText(spyBars+' D bars',{exact:false})).toBeVisible();
   await expect(page.locator('#price-chart canvas').first()).toBeVisible();
   await page.locator('.sidebar [data-tab="data"]').click();
   await expect(page.locator('#scan-duration')).toContainText('Last live scan:');
-  await expect(page.locator('#scan-duration')).toContainText('1825-day daily lookback');
+  await expect(page.locator('#scan-duration')).toContainText('Worker reported 1825 daily lookback days');
+  await expect(page.locator('#scan-duration')).toContainText('ABBV '+abbvBars+' actual bars');
+  await expect(page.locator('#scan-duration')).toContainText('SPY '+spyBars+' actual bars');
   await expect(page.locator('#scan-duration')).toContainText(/measured in this browser/);
-  console.info('Round 19 REAL Alpaca SPY daily bars='+spyBars+
+  console.info('Round 21 REAL SITE ABBV daily bars='+abbvBars+
+    ', SPY daily bars='+spyBars+
     ', W EMA200='+weeklyEmaPct+
     ', '+(await page.locator('#scan-duration').innerText()));
   await page.locator('.sidebar [data-tab="charts"]').click();
