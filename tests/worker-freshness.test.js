@@ -88,3 +88,45 @@ test('Worker labels still-stale symbols amber after unsuccessful one-time Alpaca
     if(originalCaches===undefined)delete globalThis.caches;else globalThis.caches=originalCaches;
   }
 });
+
+test('Round 14 Worker uses modal date for 132 Nov 16 / one Nov 13 and verifies no newer Alpaca bar',async()=>{
+  const originalFetch=globalThis.fetch,originalCaches=globalThis.caches;
+  delete globalThis.caches;
+  const seen=[],now='2026-11-16',lag='2026-11-13';
+  globalThis.fetch=async(raw)=>{
+    const u=new URL(raw);
+    if(u.pathname==='/v2/assets/VXZ')return new Response(JSON.stringify({
+      symbol:'VXZ',status:'active',tradable:true,exchange:'BATS',class:'us_equity'
+    }),{status:200});
+    assert.equal(u.pathname,'/v2/stocks/bars');
+    const names=u.searchParams.get('symbols').split(',');
+    const isRetry=Date.parse(u.searchParams.get('start'))>Date.parse('2026-11-01T00:00:00Z');
+    seen.push({names,isRetry});
+    if(isRetry)assert.deepEqual(names,['VXZ']);
+    const bars=Object.fromEntries(names.map(symbol=>[symbol,[{
+      t:(symbol==='VXZ'?lag:now)+'T21:00:00Z',o:100,h:101,l:99,c:100,v:1200
+    }]]));
+    return new Response(JSON.stringify({bars,next_page_token:null}),{status:200});
+  };
+  try{
+    const result=await (await worker.fetch(
+      new Request('https://fake-worker.example/api/stocks/scan?feed=iex',{
+        headers:{'CF-Connecting-IP':'198.51.100.226'}
+      }),{ALPACA_API_KEY:'test',ALPACA_API_SECRET:'test'})).json();
+    assert.equal(result.requested,133);
+    assert.equal(result.returned,133);
+    assert.equal(result.freshness.expected,now);
+    assert.equal(result.freshness.referenceMethod,'modal latest-bar date');
+    assert.equal(result.freshness.allFresh,false);
+    assert.deepEqual(result.freshness.stale,[{symbol:'VXZ',latest:lag}]);
+    assert.deepEqual(result.retry.attempted,['VXZ']);
+    assert.deepEqual(result.retry.stillStale,['VXZ']);
+    assert.deepEqual(result.retry.updated,[]);
+    assert.equal(result.diagnostics.VXZ.barsAfterLatest,false);
+    assert.equal(result.diagnostics.VXZ.asset.status,'active');
+    assert.equal(seen.filter(x=>x.isRetry).length,1);
+  }finally{
+    globalThis.fetch=originalFetch;
+    if(originalCaches===undefined)delete globalThis.caches;else globalThis.caches=originalCaches;
+  }
+});
