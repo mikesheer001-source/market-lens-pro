@@ -602,45 +602,70 @@ async function initApp(){
     return [...S.data.keys()].filter(isVisibleSymbol).filter(sym=>screenSymbol(S.data.get(sym),S.rules).pass);
   }
   function portfolioBacktestView(){
-    const selections=portfolioSelection(),result=S.portfolioResult;
+    const isBest=S.bestFitMode,selections=portfolioSelection(),result=activePortfolioResult();
     const sourceName=S.mode==='live'?'Alpaca '+String(S.liveFeed).toUpperCase()+' 1Day bars':
       'Simulated Demo or imported daily OHLCV';
     const namedLists=S.watchlists.map(w=>[w.id,w.name+' · '+w.symbols.length+' symbols']);
-    const controls='<div class="panel"><div class="panel-header"><h2>Portfolio selection & strategy</h2><div class="flex">'+
-      button('Run equal-weight portfolio','run-portfolio','primary')+button('Sweep portfolio parameters','view-optimize','small')+
+    const controls='<div class="panel"><div class="panel-header"><h2>'+
+      (isBest?'Best-fit portfolio selection':'Portfolio selection & strategy')+'</h2><div class="flex">'+
+      button(S.portfolioLoading?'Evaluating portfolio…':(isBest?'Run best-fit portfolio':'Run equal-weight portfolio'),
+        isBest?'run-best-fit':'run-portfolio','primary')+
+      (isBest?'':button('Sweep portfolio parameters','view-optimize','small'))+
       button('Export portfolio breakdown','export-portfolio','small')+'</div></div><div class="panel-body">'+
       '<div class="portfolio-pick"><label class="control">Symbol source '+
       select([['matches','All current scan matches'],['watchlist','Named watchlist']],S.portfolioScope,'data-option="portfolio-scope"')+'</label>'+
       (S.portfolioScope==='watchlist'?'<label class="control">Watchlist '+
         select(namedLists,S.portfolioWatchlistId,'data-option="portfolio-watchlist"')+'</label>':'')+
       '<strong>'+selections.length+' selected</strong></div>'+
-      (S.portfolioScope==='matches'?'<p class="section-note">Uses current Screener filter rules, including active volatility-universe restriction, but not the text search. Saved scan snapshots are not silently reused.</p>':
-        '<p class="section-note">Uses every currently loaded symbol from the selected named list. Unavailable symbols are excluded.</p>')+
-      '<div class="info-strip">Inputs: '+esc(sourceName)+'. Equal initial capital (1/N each), independent positions, no periodic rebalancing, same fee/slippage/stop/target rules as single-symbol Backtest. Daily close-aligned calendar. This is research, not order execution.</div>'+
-      btOptions()+'</div></div>';
+      (S.portfolioScope==='matches'?'<p class="section-note">Current Screener rule matches, including the volatility-universe restriction; saved scan snapshots are never reused.</p>':
+        '<p class="section-note">Currently loaded symbols on the chosen named watchlist; unavailable or insufficient-history symbols are reported as omitted.</p>')+
+      '<div class="info-strip">Data source: '+esc(sourceName)+
+      '. Each included symbol receives the same initial capital fraction. Costs, stops and fills use the existing engine.</div>'+
+      (isBest?'<p class="section-note"><strong>Strategy selection:</strong> For each selected symbol, compare executable preset, saved Pine and built-in example strategies on the common aligned daily dates and select the highest finite in-sample Sharpe. All strategies share the portfolio trade assumptions. This is in-sample optimization with selection bias, <strong>not out-of-sample validation</strong>. If no strategy has a finite Sharpe, the symbol is excluded and listed below.</p>':
+        btOptions())+
+      backtestDateControls()+'</div></div>';
     const summary=result?'<div class="metrics">'+
-      metric('Total return',pct(result.metrics.returnPct),'Equal-weight initial allocations',priceColor(result.metrics.returnPct))+
-      metric('CAGR',pct(result.metrics.cagrPct),'Calendar years on common dates')+
-      metric('Sharpe',format(result.metrics.sharpe,2),'252-session annualization; RF = 0')+
+      metric('Total return',pct(result.metrics.returnPct),'Equal initial capital',priceColor(result.metrics.returnPct))+
+      metric('CAGR',pct(result.metrics.cagrPct),'Calendar time, aligned dates')+
+      metric('Sharpe',format(result.metrics.sharpe,2),'252 sessions, RF = 0')+
       metric('Maximum DD',pct(-result.metrics.maxDD),'Peak-to-trough portfolio equity')+
-      '</div>':'<div class="empty">Select a watchlist or matching scan symbols, then run a portfolio backtest.</div>';
-    const names=result?result.symbols.join(', '):'';
+      '</div>':'<div class="empty">Select symbols and a date range, then run the portfolio.</div>';
     const rows=result?.breakdown||[];
-    const table='<div class="table-wrap"><table class="data-table"><thead><tr><th>Symbol</th><th>Daily source</th><th>Weight</th><th>Return</th><th>Trades</th><th>Win rate</th><th>Max DD</th><th>Sharpe</th></tr></thead><tbody>'+
-      rows.map(r=>'<tr><td>'+esc(r.symbol)+'</td><td>'+esc(r.source)+'</td><td>'+pct(result.weights[r.symbol]*100)+'</td><td class="'+priceColor(r.returnPct)+'">'+pct(r.returnPct)+'</td><td>'+format(r.trades,0)+'</td><td>'+pct(r.winPct)+'</td><td>'+pct(-r.maxDD)+'</td><td>'+format(r.sharpe,2)+'</td></tr>').join('')+
+    const table='<div class="table-wrap"><table class="data-table" id="portfolio-breakdown"><thead><tr>'+
+      '<th>Symbol</th><th>Strategy</th><th>Source</th><th>Bar date</th><th>Weight</th>'+
+      '<th>Return</th><th>Trades</th><th>Win rate</th><th>Max DD</th><th>Sharpe</th></tr></thead><tbody>'+
+      rows.map(r=>'<tr data-portfolio-symbol="'+esc(r.symbol)+'"><td>'+esc(r.symbol)+'</td>'+
+        '<td>'+esc(r.strategyName||r.strategy||'—')+
+        (isBest?'<small class="fit-stale">Fit Sharpe: '+format(r.fitSharpe,2)+'</small>':'')+'</td>'+
+        '<td>'+esc(r.source==='ALPACA'?'ALPACA '+String(S.liveFeed).toUpperCase()+' 1Day':r.source)+'</td>'+
+        '<td>'+esc(String(r.barDate||'—').slice(0,10))+'</td>'+
+        '<td>'+pct(result.weights[r.symbol]*100)+'</td><td class="'+priceColor(r.returnPct)+'">'+pct(r.returnPct)+'</td>'+
+        '<td>'+format(r.trades,0)+'</td><td>'+pct(r.winPct)+'</td>'+
+        '<td>'+pct(-r.maxDD)+'</td><td>'+format(r.sharpe,2)+'</td></tr>').join('')+
       '</tbody></table></div>';
-    return head('Backtest · Portfolio','Run the same entry and exit logic across a shared daily calendar. No live trades are placed.')+
+    return head('Backtest · '+(isBest?'Best-fit portfolio':'Portfolio'),
+      'Equal initial allocations on a shared daily calendar; no live orders.')+
       portfolioModeControl()+controls+
       (S.portfolioError?'<div class="warning info-strip" role="alert">'+esc(S.portfolioError)+'</div>':'')+
-      (result?'<div class="info-strip" id="portfolio-source">Saved equal-weight portfolio · '+esc(result.sourceSummary||'Daily OHLCV from selected data')+
-        ' · '+result.symbols.length+' symbols · '+result.curve.length+' common daily bars · run '+esc(S.portfolioTimestamp||'')+
-        (result.omitted.length?' · excluded '+esc(result.omitted.join(', '))+' (too few bars)':'')+'</div>':'')+
+      (S.portfolioLoading?'<div class="info-strip" role="status" id="portfolio-loading">Comparing strategies and aligning portfolio equity…</div>':'')+
+      (result?'<div class="info-strip" id="portfolio-source">Saved '+(isBest?'best-fit':'equal-weight')+
+        ' portfolio · '+esc(result.sourceSummary||'Daily OHLCV')+
+        ' · '+result.symbols.length+' symbols · '+result.curve.length+' daily equity points · run '+
+        esc(S.portfolioTimestamp||'')+
+        '<div class="result-range">'+esc(displayBacktestRange(result.range))+'</div>'+
+        (result.omitted?.length?' · excluded '+esc(result.omitted.join(', '))+' (insufficient bars or no rankable strategy)':'')+
+        '</div>':'')+
       summary+
-      '<div class="panel"><div class="panel-header"><h2>Combined portfolio equity vs. equal-weight buy & hold</h2></div>'+
-      (result?.curve?.length?'<div class="equity-legend"><span><i class="equity-swatch strategy"></i>Equal-weight strategy</span><span><i class="equity-swatch benchmark"></i>Equal-weight buy &amp; hold</span></div><div id="equity-chart" class="equity-plot"></div>':
-        '<div class="empty">Run a portfolio backtest to draw its combined equity curve.</div>')+'</div>'+
+      '<div class="panel"><div class="panel-header"><h2>Combined portfolio equity vs. equal-weight buy &amp; hold</h2></div>'+
+      (result?.curve?.length?'<div class="equity-legend"><span><i class="equity-swatch strategy"></i>'+
+        (isBest?'Best-fit strategies':'Equal-weight strategy')+'</span><span><i class="equity-swatch benchmark"></i>Equal-weight buy &amp; hold</span></div>'+
+        '<div id="equity-chart" class="equity-plot"></div>':
+        '<div class="empty">Run the portfolio to see the combined curve.</div>')+'</div>'+
       '<div class="panel"><div class="panel-header"><h2>Per-symbol breakdown</h2><span class="muted">'+rows.length+' symbols</span></div>'+
-      (rows.length?table:'<div class="empty">No portfolio runs yet.</div>')+'</div>';
+      (rows.length?table:'<div class="empty">No portfolio results yet.</div>')+'</div>'+
+      (result?.unranked?.length?'<div class="info-strip warning" id="best-fit-unranked">No finite-Sharpe candidate for: '+
+        esc(result.unranked.map(x=>x.symbol+' ('+x.reason+')').join('; '))+'</div>':'')+
+      (result?.methodology?'<p class="section-note" id="portfolio-methodology">'+esc(result.methodology)+'</p>':'');
   }
   function portfolioOptimizeView(){
     const rows=S.portfolioSweep||[];
