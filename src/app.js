@@ -85,7 +85,7 @@ async function initApp(){
   restoreSymbolState(S.symbol);
   parseCurrentPine();
   let chart=null,equityChart=null,leaderboardChart=null;
-  const saveSettings=()=>{try{localStorage.setItem('market-lens-pro-settings',JSON.stringify({mode:S.mode,
+  const saveSettings=()=>{try{localStorage.setItem('market-lens-pro-settings',JSON.stringify({mode:S.preferredMode==='live'?'live':S.mode,
     tab:S.tab,lastSymbol:S.symbol,lastBacktestSymbol:S.lastBacktestSymbol,
     lastLiveSymbol:S.lastLiveSymbol,lastDemoSymbol:S.lastDemoSymbol,watch:[...S.watch],watchlists:S.watchlists,watchlistId:S.watchlistId,alerts:S.alerts,savedScans:S.savedScans,rules:S.rules,chart:S.chart,bt:S.bt,portfolioMode:S.portfolioMode,portfolioScope:S.portfolioScope,portfolioWatchlistId:S.portfolioWatchlistId,signalSelection:S.signalSelection,signalsOnly:S.signalsOnly,apiBaseUrl:S.apiBaseUrl,universeFilter:S.universeFilter}));}catch{}};
   function rememberPortfolio(){
@@ -232,7 +232,20 @@ async function initApp(){
       db.close();
     }catch{notice('Intraday candles loaded, but IndexedDB could not store them for the next reload.');}
   }
-  async function loadStored(){try{const db=await openDb(),tx=db.transaction('symbols','readonly'),req=tx.objectStore('symbols').getAll();const rows=await new Promise((res,rej)=>{req.onsuccess=()=>res(req.result);req.onerror=()=>rej(req.error);});for(const item of rows){S.data.set(item.symbol,item.bars);S.sources.set(item.symbol,'IMPORTED');}db.close();if(rows.length){S.symbol=rows[0].symbol;render();}}catch{notice('Local database unavailable. Imports still work until this tab closes.');}}
+  async function loadStored(){
+    try{
+      const db=await openDb(),tx=db.transaction('symbols','readonly'),req=tx.objectStore('symbols').getAll();
+      const rows=await new Promise((res,rej)=>{req.onsuccess=()=>res(req.result);req.onerror=()=>rej(req.error);});
+      for(const item of rows){S.data.set(item.symbol,item.bars);S.sources.set(item.symbol,'IMPORTED');}
+      db.close();
+      if(S.preferredMode!=='live'){
+        const preferred=startupPrefs.selectedSymbol;
+        if(preferred&&S.data.has(preferred))restoreSymbolState(preferred);
+        else if(rows.length&&!S.data.has(S.symbol))restoreSymbolState(rows[0].symbol);
+      }
+      if(rows.length)render();
+    }catch{notice('Local database unavailable. Imports still work until this tab closes.');}
+  }
   async function storeDataset(symbol,bars){try{const db=await openDb(),tx=db.transaction('symbols','readwrite');tx.objectStore('symbols').put({symbol,bars});await new Promise((res,rej)=>{tx.oncomplete=res;tx.onerror=()=>rej(tx.error);});db.close();}catch{notice('Import loaded, but this browser could not save it for future visits.');}}
   async function removeImports(){try{const db=await openDb(),tx=db.transaction('symbols','readwrite');tx.objectStore('symbols').clear();await new Promise((res,rej)=>{tx.oncomplete=res;tx.onerror=()=>rej(tx.error);});db.close();}catch{}S.data=new Map(Object.entries(sampleData()));S.sources=new Map([...S.data.keys()].map(x=>[x,'SIMULATED']));S.symbol='DEMO-SPY';S.result=null;S.sweep=null;render();}
   const intradayTf=tf=>tf==='15m'||tf==='2H';
@@ -687,8 +700,12 @@ async function initApp(){
       mountPriceChart();
       if(intradayTf(S.chart.tf)&&S.mode==='live'&&S.sources.get(S.symbol)==='ALPACA'&&
         !S.intraday.get(intradayKey(S.symbol))&&!S.intradayStatus.get(intradayKey(S.symbol)))
-        void loadLiveIntraday(S.symbol);
+        void loadLiveIntraday(S.symbol).catch(()=>{});
     }
+    if(['backtest','optimize'].includes(S.tab)&&intradayTf(S.chart.tf)&&S.mode==='live'&&
+      S.sources.get(S.symbol)==='ALPACA'&&!S.intraday.get(intradayKey(S.symbol))&&
+      !S.intradayStatus.get(intradayKey(S.symbol)))
+      void loadLiveIntraday(S.symbol).catch(()=>{});
     if(S.tab==='backtest'&&(S.portfolioMode?S.portfolioResult?.curve?.length:S.result?.curve?.length))mountEquity();
     if(S.tab==='backtest'&&!S.portfolioMode&&S.leaderboard?.symbol===S.symbol)mountLeaderboardChart();
     saveSettings();
@@ -1219,5 +1236,14 @@ async function initApp(){
   if(S.signalSelection!=='none')evaluateScreenerSignals(false);
   render();
   await loadStored();
+  if(startupPrefs.mode==='live'){
+    // Restore Live by rehydrating the real market scan, never relabel Demo prices.
+    const destination=startupPrefs.tab;
+    await switchToLive({restoreTab:destination,restoreSymbol:startupPrefs.selectedSymbol});
+  }else{
+    if(startupPrefs.selectedSymbol&&S.data.has(startupPrefs.selectedSymbol))
+      restoreSymbolState(startupPrefs.selectedSymbol);
+    render();
+  }
 }
 initApp().catch(err=>{document.getElementById('app').textContent='App startup failed: '+err.message;console.error(err);});
