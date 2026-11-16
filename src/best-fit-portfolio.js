@@ -7,10 +7,10 @@ import {windowPortfolioData,validateBacktestRange,actualPortfolioRange} from './
 import {barDate} from './freshness.js';
 export function bestSharpeStrategy(rows){
   const eligible=(rows||[]).filter(row=>
-    row?.strategy&&Number.isFinite(row.trainMetrics?.sharpe??row.metrics?.sharpe)&&
+    row?.strategy&&Number.isFinite(row.trainMetrics?row.trainMetrics.sharpe:row.metrics?.sharpe)&&
     Array.isArray(row.curve)&&row.curve.length);
-  eligible.sort((a,b)=>(b.trainMetrics?.sharpe??b.metrics.sharpe)-
-    (a.trainMetrics?.sharpe??a.metrics.sharpe)||
+  eligible.sort((a,b)=>(b.trainMetrics?b.trainMetrics.sharpe:b.metrics.sharpe)-
+    (a.trainMetrics?a.trainMetrics.sharpe:a.metrics.sharpe)||
     String(a.id).localeCompare(String(b.id)));
   return eligible[0]||null;
 }
