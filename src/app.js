@@ -710,12 +710,12 @@ async function initApp(){
       mountPriceChart();
       if(intradayTf(S.chart.tf)&&S.mode==='live'&&S.sources.get(S.symbol)==='ALPACA'&&
         !S.intraday.get(intradayKey(S.symbol))&&!S.intradayStatus.get(intradayKey(S.symbol)))
-        void loadLiveIntraday(S.symbol).catch(()=>{});
+        void Promise.resolve().then(()=>loadLiveIntraday(S.symbol)).catch(()=>{});
     }
     if(['backtest','optimize'].includes(S.tab)&&intradayTf(S.chart.tf)&&S.mode==='live'&&
       S.sources.get(S.symbol)==='ALPACA'&&!S.intraday.get(intradayKey(S.symbol))&&
       !S.intradayStatus.get(intradayKey(S.symbol)))
-      void loadLiveIntraday(S.symbol).catch(()=>{});
+      void Promise.resolve().then(()=>loadLiveIntraday(S.symbol)).catch(()=>{});
     if(S.tab==='backtest'&&(S.portfolioMode?S.portfolioResult?.curve?.length:S.result?.curve?.length))mountEquity();
     if(S.tab==='backtest'&&!S.portfolioMode&&S.leaderboard?.symbol===S.symbol)mountLeaderboardChart();
     saveSettings();
