@@ -14,6 +14,18 @@ The VXX / Volatility preset has 11 entries: 10 live tickers (VXX, UVXY, SVXY, VI
 
 The screener's **RSI 5D** column is a five-period RSI calculated from daily closes. Daily OHLC cannot be expanded into genuine two-hour bars. A 2H filter still requires timestamped intraday data.
 
+## Round 11: seamless Live sessions, intraday persistence and complete Pine example comparison
+
+**Auto-fetch:** Backtest, Compare all strategies, and Optimize automatically load genuine Alpaca **15Min** bars for a selected Live 15m/2H ticker if missing or out of date. The Backtester displays **Fetching Alpaca 15-minute bars…** while waiting and a visible error if the feed fails or supplies fewer than the minimum required observations. No click silently does nothing, and daily candles are never converted to invented intraday candles. Chart Lab continues to fetch as needed.
+
+**Persistent bars:** A separate **IndexedDB** `intraday` object store saves the actual normalized Alpaca 15m OHLCV, symbol, feed and fetch time. The original imported `symbols` store is preserved during the schema upgrade. A saved cache entry is reused when its newest bar belongs to the expected latest **New York stock-trading session** and it was fetched within five minutes; otherwise the application requests fresh market data from the existing Worker. Cache and requests are segregated by symbol and IEX/SIP feed. If the browser blocks storage, the session still works and reports the persistence limitation.
+
+**Restore Live/Demo and ticker:** Browser settings retain the selected mode, tab, last selected ticker, separately remembered Live/Demo tickers, and the Backtester ticker. On reopening a Live session, the site **retrieves real Alpaca daily data again before reporting Live mode**; it does not label simulated Demo bars as real. The relevant per-symbol saved analysis and leaderboard are restored once that symbol is available. If Alpaca is unavailable, the page reports the failed Live restore rather than silently substituting live quotes.
+
+**Readable dates:** Leaderboard source/date banners display **YYYY-MM-DD** for either UTC/ISO daily dates or Unix-second intraday bars, rather than raw epoch numbers. The source and calculation timestamp remain visible.
+
+**Built-in strategy examples:** The leaderboard now includes all **seven** bundled Pine scripts, labeled **built-in example**, in addition to all five preset strategies and any user-saved Pine strategies. Five are trading strategies and receive properly backtested ranking metrics; the two indicator-only scripts (RSI and MACD) appear explicitly as **Indicator · N/A**, without invented trades or Sharpe values. The top-three equity overlay and "Load best" use only executable strategies.
+
 ## Round 10: source-labeled strategy signals and latest-bar freshness
 
 **Screener strategy signals:** Select one of the original five built-in strategies or any **saved strategy() Pine script**. Each loaded symbol's current position is calculated from its own daily OHLCV using the **same backtest order engine** and configured entry, stop/target, commissions and slippage, with long-only positioning. **LONG** means a long position remains open after the latest available bar; **EXIT** means the long closed on that bar or an exit condition at that bar's close is pending execution at next open; **FLAT** means no position. The forced liquidation used only to value a backtest at its final observation **never** counts as EXIT. The column displays the selected strategy name and the date of the source bar, plus the source in its tooltip. The Signal sort and **Signals only (LONG)** filter work alongside existing Screener filters and CSV export. Unavailable/invalid Pine strategies are not silently reported as FLAT.
