@@ -3,7 +3,8 @@ import {compilePine, executePine, sweepPine, PineError} from './pine.js';
 import {PINE_EXAMPLES} from './pine-examples.js';
 import {readableBarDate,normalizeStartupPreferences,intradayCacheFresh,intradayFetchDecision} from './intraday-session.js';
 import {availableStrategySignals,evaluateStrategySignals,scanSignalFlips} from './signals.js';
-import {expectedNyseBarDate,scanFreshness} from './freshness.js';
+import {expectedNyseBarDate,scanFreshness,explainStaleSymbol} from './freshness.js';
+import {FIT_COLUMNS,sortUniverseFit,bestUniverseFit,fitAcrossUniverse} from './fit.js';
 import {compareStrategies,sortLeaderboard,leaderboardBest,updateSymbolMemory,pruneSymbolMemory,symbolMemoryItem,compactLeaderboard,LEADERBOARD_METRICS} from './leaderboard.js';
 import {runPortfolio,runPortfolioSweep,portfolioUniverse} from './portfolio.js';
 import {VOL_TICKERS,volatilityRow,contangoPriceProxies} from './volatility.js';
@@ -58,7 +59,7 @@ async function initApp(){
     scanDraft:'',savedScanId:null,savedScanView:null,
     signalSelection:typeof saved.signalSelection==='string'?saved.signalSelection:'none',
     signalsOnly:!!saved.signalsOnly,signalRows:new Map(),signalErrors:[],
-    signalHistory:priorSignalHistory,signalAsOf:null,freshness:null,
+    signalHistory:priorSignalHistory,signalAsOf:null,freshness:null,staleDiagnostics:{},
     rules:saved.rules||preset.trend.map(x=>({...x})),sort:'symbol',ascending:true,showOnlyMatches:false,showWatch:false,chart:(()=>{const restored={...defaultSettings,...saved.chart};if(!saved.chart?.style||saved.chart.style==='line')restored.style='candles';return restored;})(),bt:{...defaultBacktest,...saved.bt},result:previousAnalysis?.result||null,sweep:previousAnalysis?.sweep||null,lastAnalysis:previousAnalysis,resultSymbol:previousAnalysis?.symbol||null,resultTf:previousAnalysis?.tf||null,
     portfolioMode:!!saved.portfolioMode,portfolioScope:saved.portfolioScope==='watchlist'?'watchlist':'matches',
     portfolioWatchlistId:saved.portfolioWatchlistId||workspaceLists.watchlistId,
@@ -66,7 +67,7 @@ async function initApp(){
     portfolioTimestamp:previousPortfolio?.savedAt||null,portfolioError:'',
     intraday:new Map(),intradayStatus:new Map(),intradayPromises:new Map(),intradayError:'',
     analysisLoading:'',analysisError:'',
-    symbolMemory:previousSymbolMemory,leaderboard:null,leaderboardSort:'sharpe',leaderboardDescending:true,leaderboardError:'',
+    symbolMemory:previousSymbolMemory,leaderboard:null,leaderboardSort:'sharpe',leaderboardDescending:true,leaderboardError:'',fitReport:null,fitSort:'sharpe',fitDescending:true,fitStatus:'',fitError:'',
     drawLine:false,
     scriptCode:typeof draft.code==='string'?draft.code:PINE_EXAMPLES[0].code,
     scriptName:typeof draft.name==='string'?draft.name:'EMA crossover',
@@ -414,8 +415,8 @@ async function initApp(){
       '" role="status"><strong>'+(freshness.allFresh?'Fresh daily bars':'Stale daily bars')+'</strong> · expected NYSE session '+
       esc(freshness.expected)+' · '+(freshness.checked-stale.length)+'/'+freshness.checked+' current'+
       (stale.length?'<details class="freshness-details" open><summary>'+stale.length+' older or missing symbol(s)</summary>'+
-        '<span>'+stale.map(x=>esc(x.symbol)+' ('+esc(x.latest||'missing')+')').join(' · ')+'</span></details>':'')+
-      '<small>Actual ALPACA '+esc(String(S.liveFeed).toUpperCase())+' 1Day bars · NYSE trading calendar; intraday daily bars may be unfinished. '+
+        '<span>'+stale.map(x=>esc(x.symbol)+' ('+esc(x.latest||'missing')+'): '+esc(explainStaleSymbol(x,S.staleDiagnostics[x.symbol]))).join(' · ')+'</span></details>':'')+
+      '<small>Actual ALPACA '+esc(String(S.liveFeed).toUpperCase())+' 1Day bars · NYSE trading calendar; expect a new daily bar only after 16:30 ET. '+
       (S.scan.retry?.attempted?.length?'Worker retried '+S.scan.retry.attempted.length+' stale tickers once.':'')+
       '</small></div>':'';
     const selectedStrategy=screenerStrategies().find(x=>x.id===S.signalSelection);
@@ -614,6 +615,37 @@ async function initApp(){
       (overlay.series.length?'<div id="leaderboard-chart" class="equity-plot leaderboard-plot" aria-label="Top three strategy equity curves and buy and hold"></div>':
         '<div class="empty">Run Compare all strategies to generate overlays.</div>')+'</div></div>';
   }
+
+  function universeFitView(){
+    const report=S.fitReport;
+    const status=S.fitStatus?'<div id="fit-status" role="status" class="info-strip">'+esc(S.fitStatus)+'</div>':
+      S.fitError?'<div id="fit-status" role="alert" class="info-strip warning">'+esc(S.fitError)+'</div>':'';
+    if(!report)return '<section class="panel" id="universe-fit"><div class="panel-header"><h2>Fit across universe</h2></div>'+
+      '<div class="panel-body">'+status+'<p class="section-note">Run the selected preset or Pine strategy on all '+
+      LIVE_UNIVERSE.length+' curated live Alpaca symbols with identical capital, fees, slippage and stops. Daily bars only. In-sample research, not proof of future performance.</p></div></section>';
+    const defs=[['symbol','Symbol'],['returnPct','Total return'],['cagrPct','CAGR'],['sharpe','Sharpe'],
+      ['maxDD','Max DD'],['winPct','Win rate'],['trades','Trades'],['source','Data source'],['barDate','Last bar']];
+    const headers=defs.map(([key,name])=>'<th aria-sort="'+(S.fitSort===key?(S.fitDescending?'descending':'ascending'):'none')+
+      '"><button type="button" class="table-sort" data-action="sort-fit" data-key="'+key+'">'+name+
+      (S.fitSort===key?(S.fitDescending?' ▼':' ▲'):'')+'</button></th>').join('');
+    const best=bestUniverseFit(report.rows);
+    const cells=sortUniverseFit(report.rows,S.fitSort,S.fitDescending).map(row=>
+      '<tr data-fit-symbol="'+esc(row.symbol)+'"'+(best?.symbol===row.symbol?' class="leaderboard-best"':'')+'>'+
+      '<td>'+esc(row.symbol)+(row.stale?'<small class="fit-stale">Stale</small>':'')+'</td>'+
+      '<td>'+pct(row.metrics?.returnPct)+'</td><td>'+pct(row.metrics?.cagrPct)+'</td>'+
+      '<td>'+format(row.metrics?.sharpe)+'</td><td>'+format(row.metrics?.maxDD)+'%</td>'+
+      '<td>'+pct(row.metrics?.winPct)+'</td><td>'+(row.metrics?.trades??'—')+'</td>'+
+      '<td>'+esc(row.source)+'</td><td>'+esc(row.barDate||'—')+
+      (row.error?'<small class="fit-error">'+esc(row.error)+'</small>':'')+'</td></tr>').join('');
+    return '<section class="panel" id="universe-fit"><div class="panel-header"><h2>Fit across universe</h2><div class="flex">'+
+      (best?button('Load best symbol','load-fit-best','primary'):'')+button('Export fit CSV','export-fit','small')+
+      '</div></div><div class="panel-body">'+status+
+      '<div id="fit-source" class="info-strip">'+report.completed+'/'+report.requested+' symbols backtested · ALPACA '+
+      esc(String(S.liveFeed).toUpperCase())+' 1Day OHLCV · '+esc(report.runAt)+
+      '. In-sample research, not proof of future performance. Missing bars are never fabricated.</div>'+
+      '<div class="table-wrap"><table class="data-table fit-table"><thead><tr>'+headers+
+      '</tr></thead><tbody>'+cells+'</tbody></table></div></div></section>';
+  }
   function backtestView(){
     if(S.portfolioMode)return portfolioBacktestView();
     const dataStatus=S.analysisLoading?
@@ -625,11 +657,11 @@ async function initApp(){
     const analysisNotice=S.result&&S.lastAnalysis?'<div class="info-strip">Saved analysis for <strong>'+esc(S.resultSymbol||S.symbol)+'</strong> · '+esc(S.resultTf||S.chart.tf)+' · '+esc(S.lastAnalysis.savedAt)+
       (S.resultSymbol!==S.symbol?' · Historical result from another symbol; select the original symbol and rerun for a matching chart.':'')+'</div>':'';
     return head('Backtest','Signals use completed bars and next-open fills. One position at a time, long or short.',symbolSelect()+tfSelect())+portfolioModeControl()+
-      '<div class="panel"><div class="panel-header"><h2>Strategy settings</h2><div class="flex">'+button('Run backtest','run-backtest','primary')+button('Compare all strategies','compare-strategies')+button('Optimize parameters','view-optimize')+'</div></div><div class="panel-body">'+btOptions()+'<p class="section-note">Stop-first rule when stop and target are both hit inside the same bar. Costs are modeled on each side. Short borrow fees are approximate; the engine does not model margin calls, locate availability, dividends, partial fills, taxes, or corporate actions.</p></div></div>'+
+      '<div class="panel"><div class="panel-header"><h2>Strategy settings</h2><div class="flex">'+button('Run backtest','run-backtest','primary')+button('Compare all strategies','compare-strategies')+button('Fit across universe','fit-universe')+button('Optimize parameters','view-optimize')+'</div></div><div class="panel-body">'+btOptions()+'<p class="section-note">Stop-first rule when stop and target are both hit inside the same bar. Costs are modeled on each side. Short borrow fees are approximate; the engine does not model margin calls, locate availability, dividends, partial fills, taxes, or corporate actions.</p></div></div>'+
       dataStatus+sourceStrip()+analysisNotice+'<div class="panel"><div class="panel-header"><h2>Performance</h2><div class="flex">'+button('Export trades CSV','export-trades','small')+button('View trade markers','view-charts','small')+'</div></div><div class="panel-body">'+resultCards(S.result)+'</div></div>'+
       '<div class="panel"><div class="panel-header"><h2>Equity curve vs. buy-and-hold</h2></div>'+(S.result?.curve?.length?'<div class="equity-legend"><span><i class="equity-swatch strategy"></i>Strategy</span><span><i class="equity-swatch benchmark"></i>Buy &amp; hold</span></div><div id="equity-chart" class="equity-plot"></div>':'<div class="empty">Run a backtest to generate an equity curve.</div>')+'</div>'+
       '<div class="panel"><div class="panel-header"><h2>Trade log</h2></div>'+tradeTable(S.result)+'</div>'+
-      leaderboardView();
+      leaderboardView()+universeFitView();
   }
   function optimizeView(){
     if(S.portfolioMode)return portfolioOptimizeView();
@@ -891,6 +923,7 @@ async function initApp(){
     const expected=payload.freshness?.expected||expectedNyseBarDate(new Date());
     const allBars=Object.fromEntries(LIVE_UNIVERSE.map(sym=>[sym,S.sources.get(sym)==='ALPACA'?S.data.get(sym):[]]));
     S.freshness=scanFreshness(allBars,expected);
+    S.staleDiagnostics=payload.diagnostics||{};
     S.scan={status:'complete',source:'ALPACA',requested:payload.requested||LIVE_UNIVERSE.length,returned:loaded.length,
       matched,missing:payload.missing||[],cached:response.headers.get('X-Scan-Cache')==='HIT',
       retry:payload.retry||null,at:new Date().toISOString()};
@@ -1045,6 +1078,39 @@ async function initApp(){
     }catch(error){S.portfolioError=error.message;S.tab='optimize';render();notice(error.message);}
   }
 
+
+  async function runUniverseFitCurrent(){
+    if(S.fitStatus)return;
+    const cfg={...S.bt},script=cfg.strategy==='pine-custom'?
+      {...(S.activeStrategy||{code:S.scriptCode,settings:{...S.scriptSettings}})}:null;
+    S.fitReport=null;S.fitError='';S.fitStatus='Fetching 133 Alpaca daily OHLCV histories…';render();
+    try{
+      await fetchLiveUniverse({restoreTab:'backtest',restoreSymbol:S.mode==='live'?S.symbol:S.lastLiveSymbol});
+      S.bt={...cfg};S.activeStrategy=script;
+      S.fitStatus='Running selected strategy across all live symbols…';render();
+      await new Promise(resolve=>setTimeout(resolve,0));
+      const histories=new Map(LIVE_UNIVERSE.filter(sym=>S.sources.get(sym)==='ALPACA')
+        .map(sym=>[sym,S.data.get(sym)]));
+      S.fitReport=fitAcrossUniverse({symbols:LIVE_UNIVERSE,data:histories,
+        options:cfg,strategyScript:script,backtest,compilePine,executePine,
+        expectedBarDate:S.freshness?.expected||expectedNyseBarDate(),
+        sourceFor:sym=>histories.has(sym)?'ALPACA '+String(S.liveFeed).toUpperCase()+' 1Day':'NO ALPACA BARS'});
+      S.fitSort='sharpe';S.fitDescending=true;S.fitStatus='';render();
+    }catch(err){S.fitStatus='';S.fitError=String(err.message||err);render();}
+  }
+  function loadUniverseFitBest(){
+    const best=bestUniverseFit(S.fitReport?.rows||[]);
+    if(!best){notice('No symbol has a finite Sharpe in this fit.');return;}
+    const report=S.fitReport;
+    restoreSymbolState(best.symbol);S.bt={...S.bt,...report.settings};
+    S.chart.tf='D';S.activeStrategy=report.script?{...report.script}:null;
+    if(report.script){
+      S.scriptCode=report.script.code;S.scriptSettings={...(report.script.settings||{})};
+      parseCurrentPine();persistPineDraft();
+    }
+    S.lastBacktestSymbol=best.symbol;S.tab='backtest';
+    if(runBt())render();
+  }
   function runComparison(){
     try{
       const history=bars();
@@ -1151,6 +1217,18 @@ async function initApp(){
       if(!await ensureAnalysisBars('Backtest'))return;
       if(runBt())render();
     },
+
+    'fit-universe':()=>void runUniverseFitCurrent(),
+    'load-fit-best':()=>loadUniverseFitBest(),
+    'sort-fit':el=>{const key=el.dataset.key;if(!FIT_COLUMNS.includes(key))return;
+      if(S.fitSort===key)S.fitDescending=!S.fitDescending;
+      else{S.fitSort=key;S.fitDescending=!['symbol','source','barDate','maxDD'].includes(key);}
+      render();},
+    'export-fit':()=>{if(!S.fitReport)return;exportFile('market-lens-universe-fit.csv',
+      csvDownload(S.fitReport.rows.map(r=>({symbol:r.symbol,returnPct:r.metrics?.returnPct??'',
+        cagrPct:r.metrics?.cagrPct??'',sharpe:r.metrics?.sharpe??'',
+        maxDD:r.metrics?.maxDD??'',winPct:r.metrics?.winPct??'',trades:r.metrics?.trades??'',
+        source:r.source,barDate:r.barDate||'',error:r.error||''}))));},
     'compare-strategies':async ()=>{
       if(S.portfolioMode){notice('Switch to Single symbol mode to compare individual strategies.');return;}
       S.lastBacktestSymbol=S.symbol;saveSettings();
