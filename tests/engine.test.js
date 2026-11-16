@@ -86,7 +86,7 @@ test('Alpaca daily timestamps stay daily and cannot be misread as two-hour bars'
  assert.equal(daily[0].time,'2026-01-01');
  assert.equal(aggregate(daily,'2H').length,0);
  assert.ok(Number.isFinite(statsFor(daily).rsi5));
- const intraday=alpacaBars([{t:'2026-01-05T14:30:00Z',o:100,h:101,l:99,c:100,v:100},{t:'2026-01-05T16:30:00Z',o:100,h:102,l:99,c:101,v:100}],'1Hour');
+ const intraday=alpacaBars([{t:'2026-01-05T14:30:00Z',o:100,h:101,l:99,c:100,v:100},{t:'2026-01-05T15:30:00Z',o:100,h:102,l:99,c:101,v:100}],'1Hour');
  assert.equal(typeof intraday[0].time,'number');
  assert.equal(aggregate(intraday,'2H').length,1);
 });
