@@ -208,7 +208,30 @@ async function initApp(){
     catch(err){S.scriptParsed=null;S.scriptError=err.message;return null;}
   }
   function notice(message){document.querySelectorAll('.toast').forEach(x=>x.remove());const el=document.createElement('div');el.className='toast';el.textContent=message;document.body.append(el);setTimeout(()=>el.remove(),4500);}
-  function openDb(){return new Promise((resolve,reject)=>{const req=indexedDB.open('market-lens-pro-datasets',1);req.onupgradeneeded=()=>req.result.createObjectStore('symbols',{keyPath:'symbol'});req.onsuccess=()=>resolve(req.result);req.onerror=()=>reject(req.error);});}
+  function openDb(){return new Promise((resolve,reject)=>{
+    const req=indexedDB.open('market-lens-pro-datasets',2);
+    req.onupgradeneeded=()=>{
+      if(!req.result.objectStoreNames.contains('symbols'))req.result.createObjectStore('symbols',{keyPath:'symbol'});
+      if(!req.result.objectStoreNames.contains('intraday'))req.result.createObjectStore('intraday',{keyPath:'key'});
+    };
+    req.onsuccess=()=>resolve(req.result);req.onerror=()=>reject(req.error);
+  });}
+  async function readCachedIntraday(key){
+    try{
+      const db=await openDb(),tx=db.transaction('intraday','readonly');
+      const req=tx.objectStore('intraday').get(key);
+      const row=await new Promise((resolve,reject)=>{req.onsuccess=()=>resolve(req.result||null);req.onerror=()=>reject(req.error);});
+      db.close();return row;
+    }catch{return null;}
+  }
+  async function persistIntraday(key,record){
+    try{
+      const db=await openDb(),tx=db.transaction('intraday','readwrite');
+      tx.objectStore('intraday').put({...record,key});
+      await new Promise((resolve,reject)=>{tx.oncomplete=resolve;tx.onerror=()=>reject(tx.error);});
+      db.close();
+    }catch{notice('Intraday candles loaded, but IndexedDB could not store them for the next reload.');}
+  }
   async function loadStored(){try{const db=await openDb(),tx=db.transaction('symbols','readonly'),req=tx.objectStore('symbols').getAll();const rows=await new Promise((res,rej)=>{req.onsuccess=()=>res(req.result);req.onerror=()=>rej(req.error);});for(const item of rows){S.data.set(item.symbol,item.bars);S.sources.set(item.symbol,'IMPORTED');}db.close();if(rows.length){S.symbol=rows[0].symbol;render();}}catch{notice('Local database unavailable. Imports still work until this tab closes.');}}
   async function storeDataset(symbol,bars){try{const db=await openDb(),tx=db.transaction('symbols','readwrite');tx.objectStore('symbols').put({symbol,bars});await new Promise((res,rej)=>{tx.oncomplete=res;tx.onerror=()=>rej(tx.error);});db.close();}catch{notice('Import loaded, but this browser could not save it for future visits.');}}
   async function removeImports(){try{const db=await openDb(),tx=db.transaction('symbols','readwrite');tx.objectStore('symbols').clear();await new Promise((res,rej)=>{tx.oncomplete=res;tx.onerror=()=>rej(tx.error);});db.close();}catch{}S.data=new Map(Object.entries(sampleData()));S.sources=new Map([...S.data.keys()].map(x=>[x,'SIMULATED']));S.symbol='DEMO-SPY';S.result=null;S.sweep=null;render();}
@@ -225,31 +248,74 @@ async function initApp(){
   };
   const bars=()=>barsFor(S.symbol,S.chart.tf);
   async function loadLiveIntraday(symbol,force=false){
-    if(S.mode!=='live'||S.sources.get(symbol)!=='ALPACA')return;
-    const key=intradayKey(symbol),current=S.intraday.get(key),status=S.intradayStatus.get(key);
-    if(status?.status==='loading')return;
-    if(!force&&current&&Date.now()-current.fetchedAt<300000)return;
-    if(!force&&status?.status==='error')return;
-    S.intradayStatus.set(key,{status:'loading'});
-    if(S.tab==='charts'&&S.symbol===symbol)render();
-    try{
-      const base=S.apiBaseUrl.replace(/\/$/,'');
-      if(!base.startsWith('https://'))throw Error('Configure an HTTPS Worker URL in Data Center.');
-      const response=await fetch(base+'/api/stocks/intraday?symbol='+encodeURIComponent(symbol)+
-        '&feed='+encodeURIComponent(S.liveFeed),{headers:{Accept:'application/json'}});
-      const payload=await response.json().catch(()=>({}));
-      if(!response.ok)throw Error(payload.detail||payload.error||'Alpaca intraday request failed.');
-      const received=alpacaBars(payload.bars||[],'15Min');
-      if(!received.length)throw Error('Alpaca '+String(payload.feed||S.liveFeed).toUpperCase()+' returned no real 15-minute candles for '+symbol+'.');
-      S.intraday.set(key,{bars:received,source:'ALPACA',feed:payload.feed||S.liveFeed,
-        fetchedAt:Date.now(),start:payload.start,end:payload.end});
-      S.intradayStatus.set(key,{status:'ready',bars:received.length});
-    }catch(err){
-      S.intraday.delete(key);
-      S.intradayStatus.set(key,{status:'error',error:err.message});
-      notice('Real 15-minute Alpaca candles unavailable: '+err.message);
+    if(S.mode!=='live'||S.sources.get(symbol)!=='ALPACA')return null;
+    const key=intradayKey(symbol),feed=S.liveFeed;
+    if(S.intradayPromises.has(key))return S.intradayPromises.get(key);
+    const work=(async()=>{
+      const current=S.intraday.get(key);
+      if(!force&&intradayCacheFresh({...current,symbol,feed},{
+        symbol,feed,expected:expectedNyseBarDate(),now:Date.now()}))return current;
+      S.intradayStatus.set(key,{status:'loading'});
+      if(S.symbol===symbol&&['charts','backtest','optimize'].includes(S.tab))render();
+      try{
+        if(!force){
+          const cached=await readCachedIntraday(key);
+          if(intradayCacheFresh(cached,{symbol,feed,expected:expectedNyseBarDate(),now:Date.now()})){
+            S.intraday.set(key,cached);
+            S.intradayStatus.set(key,{status:'ready',bars:cached.bars.length,cached:true});
+            return cached;
+          }
+        }
+        const base=S.apiBaseUrl.replace(/\/$/,'');
+        if(!base.startsWith('https://'))throw Error('Configure an HTTPS Worker URL in Data Center.');
+        const response=await fetch(base+'/api/stocks/intraday?symbol='+encodeURIComponent(symbol)+
+          '&feed='+encodeURIComponent(feed),{headers:{Accept:'application/json'}});
+        const payload=await response.json().catch(()=>({}));
+        if(!response.ok)throw Error(payload.detail||payload.error||'Alpaca intraday request failed.');
+        const received=alpacaBars(payload.bars||[],'15Min');
+        if(!received.length)throw Error('Alpaca '+String(payload.feed||feed).toUpperCase()+
+          ' returned no real 15-minute candles for '+symbol+'.');
+        const record={symbol,bars:received,source:'ALPACA',feed:payload.feed||feed,
+          fetchedAt:Date.now(),start:payload.start,end:payload.end};
+        S.intraday.set(key,record);
+        S.intradayStatus.set(key,{status:'ready',bars:received.length,cached:false});
+        await persistIntraday(key,record);
+        return record;
+      }catch(err){
+        S.intradayStatus.set(key,{status:'error',error:err.message});
+        notice('Real Alpaca 15-minute bars unavailable: '+err.message);
+        throw err;
+      }finally{
+        if(S.symbol===symbol&&['charts','backtest','optimize'].includes(S.tab))render();
+      }
+    })();
+    S.intradayPromises.set(key,work);
+    try{return await work;}finally{S.intradayPromises.delete(key);}
+  }
+  async function ensureAnalysisBars(actionLabel='Backtest'){
+    if(!intradayTf(S.chart.tf))return true;
+    const key=intradayKey(S.symbol);
+    const decision=intradayFetchDecision({timeframe:S.chart.tf,mode:S.mode,source:S.sources.get(S.symbol),
+      symbol:S.symbol,entry:S.intraday.get(key),feed:S.liveFeed});
+    if(decision==='unavailable'){
+      S.analysisError=actionLabel+' requires genuine timestamped intraday OHLCV. Select Live Alpaca or import real intraday CSV.';
+      notice(S.analysisError);render();return false;
     }
-    if(S.tab==='charts'&&S.symbol===symbol)render();
+    if(decision==='fetch'){
+      S.analysisLoading='Fetching Alpaca 15-minute bars…';
+      S.analysisError='';render();
+      try{await loadLiveIntraday(S.symbol);}
+      catch(err){S.analysisError=actionLabel+' could not obtain real intraday bars: '+err.message;
+        S.analysisLoading='';render();return false;}
+      S.analysisLoading='';
+    }
+    if(bars().length<40){
+      S.analysisError=actionLabel+' needs at least 40 real '+S.chart.tf+
+        ' bars; '+bars().length+' available. Try a longer timeframe or refresh the Alpaca feed.';
+      notice(S.analysisError);render();return false;
+    }
+    S.analysisError='';render();
+    return true;
   }
 
   const status=()=>S.mode==='live'?'ALPACA LIVE · '+String(S.liveFeed||'iex').toUpperCase():S.sources.get(S.symbol)==='SIMULATED'?'SIMULATED SAMPLE':S.sources.get(S.symbol)==='IMPORTED'?'IMPORTED OHLCV':'NO DATA';
