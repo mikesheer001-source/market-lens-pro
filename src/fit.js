@@ -1,6 +1,7 @@
 // Research-only strategy fit: same execution engine and cost assumptions per symbol.
 import {barDate} from './freshness.js';
 import {assessHoldout} from './validation.js';
+import {windowBacktestBars,validateBacktestRange} from './date-window.js';
 export const FIT_COLUMNS=Object.freeze(['symbol','returnPct','cagrPct','sharpe','maxDD','winPct','trades',
   'trainReturnPct','trainSharpe','testReturnPct','testSharpe','validation','source','barDate']);
 const metricKeys=new Set(['returnPct','cagrPct','sharpe','maxDD','winPct','trades']);
@@ -29,10 +30,11 @@ export function bestUniverseFit(rows){
   return sortUniverseFit(rows,'sharpe',true).find(r=>Number.isFinite(fitMetric(r,'sharpe')))||null;
 }
 export function fitAcrossUniverse({symbols,data,options,backtest,compilePine,executePine,
- strategyScript=null,sourceFor=()=>null,expectedBarDate=null}){
+ strategyScript=null,sourceFor=()=>null,expectedBarDate=null,dateRange={}}){
   if(!Array.isArray(symbols)||!symbols.length)throw Error('Choose a research universe.');
   if(typeof backtest!=='function')throw Error('Backtest engine unavailable.');
   const settings={...options,timeframe:'D'};
+  const selectedRange=validateBacktestRange(dateRange);
   let pine=null;
   if(settings.strategy==='pine-custom'){
     if(!strategyScript?.code)throw Error('Load a Pine strategy() in Script Lab first.');
@@ -41,10 +43,13 @@ export function fitAcrossUniverse({symbols,data,options,backtest,compilePine,exe
   }
   const rows=[];
   for(const symbol of symbols){
-    const history=data instanceof Map?data.get(symbol):data?.[symbol];
-    const last=Array.isArray(history)?barDate(history.at(-1)):null;
+    const original=data instanceof Map?data.get(symbol):data?.[symbol];
+    const history=windowBacktestBars(original||[],selectedRange,{allowEmpty:true}).bars;
+    const last=barDate(history.at(-1));
+    const actualNewest=Array.isArray(original)?barDate(original.at(-1)):null;
     const row={symbol,source:sourceFor(symbol)||'NO ALPACA DATA',barDate:last,
-      stale:!!(expectedBarDate&&(!last||last<expectedBarDate)),metrics:null,error:null};
+      stale:!!(expectedBarDate&&(!actualNewest||actualNewest<expectedBarDate)),
+      metrics:null,error:null};
     if(!Array.isArray(history)||history.length<40)
       row.error=history?.length?'Insufficient OHLCV history ('+history.length+' bars)':'No OHLCV bars returned';
     else try{
@@ -57,7 +62,7 @@ export function fitAcrossUniverse({symbols,data,options,backtest,compilePine,exe
     }catch(e){row.error=String(e.message||e);}
     rows.push(row);
   }
-  return {version:2,settings,script:pine?{...strategyScript}:null,
+  return {version:2,settings,dateRange:selectedRange,script:pine?{...strategyScript}:null,
     expectedBarDate,runAt:new Date().toISOString(),requested:symbols.length,
     completed:rows.filter(x=>x.metrics).length,rows:sortUniverseFit(rows)};
 }
