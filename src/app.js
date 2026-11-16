@@ -198,8 +198,8 @@ async function initApp(){
   }
   const runBt=()=>{const b=bars();if(b.length<40){notice('Need at least 40 bars for a meaningful backtest.');return false;}S.result=backtest(b,{...S.bt,timeframe:S.chart.tf});S.resultSymbol=S.symbol;S.resultTf=S.chart.tf;return true;};
   async function testLiveBackend(){
-    const base=S.apiBaseUrl.trim().replace(/\\/+$/,'');
-    if(!/^https:\\/\\//i.test(base))throw new Error('Enter the Cloudflare Worker URL in Data Center first.');
+    let base=S.apiBaseUrl.trim();while(base.endsWith('/'))base=base.slice(0,-1);
+    if(!base.startsWith('https://'))throw new Error('Enter the Cloudflare Worker URL in Data Center first.');
     const response=await fetch(base+'/api/health',{headers:{Accept:'application/json'}}),payload=await response.json().catch(()=>({}));
     if(!response.ok)throw new Error(payload.error||'Worker health check failed ('+response.status+').');
     if(!payload.configured)throw new Error('Worker is reachable, but Alpaca secrets have not been configured yet.');
@@ -208,8 +208,8 @@ async function initApp(){
   async function fetchLiveBars(){
     const symbol=String(S.liveSymbol||'').trim().toUpperCase();
     if(!/^[A-Z0-9][A-Z0-9.^_-]{0,19}$/.test(symbol))throw new Error('Enter a valid ticker symbol, for example SPY.');
-    const base=S.apiBaseUrl.trim().replace(/\\/+$/,'');
-    if(!/^https:\\/\\//i.test(base))throw new Error('Enter the Cloudflare Worker URL in Data Center first.');
+    let base=S.apiBaseUrl.trim();while(base.endsWith('/'))base=base.slice(0,-1);
+    if(!base.startsWith('https://'))throw new Error('Enter the Cloudflare Worker URL in Data Center first.');
     if(S.sources.get(S.symbol)!=='ALPACA')S.lastDemoSymbol=S.symbol;
     const start=new Date(Date.now()-5*365.25*86400000).toISOString(),end=new Date().toISOString();
     const params=new URLSearchParams({symbol,timeframe:'1Day',start,end,limit:'10000'});
