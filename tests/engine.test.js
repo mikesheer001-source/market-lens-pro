@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {parseCsv,ema,rsi,aggregate,backtest,parameterSweep,sampleData,screenSymbol} from '../src/engine.js';
+import {parseCsv,ema,rsi,aggregate,backtest,parameterSweep,sampleData,screenSymbol,statsFor} from '../src/engine.js';
 
 const day = i => new Date(Date.UTC(2024,0,1+i)).toISOString().slice(0,10);
 const bar = (i,open=100,high=101,low=99,close=100) => ({time:day(i),open,high,low,close,volume:100});
@@ -77,4 +77,13 @@ test('borrow fees reduce short strategy equity',()=>{
  const base={strategy:'breakout',side:'short',period:20,feeBps:0,slipBps:0};
  const free=backtest(b,{...base,borrowAnnualPct:0}),charged=backtest(b,{...base,borrowAnnualPct:50});
  assert.ok(charged.metrics.endEquity<free.metrics.endEquity);
+});
+
+
+test('daily-only datasets provide a real five-day RSI instead of blank 2-hour RSI',()=>{
+ const daily=sampleData()['DEMO-SPY'];
+ assert.equal(aggregate(daily,'2H').length,0,'daily OHLC cannot be expanded into genuine intraday bars');
+ const stats=statsFor(aggregate(daily,'D'));
+ assert.ok(Number.isFinite(stats.rsi5),'five-day RSI must be calculated from daily closes');
+ assert.ok(stats.rsi5>=0&&stats.rsi5<=100);
 });
