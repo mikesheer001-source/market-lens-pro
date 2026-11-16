@@ -151,3 +151,56 @@ test('real Alpaca scan exposes latest-bar freshness and dated computed strategy 
   expect(longs.every(x=>x.trim()==='LONG')).toBe(true);
   expect(errors).toEqual([]);
 });
+
+
+test('Round 11 live 2H comparison auto-fetches real Alpaca 15Min bars, caches in IndexedDB, restores Live and VXX on reload',async ({page})=>{
+  test.skip(process.env.REAL_ALPACA_TEST!=='1','Only after publish, using real configured Alpaca Worker');
+  test.setTimeout(180000);
+  const errors=[],intradayRequests=[];
+  page.on('pageerror',e=>errors.push(e.message));
+  page.on('request',r=>{if(r.url().includes('/api/stocks/intraday?'))intradayRequests.push(r.url());});
+  await page.goto('./');
+  await page.evaluate(url=>localStorage.setItem('market-lens-pro-settings',JSON.stringify({apiBaseUrl:url})),WORKER);
+  await page.reload();
+  await page.locator('.mode-switch [data-action="mode-live"]').click();
+  await expect(page.locator('#scan-status')).toContainText('133/133 symbols loaded',{timeout:150000});
+  await page.locator('.sidebar [data-tab="backtest"]').click();
+  await page.locator('[data-option="symbol"]').selectOption('VXX');
+  await page.locator('[data-option="tf"]').selectOption('2H');
+  // No Chart Lab navigation, no manual Refresh button; the analysis fetch is automatic.
+  await page.locator('[data-action="compare-strategies"]').first().click();
+  await expect(page.locator('#leaderboard-source')).toContainText('VXX',{timeout:90000});
+  await expect(page.locator('#leaderboard-source')).toContainText('2H');
+  await expect(page.locator('#leaderboard-source')).toContainText('7 built-in examples');
+  await expect(page.locator('#leaderboard-source')).not.toContainText(/bar date \d{10}/);
+  await expect(page.locator('.leaderboard-table tbody tr')).toHaveCount(12);
+  await expect(page.locator('#leaderboard-chart canvas').first()).toBeVisible();
+  expect(intradayRequests.length).toBeGreaterThan(0);
+  const record=await page.evaluate(()=>new Promise((resolve,reject)=>{
+    const open=indexedDB.open('market-lens-pro-datasets',2);
+    open.onerror=()=>reject(open.error?.message);
+    open.onsuccess=()=>{
+      const db=open.result,tx=db.transaction('intraday','readonly'),req=tx.objectStore('intraday').get('VXX|iex');
+      req.onsuccess=()=>{db.close();resolve(req.result||null);};
+      req.onerror=()=>reject(req.error?.message);
+    };
+  }));
+  expect(record?.bars.length).toBeGreaterThan(40);
+  expect(record.source).toBe('ALPACA');
+  expect(record.feed).toBe('iex');
+  await page.locator('[data-action="run-backtest"]').click();
+  await expect(page.locator('#equity-chart canvas').first()).toBeVisible();
+  const requestCount=intradayRequests.length;
+  await page.reload();
+  await expect(page.locator('.mode-switch [data-action="mode-live"]')).toHaveAttribute('aria-pressed','true',{timeout:150000});
+  await expect(page.locator('.sidebar [data-tab="backtest"]')).toHaveClass(/active/);
+  await expect(page.locator('[data-option="symbol"]')).toHaveValue('VXX');
+  await expect(page.locator('[data-option="tf"]')).toHaveValue('2H');
+  await expect(page.locator('#equity-chart canvas').first()).toBeVisible();
+  await expect(page.locator('.leaderboard-table tbody tr')).toHaveCount(12);
+  await expect(page.locator('.leaderboard-table')).toContainText('Hidden bullish RSI divergence');
+  await expect(page.locator('#leaderboard-source')).not.toContainText(/bar date \d{10}/);
+  await expect(page.locator('#leaderboard-chart canvas').first()).toBeVisible();
+  expect(intradayRequests.length).toBe(requestCount,'fresh 15m IndexedDB bars should be reused without refetching');
+  expect(errors).toEqual([]);
+});
