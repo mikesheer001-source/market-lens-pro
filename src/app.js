@@ -616,11 +616,17 @@ async function initApp(){
   }
   function backtestView(){
     if(S.portfolioMode)return portfolioBacktestView();
+    const dataStatus=S.analysisLoading?
+      '<div class="info-strip analysis-loading" role="status" aria-live="polite"><strong>'+
+      esc(S.analysisLoading)+'</strong> · '+esc(S.symbol)+' · '+esc(S.chart.tf)+
+      ' · '+esc(String(S.liveFeed).toUpperCase())+' Alpaca real OHLCV. No daily-to-intraday simulation.</div>':
+      S.analysisError?'<div class="info-strip warning" role="alert"><strong>Intraday data unavailable:</strong> '+
+      esc(S.analysisError)+'</div>':'';
     const analysisNotice=S.result&&S.lastAnalysis?'<div class="info-strip">Saved analysis for <strong>'+esc(S.resultSymbol||S.symbol)+'</strong> · '+esc(S.resultTf||S.chart.tf)+' · '+esc(S.lastAnalysis.savedAt)+
       (S.resultSymbol!==S.symbol?' · Historical result from another symbol; select the original symbol and rerun for a matching chart.':'')+'</div>':'';
     return head('Backtest','Signals use completed bars and next-open fills. One position at a time, long or short.',symbolSelect()+tfSelect())+portfolioModeControl()+
       '<div class="panel"><div class="panel-header"><h2>Strategy settings</h2><div class="flex">'+button('Run backtest','run-backtest','primary')+button('Compare all strategies','compare-strategies')+button('Optimize parameters','view-optimize')+'</div></div><div class="panel-body">'+btOptions()+'<p class="section-note">Stop-first rule when stop and target are both hit inside the same bar. Costs are modeled on each side. Short borrow fees are approximate; the engine does not model margin calls, locate availability, dividends, partial fills, taxes, or corporate actions.</p></div></div>'+
-      sourceStrip()+analysisNotice+'<div class="panel"><div class="panel-header"><h2>Performance</h2><div class="flex">'+button('Export trades CSV','export-trades','small')+button('View trade markers','view-charts','small')+'</div></div><div class="panel-body">'+resultCards(S.result)+'</div></div>'+
+      dataStatus+sourceStrip()+analysisNotice+'<div class="panel"><div class="panel-header"><h2>Performance</h2><div class="flex">'+button('Export trades CSV','export-trades','small')+button('View trade markers','view-charts','small')+'</div></div><div class="panel-body">'+resultCards(S.result)+'</div></div>'+
       '<div class="panel"><div class="panel-header"><h2>Equity curve vs. buy-and-hold</h2></div>'+(S.result?.curve?.length?'<div class="equity-legend"><span><i class="equity-swatch strategy"></i>Strategy</span><span><i class="equity-swatch benchmark"></i>Buy &amp; hold</span></div><div id="equity-chart" class="equity-plot"></div>':'<div class="empty">Run a backtest to generate an equity curve.</div>')+'</div>'+
       '<div class="panel"><div class="panel-header"><h2>Trade log</h2></div>'+tradeTable(S.result)+'</div>'+
       leaderboardView();
@@ -1122,7 +1128,7 @@ async function initApp(){
     'view-charts':()=>{S.tab='charts';render();},
     'refresh-intraday':()=>{if(S.mode==='live')void loadLiveIntraday(S.symbol,true).catch(()=>{});
       else notice('Only Alpaca Live mode can refresh real intraday bars.');},
-    'view-backtest':()=>{S.tab='backtest';render();},
+    'view-backtest':()=>{S.tab='backtest';S.lastBacktestSymbol=S.symbol;render();},
     'view-optimize':()=>{S.tab='optimize';render();},
     'add-rule':()=>{clearSavedScanView();S.universeFilter='all';S.rules.push({metric:'rsi',tf:'D',op:'<',value:50});S.scan={status:'idle'};render();},
     'remove-rule':el=>{clearSavedScanView();S.rules.splice(Number(el.dataset.index),1);render();},
@@ -1159,7 +1165,7 @@ async function initApp(){
       else {S.leaderboardSort=key;S.leaderboardDescending=!['name','maxDD'].includes(key);}
       render();
     },
-    'run-sweep':()=>{if(S.portfolioMode){runPortfolioOptimization();return;}if(bars().length<60){notice('A parameter sweep needs at least 60 bars.');return;}if(S.bt.strategy==='pine-custom'){sweepCurrentPine();return;}S.sweep=parameterSweep(bars(),{...S.bt,timeframe:S.chart.tf});rememberAnalysis();render();},
+    'run-sweep':async ()=>{if(S.portfolioMode){runPortfolioOptimization();return;}if(!await ensureAnalysisBars('Parameter sweep'))return;if(bars().length<60){notice('A parameter sweep needs at least 60 bars.');return;}if(S.bt.strategy==='pine-custom'){sweepCurrentPine();return;}S.sweep=parameterSweep(bars(),{...S.bt,timeframe:S.chart.tf});rememberAnalysis();render();},
     'apply-sweep':el=>{
       if(S.portfolioMode){
         const params=S.portfolioSweep?.[Number(el.dataset.index)]?.params;
