@@ -9,10 +9,9 @@ test('desktop screener, chart, backtest, optimization and CSV import',async ({pa
   const shortRsi = await page.locator('tbody tr td:nth-child(5)').allTextContents();
   expect(shortRsi).toHaveLength(4);
   expect(shortRsi.every(value => value.trim() !== '—')).toBeTruthy();
-  await page.locator('.mode-switch [data-action="mode-live"]').click();
+  await page.locator('.sidebar [data-tab="data"]').click();
   await expect(page.getByRole('heading',{name:'Data Center'})).toBeVisible();
   await expect(page.locator('[data-setting="apiBaseUrl"]')).toBeVisible();
-  await page.locator('.mode-switch [data-action="mode-demo"]').click();
   await page.locator('.sidebar [data-tab="screener"]').click();
   await expect(page.getByRole('heading',{name:'Screener'})).toBeVisible();
   await page.locator('.sidebar [data-tab="charts"]').click();
