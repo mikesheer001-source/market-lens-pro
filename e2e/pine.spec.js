@@ -70,3 +70,17 @@ test('Alpaca live market fact displays real VXX daily close returned by the conn
   await expect(page.locator('.market-fact')).not.toContainText('SIMULATED');
   await expect(page.locator('tr[data-symbol="VXX"]')).toHaveCount(1);
 });
+
+test('saved scripts can be renamed and deleted without server access',async ({page})=>{
+  await page.goto('./');
+  await page.locator('.sidebar [data-tab="scripts"]').click();
+  await page.locator('#pine-name').fill('Local RSI strategy');
+  await page.locator('[data-action="pine-save"]').click();
+  await expect(page.locator('#pine-library option')).toHaveCount(2);
+  await page.locator('#pine-name').fill('Renamed locally');
+  await page.locator('[data-action="pine-rename"]').click();
+  await expect(page.locator('#pine-library option').last()).toContainText('Renamed locally');
+  page.once('dialog',dialog=>dialog.accept());
+  await page.locator('[data-action="pine-delete"]').click();
+  await expect(page.locator('#pine-library option')).toHaveCount(1);
+});
