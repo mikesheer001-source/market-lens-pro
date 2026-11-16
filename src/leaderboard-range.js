@@ -34,14 +34,14 @@ export function leaderboardRangeStatus(report,{bars,range={},symbol,timeframe,so
     // Older reports have no range fields. Only allow them in full-range mode,
     // and only if their last observed bar is still current.
     const full=!selectedRange.startDate&&!selectedRange.endDate;
-    return {matches:full&&barDate(report.asOf)===selectedRange.actualEnd,
+    return {matches:full&&barDate({time:report.asOf})===selectedRange.actualEnd,
       reason:full?'Saved full-history leaderboard needs recalculation against current bars.':
         'Saved full-history leaderboard — selected date range not applied.',
       range:selectedRange};
   }
   const matches=['startDate','endDate','actualStart','actualEnd','count']
     .every(key=>report.range[key]===selectedRange[key])&&
-    barDate(report.asOf)===selectedRange.actualEnd;
+    barDate({time:report.asOf})===selectedRange.actualEnd;
   return {matches,reason:matches?null:'Saved leaderboard was calculated for different dates or bars.',
     range:selectedRange};
 }
