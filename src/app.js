@@ -774,7 +774,7 @@ async function initApp(){
       (i+1)+'. '+esc(entry.name)+'</span>').join('')+
       '<span class="leaderboard-legend-item"><i class="leaderboard-swatch" style="--swatch:#91a0a7"></i>Buy &amp; hold</span>';
     const assessment=holdoutSummary(lb.rows),split=lb.rows.find(x=>x.validation)?.validation;
-    const walk='<div class="info-strip" id="walk-forward-summary">Single-split walk-forward summary (70/30 chronological holdout): '+
+    const walk='<div class="info-strip" id="walk-forward-summary">Walk-forward summary (single 70/30 chronological holdout): '+
       assessment.positive+' of '+assessment.assessable+' assessable strategies retained positive OOS Sharpe'+
       (assessment.assessable<assessment.total?' ('+(assessment.total-assessment.assessable)+
         ' had insufficient/unmeasurable test Sharpe)':'')+'. '+
