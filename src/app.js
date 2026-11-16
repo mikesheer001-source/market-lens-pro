@@ -61,14 +61,15 @@ async function initApp(){
     scriptSettings:draft.settings&&typeof draft.settings==='object'?draft.settings:{},
     scriptParsed:null,scriptError:'',scriptOutput:null,scriptLibrary,activeIndicators:[],activeStrategy:null};
   for(const symbol of S.data.keys())S.sources.set(symbol,'SIMULATED');
-  if(!Object.keys(S.symbolMemory).length&&previousAnalysis?.symbol===S.symbol&&previousAnalysis?.result){
+  if(!symbolMemoryItem(S.symbolMemory,S.symbol)?.backtest&&previousAnalysis?.symbol===S.symbol&&previousAnalysis?.result){
     S.symbolMemory=updateSymbolMemory(S.symbolMemory,S.symbol,{backtest:{
       result:previousAnalysis.result,sweep:previousAnalysis.sweep,options:{...S.bt},
       timeframe:previousAnalysis.tf||S.chart.tf,source:previousAnalysis.source,
       savedAt:previousAnalysis.savedAt
     }});
   }
-  S.leaderboard=symbolMemoryItem(S.symbolMemory,S.symbol)?.leaderboard||null;
+  // Restore the default symbol's own run. Never mislabel a different symbol's global last analysis.
+  restoreSymbolState(S.symbol);
   parseCurrentPine();
   let chart=null,equityChart=null,leaderboardChart=null;
   const saveSettings=()=>{try{localStorage.setItem('market-lens-pro-settings',JSON.stringify({watch:[...S.watch],watchlists:S.watchlists,watchlistId:S.watchlistId,alerts:S.alerts,savedScans:S.savedScans,rules:S.rules,chart:S.chart,bt:S.bt,portfolioMode:S.portfolioMode,portfolioScope:S.portfolioScope,portfolioWatchlistId:S.portfolioWatchlistId,apiBaseUrl:S.apiBaseUrl,universeFilter:S.universeFilter}));}catch{}};
