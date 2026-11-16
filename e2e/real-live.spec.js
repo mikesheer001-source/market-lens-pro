@@ -1,5 +1,7 @@
 import {test,expect} from '@playwright/test';
 import {LIVE_UNIVERSE} from '../src/universe.js';
+import {nyIntradaySession} from '../src/intraday-session.js';
+import {expectedNyseBarDate} from '../src/freshness.js';
 
 const WORKER='https://market-lens-pro-api.mikesheer001.workers.dev';
 
@@ -201,6 +203,10 @@ test('Round 11 live 2H comparison auto-fetches real Alpaca 15Min bars, caches in
   await expect(page.locator('.leaderboard-table')).toContainText('Hidden bullish RSI divergence');
   await expect(page.locator('#leaderboard-source')).not.toContainText(/bar date \d{10}/);
   await expect(page.locator('#leaderboard-chart canvas').first()).toBeVisible();
-  expect(intradayRequests.length).toBe(requestCount,'fresh 15m IndexedDB bars should be reused without refetching');
+  const lastSession=nyIntradaySession(record.bars.at(-1));
+  if(lastSession>=expectedNyseBarDate())
+    expect(intradayRequests.length).toBe(requestCount,'fresh 15m IndexedDB bars should be reused without refetching');
+  else
+    expect(intradayRequests.length).toBeGreaterThan(requestCount,'stale Alpaca data must be refetched on reload');
   expect(errors).toEqual([]);
 });
