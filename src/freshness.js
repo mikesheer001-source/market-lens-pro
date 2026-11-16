@@ -73,20 +73,35 @@ export function barDate(bar){
   if(typeof time==='string'&&/^\d{4}-\d{2}-\d{2}/.test(time))return time.slice(0,10);
   return null;
 }
-export function scanFreshness(items,expected=expectedNyseBarDate()){
+// The reference is observed market data, not a local-clock guess. Use the most
+// common latest-bar date; if counts tie choose the newer date to avoid hiding lag.
+// A clock-derived date is only a fallback when not a single symbol has bars.
+export function modalLatestBarDate(dates,fallback=null){
+  const counts=new Map();
+  for(const date of Object.values(dates||{})){
+    if(!date)continue;
+    counts.set(date,(counts.get(date)||0)+1);
+  }
+  const ordered=[...counts].sort((a,b)=>b[1]-a[1]||b[0].localeCompare(a[0]));
+  return ordered[0]?.[0]||fallback;
+}
+export function scanFreshness(items,clockFallback=expectedNyseBarDate()){
   const pairs=items instanceof Map?[...items.entries()]:Object.entries(items||{});
   const stale=[],dates={};
-  for(const [symbol,bars] of pairs){
-    const latest=barDate(Array.isArray(bars)?bars.at(-1):null);
-    dates[symbol]=latest;
+  for(const [symbol,bars] of pairs)
+    dates[symbol]=barDate(Array.isArray(bars)?bars.at(-1):null);
+  const expected=modalLatestBarDate(dates,clockFallback);
+  for(const [symbol,latest] of Object.entries(dates)){
     if(!latest||latest<expected)stale.push({symbol,latest:latest||null});
   }
   stale.sort((a,b)=>a.symbol.localeCompare(b.symbol));
-  return {expected,allFresh:stale.length===0,stale,dates,checked:pairs.length};
+  return {expected,referenceMethod:expected===clockFallback&&!Object.values(dates).some(Boolean)?
+      'clock fallback (no bars)':'modal latest-bar date',
+    allFresh:stale.length===0,stale,dates,checked:pairs.length};
 }
-export function freshnessWithUniverse(items,symbols,expected=expectedNyseBarDate()){
+export function freshnessWithUniverse(items,symbols,clockFallback=expectedNyseBarDate()){
   const all=Object.fromEntries(symbols.map(symbol=>[symbol,items?.[symbol]||[]]));
-  return scanFreshness(all,expected);
+  return scanFreshness(all,clockFallback);
 }
 
 // A failed asset status request is not evidence that a symbol has delisted.
@@ -98,6 +113,17 @@ export function explainStaleSymbol(entry,diagnostic){
   if(diagnostic.asset?.tradable===false)return 'Alpaca marks this asset non-tradable';
   if(diagnostic.retryFailed)return 'Alpaca retry failed; newer bars not verified';
   if(diagnostic.barsAfterLatest===true)return 'Alpaca returned a newer bar but it is still older than the required session';
-  if(diagnostic.barsAfterLatest===false)return 'Alpaca returns no bars after '+date+' on this feed';
+  if(diagnostic.barsAfterLatest===false){
+    const parsed=/^\\d{4}-\\d{2}-\\d{2}$/.test(date)?new Date(date+'T00:00:00Z'):null;
+    const human=parsed&&Number.isFinite(parsed.valueOf())?
+      new Intl.DateTimeFormat('en-US',{timeZone:'UTC',month:'short',day:'numeric',year:'numeric'}).format(parsed):date;
+    return 'Alpaca returns no bars after '+human+' ('+date+') on this feed';
+  }
   return diagnostic.asset?.error?'Asset status unavailable: '+diagnostic.asset.error:'Newer bars could not be verified';
+}
+
+/** Never claim Alpaca confirmed no newer bars unless the Worker returned evidence. */
+export function staleReasonForSymbol(symbol,freshness,diagnostics={}){
+  const entry=freshness?.stale?.find(row=>row.symbol===symbol);
+  return entry?explainStaleSymbol(entry,diagnostics?.[symbol]):null;
 }
