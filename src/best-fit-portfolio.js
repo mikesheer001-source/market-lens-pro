@@ -77,5 +77,5 @@ export function runBestFitPortfolio({data,symbols,options,backtest,
     unranked,
     omitted:[...new Set([...aligned.omitted,...unranked.map(x=>x.symbol)])],
     methodology:portfolio.methodology+
-      ' Each ticker is selected ONLY by the highest finite Sharpe in its first 70% training bars across executable presets, saved Pine strategies and built-in examples. The final 30% is reserved for a separate independent-capital holdout backtest with the frozen selected strategy. Combined equity and headline performance still span the full available window (training + test); read the per-symbol OOS metrics for genuine holdout evidence. Positive OOS Sharpe is a descriptive label, not statistically rigorous proof of edge. Training selection may still overfit.'};
+      ' Each ticker is selected ONLY by the highest finite Sharpe in its first 70% training bars across executable presets, saved Pine strategies and built-in examples. The final 30% is reserved for a separate independent-capital holdout backtest with the frozen selected strategy. Combined equity and headline performance still span the full available window (training + test); read the per-symbol OOS metrics for genuine holdout evidence. Positive OOS Sharpe is a descriptive label, not statistically rigorous proof of edge. Training selection still has selection bias and may overfit.'};
 }
