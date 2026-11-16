@@ -22,9 +22,9 @@ test('Round 12 mocks Alpaca ONLY IN TEST to verify 133-symbol fit table, sorting
   await expect(page.locator('#fit-source')).toContainText('133/133 symbols backtested');
   await expect(page.locator('tr[data-fit-symbol="MRSH"]')).toContainText('ALPACA IEX 1Day');
   await expect(page.locator('tr[data-fit-symbol="MMC"]')).toHaveCount(0);
-  await expect(page.locator('.fit-table thead th').nth(3)).toHaveAttribute('aria-sort','descending');
+  await expect(page.locator('.fit-table th:has(button[data-key="sharpe"])')).toHaveAttribute('aria-sort','descending');
   await page.locator('[data-action="sort-fit"][data-key="maxDD"]').click();
-  await expect(page.locator('.fit-table thead th').nth(4)).toHaveAttribute('aria-sort','ascending');
+  await expect(page.locator('.fit-table th:has(button[data-key="maxDD"])')).toHaveAttribute('aria-sort','ascending');
   await expect(page.locator('[data-action="load-fit-best"]')).toBeVisible();
   await page.locator('[data-action="load-fit-best"]').click();
   await expect(page.locator('#equity-chart canvas').first()).toBeVisible();
