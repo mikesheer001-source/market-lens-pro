@@ -304,3 +304,9 @@ tr[data-vol-symbol] td:nth-child(3){min-width:138px}
   min-width:135px;max-width:225px;overflow-wrap:anywhere}
 .leaderboard-table th,.fit-table th,#portfolio-breakdown th{white-space:normal;min-width:82px}
 #walk-forward-summary{margin:12px 0 0;line-height:1.6}
+
+/* Round 18: compact factual five-window roll summary. */
+.rolling-wf-dates{margin-top:8px;font-size:12px;line-height:1.55;overflow-wrap:anywhere}
+.rolling-wf-note{margin-top:5px;font-size:12px;line-height:1.5}
+.leaderboard-table th:has([data-key="rollingPositive"]){min-width:160px}
+.leaderboard-table td:nth-child(8){min-width:155px}
