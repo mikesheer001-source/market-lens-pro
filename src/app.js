@@ -376,15 +376,60 @@ async function initApp(){
         '<div class="empty">Run a portfolio sweep to compare parameter variations.</div>')+'</div></div>';
   }
 
+  function leaderboardView(){
+    const lb=S.leaderboard?.symbol===S.symbol?S.leaderboard:null;
+    if(!lb)return S.leaderboardError?'<div role="alert" class="info-strip warning">'+esc(S.leaderboardError)+'</div>':'';
+    const definitions=[['name','Strategy'],['returnPct','Total return'],['cagrPct','CAGR'],['sharpe','Sharpe'],['maxDD','Max DD'],['winPct','Win rate'],['trades','Trades'],['profitFactor','Profit factor']];
+    const headers=definitions.map(([key,title])=>{
+      const active=S.leaderboardSort===key;
+      const arrow=active?(S.leaderboardDescending?' ▼':' ▲'):'';
+      return '<th aria-sort="'+(active?(S.leaderboardDescending?'descending':'ascending'):'none')+'"><button class="table-sort" type="button" data-action="sort-leaderboard" data-key="'+key+'" aria-label="Sort by '+esc(title)+'">'+
+        esc(title)+arrow+'</button></th>';
+    }).join('');
+    const order=sortLeaderboard(lb.rows,S.leaderboardSort,S.leaderboardDescending);
+    const top=lb.rows.find(row=>row.id===lb.bestId);
+    const note=S.chart.tf!==lb.timeframe?'Current timeframe '+esc(S.chart.tf)+' differs from saved comparison timeframe '+esc(lb.timeframe)+'. Results are not recalculated until you rerun comparison.':'';
+    const provenance='<div class="info-strip" id="leaderboard-source"><strong>'+esc(lb.symbol)+'</strong> · '+esc(lb.timeframe)+' · '+esc(lb.source)+
+      ' · bar date '+esc(String(lb.asOf))+' · compared '+lb.compared+' strategies ('+lb.savedPineStrategies+' saved Pine) · ran '+esc(lb.runAt)+
+      ' · same capital, allocation, side, costs and stop/target assumptions for all strategies.'+(note?' '+note:'')+'</div>';
+    const cells=order.map((row,index)=>{
+      const best=row.id===lb.bestId,m=row.metrics;
+      return '<tr data-leaderboard-id="'+esc(row.id)+'" class="'+(best?'leaderboard-best':'')+'"><td><span class="leaderboard-rank">'+(index+1)+'.</span> '+
+        esc(row.name)+(best?' <strong class="best-note">Best Sharpe</strong>':'')+'</td>'+
+        '<td class="'+priceColor(m.returnPct)+'">'+pct(m.returnPct)+'</td>'+
+        '<td>'+pct(m.cagrPct)+'</td><td>'+format(m.sharpe,3)+'</td>'+
+        '<td>'+pct(-m.maxDD)+'</td><td>'+pct(m.winPct)+'</td><td>'+format(m.trades,0)+'</td>'+
+        '<td>'+format(m.profitFactor,2)+'</td></tr>';
+    }).join('');
+    const overlay=lb.overlay||{series:[],benchmark:[]};
+    const legendColors=['#46d69b','#71b8b3','#e9bd68'];
+    const legend=overlay.series.map((entry,i)=>'<span class="leaderboard-legend-item"><i class="leaderboard-swatch" style="--swatch:'+legendColors[i]+'"></i>'+
+      (i+1)+'. '+esc(entry.name)+'</span>').join('')+
+      '<span class="leaderboard-legend-item"><i class="leaderboard-swatch" style="--swatch:#91a0a7"></i>Buy &amp; hold</span>';
+    return '<section class="panel" aria-label="Strategy comparison"><div class="panel-header"><h2>Strategy leaderboard</h2><div class="flex">'+
+      button('Compare all strategies','compare-strategies','small')+
+      (top?button('Load best into Backtester','load-best-strategy','primary'):'')+
+      '</div></div><div class="panel-body">'+provenance+
+      (lb.skipped.length?'<div class="info-strip warning" role="status">'+lb.skipped.length+' saved scripts not compared: '+
+        lb.skipped.map(x=>esc(x.name)+': '+esc(x.reason)).join('; ')+'</div>':'')+
+      '<div class="table-wrap"><table class="data-table leaderboard-table"><thead><tr>'+headers+'</tr></thead><tbody>'+cells+'</tbody></table></div>'+
+      '<p class="section-note">Sorted by '+esc(definitions.find(x=>x[0]===S.leaderboardSort)?.[1]||'Sharpe')+
+      '. Best means highest calculated Sharpe (rows with unavailable Sharpe sort last), not a forecast or a statistically validated winner. Click any column to sort; the Best Sharpe label does not change with sorting.</p>'+
+      '</div></section><div class="panel"><div class="panel-header"><h2>Top 3 equity curves vs. buy-and-hold</h2><span class="source-badge">Same source · '+esc(lb.timeframe)+'</span></div>'+
+      '<div class="panel-body"><div class="leaderboard-legend">'+legend+'</div>'+
+      (overlay.series.length?'<div id="leaderboard-chart" class="equity-plot leaderboard-plot" aria-label="Top three strategy equity curves and buy and hold"></div>':
+        '<div class="empty">Run Compare all strategies to generate overlays.</div>')+'</div></div>';
+  }
   function backtestView(){
     if(S.portfolioMode)return portfolioBacktestView();
     const analysisNotice=S.result&&S.lastAnalysis?'<div class="info-strip">Saved analysis for <strong>'+esc(S.resultSymbol||S.symbol)+'</strong> · '+esc(S.resultTf||S.chart.tf)+' · '+esc(S.lastAnalysis.savedAt)+
       (S.resultSymbol!==S.symbol?' · Historical result from another symbol; select the original symbol and rerun for a matching chart.':'')+'</div>':'';
     return head('Backtest','Signals use completed bars and next-open fills. One position at a time, long or short.',symbolSelect()+tfSelect())+portfolioModeControl()+
-      '<div class="panel"><div class="panel-header"><h2>Strategy settings</h2><div class="flex">'+button('Run backtest','run-backtest','primary')+button('Optimize parameters','view-optimize')+'</div></div><div class="panel-body">'+btOptions()+'<p class="section-note">Stop-first rule when stop and target are both hit inside the same bar. Costs are modeled on each side. Short borrow fees are approximate; the engine does not model margin calls, locate availability, dividends, partial fills, taxes, or corporate actions.</p></div></div>'+
+      '<div class="panel"><div class="panel-header"><h2>Strategy settings</h2><div class="flex">'+button('Run backtest','run-backtest','primary')+button('Compare all strategies','compare-strategies')+button('Optimize parameters','view-optimize')+'</div></div><div class="panel-body">'+btOptions()+'<p class="section-note">Stop-first rule when stop and target are both hit inside the same bar. Costs are modeled on each side. Short borrow fees are approximate; the engine does not model margin calls, locate availability, dividends, partial fills, taxes, or corporate actions.</p></div></div>'+
       sourceStrip()+analysisNotice+'<div class="panel"><div class="panel-header"><h2>Performance</h2><div class="flex">'+button('Export trades CSV','export-trades','small')+button('View trade markers','view-charts','small')+'</div></div><div class="panel-body">'+resultCards(S.result)+'</div></div>'+
       '<div class="panel"><div class="panel-header"><h2>Equity curve vs. buy-and-hold</h2></div>'+(S.result?.curve?.length?'<div class="equity-legend"><span><i class="equity-swatch strategy"></i>Strategy</span><span><i class="equity-swatch benchmark"></i>Buy &amp; hold</span></div><div id="equity-chart" class="equity-plot"></div>':'<div class="empty">Run a backtest to generate an equity curve.</div>')+'</div>'+
-      '<div class="panel"><div class="panel-header"><h2>Trade log</h2></div>'+tradeTable(S.result)+'</div>';
+      '<div class="panel"><div class="panel-header"><h2>Trade log</h2></div>'+tradeTable(S.result)+'</div>'+
+      leaderboardView();
   }
   function optimizeView(){
     if(S.portfolioMode)return portfolioOptimizeView();
