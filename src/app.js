@@ -1,7 +1,7 @@
 import './styles.css';
 async function initApp(){
   const {
-    parseCsv,normalizeBars,aggregate,ema,sma,rsi,indicators,statsFor,screenSymbol,backtest,parameterSweep,sampleData,csvDownload,stamp
+    parseCsv,normalizeBars,alpacaBars,aggregate,ema,sma,rsi,indicators,statsFor,screenSymbol,backtest,parameterSweep,sampleData,csvDownload,stamp
   }=await import('./engine.js');
   const {
     createChart,CandlestickSeries,BarSeries,LineSeries,AreaSeries,HistogramSeries,PriceScaleMode,createSeriesMarkers
@@ -216,7 +216,7 @@ async function initApp(){
     const response=await fetch(base+'/api/stocks/bars?'+params.toString(),{headers:{Accept:'application/json'}}),payload=await response.json().catch(()=>({}));
     if(!response.ok)throw new Error(payload.error||'Alpaca data request failed ('+response.status+').');
     const items=Array.isArray(payload.bars)?payload.bars:[];
-    const liveBars=items.map(b=>({time:Math.floor(Date.parse(b.t)/1000),open:Number(b.o),high:Number(b.h),low:Number(b.l),close:Number(b.c),volume:Number(b.v)||0})).filter(b=>Number.isFinite(b.time)&&[b.open,b.high,b.low,b.close].every(Number.isFinite));
+    const liveBars=alpacaBars(items,payload.timeframe||'1Day');
     if(!liveBars.length)throw new Error('Alpaca returned no daily bars for '+symbol+'. Check the ticker, feed, and subscription.');
     S.data.set(symbol,liveBars);S.sources.set(symbol,'ALPACA');S.symbol=symbol;S.liveSymbol=symbol;S.liveFeed=payload.feed||'iex';S.mode='live';S.result=null;S.sweep=null;render();notice('Loaded '+liveBars.length+' Alpaca '+String(S.liveFeed).toUpperCase()+' daily bars for '+symbol+'.');
   }
