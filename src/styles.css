@@ -229,3 +229,25 @@ a:hover{text-decoration-color:currentColor}
 .leaderboard-swatch{display:inline-block;width:20px;height:3px;background:var(--swatch);border-radius:0}
 .leaderboard-plot{min-height:320px}
 @media(max-width:600px){.leaderboard-table{min-width:740px}.leaderboard-legend{gap:8px 12px;font-size:11px}}
+
+/* Round 10 — source-first strategy position and session freshness in the Screener. */
+.freshness-strip{display:flex;flex-wrap:wrap;align-items:center;gap:8px 11px;
+  margin:12px 0;padding:12px 14px;border-radius:var(--radius);
+  border:1px solid var(--border);font-size:12px;line-height:1.5}
+.freshness-strip strong{font-size:12px;font-weight:750;letter-spacing:.005em}
+.fresh-ok{background:#13291f;border-left:4px solid #45bd87;color:#b8f1d5}
+.fresh-warning{background:#30291c;border-left:4px solid #e5b766;color:#f5ddac}
+.freshness-strip small{width:100%;opacity:.85;font-size:11px}
+.freshness-details{width:100%;min-width:0}
+.freshness-details summary{min-height:32px;cursor:pointer;font-weight:650;outline-offset:2px}
+.freshness-details summary:focus-visible{outline:3px solid var(--focus)}
+.freshness-details>span{display:block;margin-top:5px;overflow-wrap:anywhere;font:11px/1.7 ui-monospace,Consolas,monospace}
+.signal-status{display:inline-flex;align-items:center;justify-content:center;
+  border:1px solid var(--border);border-radius:var(--radius);
+  padding:4px 7px;font:700 11px/1.2 ui-monospace,Consolas,monospace;min-width:48px}
+.signal-long{color:#9ceac0;background:#123625;border-color:#327657}
+.signal-exit{color:#f6d28e;background:#35291b;border-color:#8b6837}
+.signal-flat{color:var(--muted);background:transparent}
+.signal-date{display:block;margin-top:4px;color:var(--muted);font-size:10px;white-space:nowrap}
+.fresh-date{white-space:nowrap;font:11px/1.3 ui-monospace,Consolas,monospace}
+@media(max-width:800px){.freshness-strip{align-items:start}.freshness-details{flex-basis:100%}}
