@@ -48,6 +48,6 @@ test('Round 19: a real-five-year-length mocked scan fills W EMA200 and shows >12
   await page.locator('.sidebar [data-tab="data"]').click();
   await expect(page.locator('#scan-duration')).toContainText('Last live scan:');
   await expect(page.locator('#scan-duration')).toContainText('Worker acquisition 12.00 seconds');
-  await expect(page.locator('#scan-duration')).toContainText('1825-day daily lookback');
+  await expect(page.locator('#scan-duration')).toContainText('Worker reported 1825 daily lookback days');
   expect(errors).toEqual([]);
 });
