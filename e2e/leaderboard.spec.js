@@ -41,7 +41,7 @@ test('saved Pine strategy is included, indicator-only script is disclosed and ov
   await page.locator('[data-action="compare-strategies"]').first().click();
   await expect(page.locator('.leaderboard-table tbody tr')).toHaveCount(13);
   await expect(page.locator('.leaderboard-table')).toContainText('Saved crossover comparison');
-  await expect(page.getByText(/saved scripts not compared:/)).toContainText('Saved RSI indicator');
+  await expect(page.getByText(/scripts unavailable:/)).toContainText('Saved RSI indicator');
   await expect(page.locator('#leaderboard-chart canvas').first()).toBeVisible();
   await page.locator('.sidebar [data-tab="charts"]').click();
   await page.locator('.sidebar [data-tab="backtest"]').click();
