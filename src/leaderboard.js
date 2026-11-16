@@ -1,5 +1,6 @@
 // Single-symbol strategy comparison, equity overlay and bounded browser memory.
 import {assessHoldout} from './validation.js';
+import {isValidatedStrategy} from './validated-strategies.js';
 // No look-ahead or different fills: every strategy uses the existing backtest() engine.
 export const PRESET_STRATEGIES=Object.freeze([
   {id:'ema-cross',name:'EMA crossover'},
@@ -21,7 +22,7 @@ export function leaderboardMetric(row,key){
   if(key==='rollingMean')return row.rolling?.meanSharpe??null;
   if(key==='rollingMedian')return row.rolling?.medianSharpe??null;
   if(key==='rollingPositive')return row.rolling?.assessableCount?row.rolling.positiveCount:null;
-  if(key==='validation')return row.validation?.validated?1:0;
+  if(key==='validation')return isValidatedStrategy(row)?1:0;
   if(key==='sharpe')return row.trainMetrics?row.trainMetrics.sharpe??null:row.metrics?.sharpe??null;
   return row.metrics?.[key]??null;
 }
