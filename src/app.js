@@ -470,7 +470,77 @@ async function initApp(){
       S.tab='optimize';render();
     }catch(err){S.scriptError=err.message;S.tab='scripts';render();}
   }
+  function loadSavedScan(id){
+    const found=S.savedScans.find(item=>item.id===id);
+    if(!found){notice('Choose a saved scan first.');return;}
+    S.rules=found.rules.map(x=>({...x}));S.universeFilter=found.universeFilter;
+    S.query=found.query;S.showOnlyMatches=found.showOnlyMatches;S.showWatch=found.showWatch;
+    S.sort=found.sort;S.ascending=found.ascending;S.savedScanView=found;S.savedScanId=id;
+    S.tab='screener';render();
+  }
+  function exportScreenerCsv(){
+    const data=screenerRows();
+    const rows=data.map(r=>{
+      const ema=r.d.ema200==null?null:100*(r.d.price/r.d.ema200-1);
+      return {Symbol:r.symbol,Source:r.source,Close:r.d.price,RSI_D:r.d.rsi,RSI_W:r.w.rsi,RSI_5D:r.d.rsi5,
+        Pct_vs_D_EMA200:ema,Return_20D_pct:r.d.ret20,Drawdown_pct:r.d.drawdown,Bars:r.d.bars,
+        Match:r.evalResult.pass?'MATCH':'NO MATCH',SnapshotDate:S.savedScanView?.savedAt||new Date().toISOString()};
+    });
+    exportFile('market-lens-screener-'+new Date().toISOString().slice(0,10)+'.csv',csvDownload(rows));
+  }
+  function addLocalAlert(){
+    try{
+      if(S.alerts.length>=ALERT_LIMIT)throw Error('Maximum '+ALERT_LIMIT+' in-app alerts reached');
+      const available=[...S.data.keys()].filter(modeSymbol);
+      const candidate={...S.alertDraft,symbol:available.includes(S.alertDraft.symbol)?S.alertDraft.symbol:available[0]};
+      const valid=validateAlert(candidate);
+      const id='alert-'+Date.now()+'-'+Math.random().toString(36).slice(2,5);
+      S.alerts.push({...valid,id,active:false,unread:false});
+      saveSettings();render();notice('Alert added. Run or refresh the scan to evaluate it.');
+    }catch(err){notice(err.message);}
+  }
+  function changeWatchlist(mode){
+    const name=S.watchlistDraft.trim().slice(0,80),chosen=S.watchlists.find(x=>x.id===S.watchlistId);
+    if(mode==='create'){
+      if(!name){notice('Enter a name before creating a watchlist.');return;}
+      if(S.watchlists.length>=WATCHLIST_LIMIT){notice('Maximum '+WATCHLIST_LIMIT+' watchlists reached.');return;}
+      const id='wl-'+Date.now();
+      S.watchlists.push({id,name,symbols:[]});selectWatchlist(id);
+    }else if(mode==='rename'){
+      if(!name){notice('Enter a name before renaming a watchlist.');return;}
+      if(chosen)chosen.name=name;
+    }else if(mode==='delete'){
+      if(S.watchlists.length<=1){notice('Keep at least one watchlist.');return;}
+      if(!window.confirm('Delete watchlist "'+chosen.name+'"?'))return;
+      S.watchlists=S.watchlists.filter(w=>w.id!==chosen.id);selectWatchlist(S.watchlists[0].id);
+    }
+    S.watchlistDraft='';saveSettings();render();
+  }
+  function saveCurrentScan(){
+    const name=S.scanDraft.trim();
+    if(!name){notice('Enter a scan name before saving.');return;}
+    if(S.savedScans.length>=SCAN_LIMIT){notice('Maximum '+SCAN_LIMIT+' saved scans reached.');return;}
+    const id='scan-'+Date.now();
+    const snapshot=makeScanSnapshot(screenerRows(),{
+      id,name,source:S.savedScanView?.source|| (S.mode==='live'?'ALPACA':'DEMO'),rules:S.rules,
+      universeFilter:S.universeFilter,query:S.query,showOnlyMatches:S.showOnlyMatches,
+      showWatch:S.showWatch,sort:S.sort,ascending:S.ascending
+    });
+    S.savedScans.push(snapshot);S.savedScanId=id;S.scanDraft='';saveSettings();render();
+    notice('Saved '+snapshot.rows.length+' screener rows and rules as "'+name+'".');
+  }
   const action={
+    'export-screener':()=>exportScreenerCsv(),
+    'watchlist-create':()=>changeWatchlist('create'),
+    'watchlist-rename':()=>changeWatchlist('rename'),
+    'watchlist-delete':()=>changeWatchlist('delete'),
+    'save-scan':()=>saveCurrentScan(),
+    'load-scan':()=>loadSavedScan(S.savedScanId),
+    'delete-scan':()=>{if(!S.savedScanId){notice('Choose a saved scan to delete.');return;}
+      S.savedScans=S.savedScans.filter(x=>x.id!==S.savedScanId);clearSavedScanView();saveSettings();render();},
+    'alert-create':()=>addLocalAlert(),
+    'alert-delete':el=>{S.alerts=S.alerts.filter(a=>a.id!==el.dataset.alertId);saveSettings();render();},
+    'alert-ack':el=>{const a=S.alerts.find(a=>a.id===el.dataset.alertId);if(a)a.unread=false;saveSettings();render();},
     'pine-check':()=>{parseCurrentPine();S.scriptOutput=S.scriptError?null:'Pine syntax OK — '+S.scriptParsed.mode+' script with '+S.scriptParsed.inputs.length+' inputs.';render();},
     'pine-example':el=>{const ex=PINE_EXAMPLES.find(x=>x.id===el.dataset.example);if(ex)loadPineSource(ex.code,ex.label);},
     'pine-run':()=>executeCurrentPine(),
@@ -481,16 +551,19 @@ async function initApp(){
     'pine-delete':()=>{const id=S.scriptId;if(!id){notice('Load a saved script to delete it.');return;}if(!window.confirm('Delete this locally saved script?'))return;S.scriptLibrary=S.scriptLibrary.filter(x=>x.id!==id);persistPineLibrary();loadPineSource(PINE_EXAMPLES[0].code,'EMA crossover');},
     'pine-clear-plots':()=>{S.activeIndicators=[];S.scriptOutput='Removed all custom indicator plots from Chart Lab.';render();},
     import:()=>$('#csv-file')?.click(),
-    'mode-demo':()=>{S.mode='demo';if(S.sources.get(S.symbol)==='ALPACA')S.symbol=S.lastDemoSymbol&&S.sources.get(S.lastDemoSymbol)!=='ALPACA'?S.lastDemoSymbol:'DEMO-SPY';S.scan={status:'idle'};S.result=null;S.sweep=null;render();},
+    'mode-demo':()=>{clearSavedScanView();S.mode='demo';if(S.sources.get(S.symbol)==='ALPACA')S.symbol=S.lastDemoSymbol&&S.sources.get(S.lastDemoSymbol)!=='ALPACA'?S.lastDemoSymbol:'DEMO-SPY';S.scan={status:'idle'};S.result=null;S.sweep=null;render();},
     'mode-live':()=>switchToLive(),
-    'scan-universe':()=>S.mode==='live'?switchToLive():runDemoScan(),
+    'scan-universe':()=>{clearSavedScanView();return S.mode==='live'?switchToLive():runDemoScan();},
     'test-live':()=>testLiveBackend().catch(err=>notice('Backend test failed: '+err.message)),
     'view-charts':()=>{S.tab='charts';render();},
     'view-backtest':()=>{S.tab='backtest';render();},
     'view-optimize':()=>{S.tab='optimize';render();},
-    'add-rule':()=>{S.universeFilter='all';S.rules.push({metric:'rsi',tf:'D',op:'<',value:50});S.scan={status:'idle'};render();},
-    'remove-rule':el=>{S.rules.splice(Number(el.dataset.index),1);render();},
-    'watch':el=>{const sym=el.dataset.symbol;S.watch.has(sym)?S.watch.delete(sym):S.watch.add(sym);render();},
+    'add-rule':()=>{clearSavedScanView();S.universeFilter='all';S.rules.push({metric:'rsi',tf:'D',op:'<',value:50});S.scan={status:'idle'};render();},
+    'remove-rule':el=>{clearSavedScanView();S.rules.splice(Number(el.dataset.index),1);render();},
+    'watch':el=>{const sym=el.dataset.symbol;
+      S.watchlists=watchlistChange(S.watchlists,S.watchlistId,sym);
+      const chosen=S.watchlists.find(x=>x.id===S.watchlistId);
+      S.watch=new Set(chosen?.symbols||[]);saveSettings();render();},
     'sort-order':()=>{S.ascending=!S.ascending;render();},
     'range-1m':()=>showRange(S.chart.tf==='D'?22:5),
     'range-3m':()=>showRange(S.chart.tf==='D'?66:14),
@@ -529,6 +602,8 @@ async function initApp(){
     if(el.id==='pine-editor'){S.scriptCode=el.value;S.scriptOutput=null;persistPineDraft();return;}
     if(el.id==='pine-name'){S.scriptName=el.value;persistPineDraft();return;}
     if(el.dataset.setting){S[el.dataset.setting]=el.value;saveSettings();return;}
+    if(el.dataset.input==='watchlist-name'){S.watchlistDraft=el.value;return;}
+    if(el.dataset.input==='scan-name'){S.scanDraft=el.value;return;}
     if(el.dataset.input==='symbol-search'){
       S.symbolQuery=el.value;
       const dropdown=$('[data-option="symbol"]');
@@ -545,8 +620,13 @@ async function initApp(){
     if(el.id==='csv-file'){if(el.files?.length)await importFiles(el.files);el.value='';return;}
     if(el.id==='pine-library'){const found=S.scriptLibrary.find(x=>x.id===el.value);if(found){loadPineSource(found.code,found.name,found.id);S.scriptSettings={...(found.settings||{})};persistPineDraft();render();}return;}
     if(el.dataset.pineInput){S.scriptSettings[el.dataset.pineInput]=el.type==='checkbox'?el.checked:Number(el.value);persistPineDraft();return;}
+    if(el.dataset.alertField){
+      const key=el.dataset.alertField;S.alertDraft[key]=key==='threshold'?Number(el.value):el.value;return;
+    }
     if(el.dataset.option){
       const opt=el.dataset.option,val=el.value;
+      if(opt==='watchlist-select'){selectWatchlist(val);render();return;}
+      if(opt==='saved-scan-select'){if(val)loadSavedScan(val);else{clearSavedScanView();render();}return;}
       if(opt==='preset'){if(val==='custom')return;clearSavedScanView();S.rules=(preset[val]||[]).map(x=>({...x}));S.universeFilter=val==='volatility'?'volatility':'all';S.scan={status:'idle'};}
       else if(opt==='symbol'){S.symbol=val;S.result=null;S.sweep=null;S.symbolQuery='';}
       else if(opt==='tf'){S.chart.tf=val;S.result=null;S.sweep=null;}
