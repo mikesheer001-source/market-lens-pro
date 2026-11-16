@@ -97,6 +97,6 @@ test('daily-only datasets provide a real five-day RSI instead of blank 2-hour RS
  const stats=statsFor(aggregate(daily,'D'));
  assert.ok(Number.isFinite(stats.rsi5),'five-day RSI must be calculated from daily closes');
  assert.ok(stats.rsi5>=0&&stats.rsi5<=100);
- const imported=parseCsv('Date,Symbol,Open,High,Low,Close,Volume\\n2026-01-01,TEST,100,102,99,101,100\\n2026-01-02,TEST,101,103,100,102,100\\n2026-01-03,TEST,102,104,101,103,100\\n2026-01-04,TEST,103,105,102,104,100\\n2026-01-05,TEST,104,106,103,105,100\\n2026-01-06,TEST,105,107,104,106,100\\n');
+ const imported=parseCsv('Date,Symbol,Open,High,Low,Close,Volume\n2026-01-01,TEST,100,102,99,101,100\n2026-01-02,TEST,101,103,100,102,100\n2026-01-03,TEST,102,104,101,103,100\n2026-01-04,TEST,103,105,102,104,100\n2026-01-05,TEST,104,106,103,105,100\n2026-01-06,TEST,105,107,104,106,100\n');
  assert.ok(Number.isFinite(statsFor(imported.groups.TEST).rsi5),'imported daily OHLC should also calculate the five-day RSI');
 });
