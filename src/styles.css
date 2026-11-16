@@ -147,3 +147,20 @@ a:hover{text-decoration-color:currentColor}
   .form-grid{grid-template-columns:repeat(2,minmax(0,1fr))}
 }
 @media(prefers-reduced-motion:reduce){.btn,.nav-btn,.data-item,a,.star{transition:none!important;transform:none!important}}
+
+/* Pine Script Lab uses the existing sharp fintech tokens; no remote editor CDN. */
+.pine-examples{display:flex;flex-wrap:wrap;gap:8px}
+.pine-editor-actions{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:12px;margin-bottom:12px}
+.pine-editor{display:block;width:100%;min-height:375px;resize:vertical;margin:8px 0 12px;
+  padding:16px;border:1px solid var(--border-strong);border-radius:var(--radius);
+  background:#091310;color:#d0e5d6;font:12px/1.6 ui-monospace,"SFMono-Regular",Consolas,"Liberation Mono",monospace;
+  tab-size:4;white-space:pre;overflow-x:auto}
+.pine-editor:focus-visible{outline:3px solid var(--focus);outline-offset:2px}
+.pine-actions{gap:8px;margin-bottom:14px}
+.pine-settings{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px}
+.pine-settings .field small{font-weight:400;color:var(--muted)}
+.pine-settings .field input[type=checkbox]{width:22px;height:22px;accent-color:var(--green)}
+.pine-error{margin:12px 0;padding:13px;border-left:3px solid var(--red);background:#30211f;color:#ffd0c8;
+  font:12px/1.55 ui-monospace,Consolas,monospace;white-space:pre-wrap;overflow-wrap:anywhere}
+@media(max-width:900px){.pine-settings{grid-template-columns:repeat(2,minmax(0,1fr))}}
+@media(max-width:600px){.pine-editor-actions,.pine-settings{grid-template-columns:minmax(0,1fr)}.pine-editor{min-height:330px;font-size:12px}.pine-actions .btn{flex:1 1 130px}}
