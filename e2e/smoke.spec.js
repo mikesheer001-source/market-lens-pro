@@ -13,6 +13,7 @@ test('desktop screener, chart, backtest, optimization and CSV import',async ({pa
   await expect(page.getByRole('heading',{name:'Data Center'})).toBeVisible();
   await expect(page.locator('[data-setting="apiBaseUrl"]')).toBeVisible();
   await page.locator('.mode-switch [data-action="mode-demo"]').click();
+  await page.locator('.sidebar [data-tab="screener"]').click();
   await expect(page.getByRole('heading',{name:'Screener'})).toBeVisible();
   await page.locator('.sidebar [data-tab="charts"]').click();
   await expect(page.getByRole('heading',{name:'Chart Lab'})).toBeVisible();
