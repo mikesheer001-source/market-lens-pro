@@ -166,6 +166,7 @@ function backtest(bars,opts={}){
   const side=opts.side==='short'?'short':'long',annualPeriods=opts.timeframe==='W'?52:opts.timeframe==='M'?12:252,borrowRate=side==='short'?Math.max(0,Number(opts.borrowAnnualPct||0))/100/annualPeriods:0;
   if(valid.length<3||start>end)return {metrics:{trades:0,returnPct:0,maxDD:0,profitFactor:null,sharpe:null,winPct:null},curve:[],trades:[],notice:'Not enough price bars'};
   const signals=opts.customSignals||signalSets(valid,opts);let cash=initial,pos=null,peak=initial,maxDD=0,exposed=0;const curve=[],trades=[];
+  let latestExitReason=null,signalState=null;
   function close(i,raw,reason){
     if(!pos)return;
     const price=raw*(side==='short'?1+slip:1-slip);
@@ -174,6 +175,7 @@ function backtest(bars,opts={}){
     if(side==='long')cash+=pos.qty*price-exitFee;
     else cash+=pos.reserved+pos.qty*(pos.price-price)-exitFee;
     trades.push({entry:valid[pos.index].time,exit:valid[i].time,buy:pos.price,sell:price,qty:pos.qty,pnl,pnlPct:100*pnl/pos.cost,reason,barsHeld:i-pos.index,side});
+    if(i===end&&reason!=='End of data')latestExitReason=reason;
     pos=null;
   }
   for(let i=start;i<=end;i++){
@@ -197,6 +199,19 @@ function backtest(bars,opts={}){
     if(pos&&borrowRate){const interest=pos.qty*b.close*borrowRate;cash-=interest;pos.borrow+=interest;}
     if(pos)exposed++;
     let equity=cash+(pos?(side==='short'?pos.reserved+pos.qty*(pos.price-b.close):pos.qty*b.close):0);
+    if(i===end){
+      // Capture the actual open position AFTER orders and stop/target fills.
+      // A regular research backtest liquidates on the last observation for P/L;
+      // that artificial liquidation is NOT an EXIT trading signal.
+      const latestExit=pos&&(side==='long'?(signals.closeLong?.[i]||signals.sell?.[i]):
+        (signals.closeShort?.[i]||signals.buy?.[i]));
+      signalState={
+        status:latestExit||latestExitReason?'EXIT':pos?'LONG':'FLAT',
+        positionOpen:!!pos,barDate:valid[i].time,
+        exitReason:latestExitReason||(latestExit?'Next bar signal':null),
+        strategySide:side
+      };
+    }
     if(i===end&&pos){close(i,b.close,'End of data');equity=cash;}
     peak=Math.max(peak,equity);maxDD=Math.max(maxDD,peak?100*(peak-equity)/peak:0);
     curve.push({time:b.time,value:equity});
@@ -206,7 +221,7 @@ function backtest(bars,opts={}){
   const mean=returns.reduce((a,b)=>a+b,0)/Math.max(1,returns.length),variance=returns.reduce((v,x)=>v+(x-mean)**2,0)/Math.max(1,returns.length-1);
   const sharpe=variance>0?mean/Math.sqrt(variance)*Math.sqrt(annualPeriods):null;
   const years=(stamp(valid[end].time)-stamp(valid[start].time))/(86400*365.25),final=curve.at(-1).value,total=final/initial-1;
-  return {metrics:{startEquity:initial,endEquity:final,returnPct:total*100,cagrPct:years>0&&final>0?((final/initial)**(1/years)-1)*100:null,maxDD,trades:trades.length,winPct:trades.length?100*trades.filter(t=>t.pnl>0).length/trades.length:null,profitFactor:loss>0?gain/loss:null,sharpe,exposurePct:100*exposed/curve.length,buyHoldPct:100*(valid[end].close/valid[start].open-1)},curve,trades,notice:valid.some(b=>b.approximateOhlc)?'Close-only input: OHLC values were approximated; stop/target fills are not realistic.':null};
+  return {metrics:{startEquity:initial,endEquity:final,returnPct:total*100,cagrPct:years>0&&final>0?((final/initial)**(1/years)-1)*100:null,maxDD,trades:trades.length,winPct:trades.length?100*trades.filter(t=>t.pnl>0).length/trades.length:null,profitFactor:loss>0?gain/loss:null,sharpe,exposurePct:100*exposed/curve.length,buyHoldPct:100*(valid[end].close/valid[start].open-1)},curve,trades,signalState,notice:valid.some(b=>b.approximateOhlc)?'Close-only input: OHLC values were approximated; stop/target fills are not realistic.':null};
 }
 function parameterSweep(bars,options={}){
   const strategy=options.strategy||'ema-cross',sets=[];
