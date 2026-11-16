@@ -1,4 +1,5 @@
 // Single-symbol strategy comparison, equity overlay and bounded browser memory.
+import {assessHoldout} from './validation.js';
 // No look-ahead or different fills: every strategy uses the existing backtest() engine.
 export const PRESET_STRATEGIES=Object.freeze([
   {id:'ema-cross',name:'EMA crossover'},
@@ -7,10 +8,19 @@ export const PRESET_STRATEGIES=Object.freeze([
   {id:'bollinger',name:'Bollinger mean reversion'},
   {id:'breakout',name:'Price breakout'}
 ]);
-export const LEADERBOARD_METRICS=Object.freeze(['name','returnPct','cagrPct','sharpe','maxDD','winPct','trades','profitFactor']);
+export const LEADERBOARD_METRICS=Object.freeze(['name','returnPct','cagrPct','sharpe','maxDD','winPct','trades','profitFactor',
+  'trainReturnPct','trainSharpe','testReturnPct','testSharpe']);
 export const SYMBOL_MEMORY_LIMIT=10;
 export const SYMBOL_MEMORY_CHARS=2900000;
 const finite=Number.isFinite;
+export function leaderboardMetric(row,key){
+  if(key==='trainReturnPct')return row.trainMetrics?.returnPct??null;
+  if(key==='trainSharpe')return row.trainMetrics?.sharpe??null;
+  if(key==='testReturnPct')return row.testMetrics?.returnPct??null;
+  if(key==='testSharpe')return row.validation?.enoughTestBars?row.testMetrics?.sharpe??null:null;
+  if(key==='sharpe')return row.trainMetrics?.sharpe??row.metrics?.sharpe??null;
+  return row.metrics?.[key]??null;
+}
 const instant=t=>typeof t==='number'?t:Date.parse(String(t).includes('T')?String(t):String(t)+'T00:00:00Z')/1000;
 export function sortLeaderboard(rows,key='sharpe',descending=key!=='name'){
   if(!LEADERBOARD_METRICS.includes(key))throw Error('Unknown leaderboard column: '+key);
@@ -18,7 +28,7 @@ export function sortLeaderboard(rows,key='sharpe',descending=key!=='name'){
     // Non-tradable indicator examples are informative but never rankable.
     if((a.kind==='example-indicator')!==(b.kind==='example-indicator'))
       return a.kind==='example-indicator'?1:-1;
-    const x=key==='name'?a.name:a.metrics?.[key],y=key==='name'?b.name:b.metrics?.[key];
+    const x=key==='name'?a.name:leaderboardMetric(a,key),y=key==='name'?b.name:leaderboardMetric(b,key);
     const absent=v=>v===null||v===undefined||(typeof v==='number'&&Number.isNaN(v));
     if(absent(x)!==absent(y))return absent(x)?1:-1;
     if(!absent(x)){
@@ -60,7 +70,8 @@ export function compareStrategies({symbol,bars,options,source,backtest,compilePi
   for(const preset of PRESET_STRATEGIES){
     const result=backtest(bars,{...base,strategy:preset.id});
     rows.push({id:'preset:'+preset.id,kind:'preset',name:preset.name,
-      strategy:preset.id,settings:null,script:null,metrics:result.metrics,curve:result.curve,trades:result.trades});
+      strategy:preset.id,settings:null,script:null,metrics:result.metrics,curve:result.curve,trades:result.trades,
+      ...assessHoldout(bars,{...base,strategy:preset.id},backtest)});
   }
   for(const saved of savedScripts){
     if(!saved||typeof saved.code!=='string'||typeof saved.name!=='string')continue;
@@ -74,7 +85,8 @@ export function compareStrategies({symbol,bars,options,source,backtest,compilePi
       const result=backtest(bars,{...base,strategy:'pine-custom',customSignals:signals});
       rows.push({id:'pine:'+id,kind:'pine',name:saved.name,strategy:'pine-custom',
         settings,script:{id,name:saved.name,code:saved.code,settings},
-        metrics:result.metrics,curve:result.curve,trades:result.trades});
+        metrics:result.metrics,curve:result.curve,trades:result.trades,
+        ...assessHoldout(bars,{...base,strategy:'pine-custom',customSignals:signals},backtest)});
     }catch(error){
       skipped.push({name:saved.name,reason:String(error.message||error)});
     }
@@ -98,7 +110,8 @@ export function compareStrategies({symbol,bars,options,source,backtest,compilePi
       const result=backtest(bars,{...base,strategy:'pine-custom',customSignals:signals});
       rows.push({id:'example:'+example.id,kind:'example',name,strategy:'pine-custom',
         settings,script:{id:example.id,name,code:example.code,settings,origin:'built-in'},
-        metrics:result.metrics,curve:result.curve,trades:result.trades});
+        metrics:result.metrics,curve:result.curve,trades:result.trades,
+        ...assessHoldout(bars,{...base,strategy:'pine-custom',customSignals:signals},backtest)});
     }catch(error){
       skipped.push({name,reason:String(error.message||error)});
       rows.push({id:'example:'+example.id,kind:'example-indicator',
@@ -108,7 +121,7 @@ export function compareStrategies({symbol,bars,options,source,backtest,compilePi
     }
   }
   const sorted=sortLeaderboard(rows),best=leaderboardBest(rows);
-  const run={version:1,symbol,timeframe,source:source||'UNKNOWN',
+  const run={version:2,symbol,timeframe,source:source||'UNKNOWN',
     asOf:bars.at(-1)?.time||null,runAt:new Date().toISOString(),capital:Number(base.capital||10000),
     compared:sorted.length,savedPineStrategies:sorted.filter(x=>x.kind==='pine').length,
     builtInExamples:sorted.filter(x=>x.id.startsWith('example:')).length,
