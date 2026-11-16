@@ -581,9 +581,19 @@ async function initApp(){
     if(!r||!r.trades.length)return '<div class="empty">No completed trades for this strategy on the selected dataset.</div>';
     return '<div class="table-wrap"><table class="data-table"><thead><tr><th>Entry</th><th>Exit</th><th>Entry price</th><th>Exit price</th><th>Quantity</th><th>Net P&amp;L</th><th>Return</th><th>Bars</th><th>Reason</th></tr></thead><tbody>'+r.trades.slice().reverse().slice(0,300).map(t=>'<tr><td>'+dateLabel(t.entry)+'</td><td>'+dateLabel(t.exit)+'</td><td>'+format(t.buy)+'</td><td>'+format(t.sell)+'</td><td>'+format(t.qty,4)+'</td><td class="'+priceColor(t.pnl)+'">'+format(t.pnl)+'</td><td class="'+priceColor(t.pnlPct)+'">'+pct(t.pnlPct)+'</td><td>'+t.barsHeld+'</td><td>'+esc(t.reason)+'</td></tr>').join('')+'</tbody></table></div>';
   }
+  const backtestDateControls=()=>'<div class="bt-date-window" id="bt-date-window">'+
+    '<label class="control">Start date <input aria-label="Backtest start date" type="date" data-bt-range="startDate" value="'+esc(S.btRange.startDate)+'"/></label>'+
+    '<label class="control">End date <input aria-label="Backtest end date" type="date" data-bt-range="endDate" value="'+esc(S.btRange.endDate)+'"/></label>'+
+    button('Full range','clear-bt-dates','small')+
+    '<span class="section-note">Inclusive dates. Both blank = all available bars. No data outside this window is traded.</span></div>';
   const portfolioModeControl=()=>'<div class="portfolio-mode"><label class="control">Backtest mode '+
-    select([['single','Single symbol'],['portfolio','Equal-weight portfolio']],S.portfolioMode?'portfolio':'single','data-option="portfolio-mode"')+
-    '</label><span class="muted">Portfolio runs use daily OHLCV, equal initial allocations, and independent existing-engine trades; no automatic rebalancing.</span></div>';
+    select([['single','Single symbol'],['portfolio','Equal-weight portfolio'],['best-fit','Best-fit portfolio']],
+      S.portfolioMode?(S.bestFitMode?'best-fit':'portfolio'):'single','data-option="portfolio-mode"')+
+    '</label><span class="muted">Portfolios use daily aligned OHLCV, equal initial allocations and independent next-open trades. Best-fit uses each symbol\'s highest in-sample Sharpe strategy (not a holdout result).</span></div>';
+  function activePortfolioResult(){
+    return S.portfolioResult&&((S.bestFitMode&&S.portfolioResult.mode==='best-fit')||
+      (!S.bestFitMode&&S.portfolioResult.mode!=='best-fit'))?S.portfolioResult:null;
+  }
   function portfolioSelection(){
     if(S.portfolioScope==='watchlist'){
       const list=S.watchlists.find(x=>x.id===S.portfolioWatchlistId);
