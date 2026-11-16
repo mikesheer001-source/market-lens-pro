@@ -10,7 +10,7 @@ This connection is read-only: it retrieves stock bars and does not place trades.
 2. A Cloudflare account with the Workers workers.dev hostname enabled.
 3. Permission to add GitHub repository Actions secrets and run workflows.
 
-The default feed is IEX. Alpaca Basic market data is IEX-only for real-time equities. SIP is consolidated US exchange data and requires the appropriate Alpaca subscription. This app currently requests daily bars over REST when you select Live; it does not open a WebSocket or stream every tick.
+The default feed is IEX. Alpaca Basic market data is IEX-only for real-time equities. SIP is consolidated US exchange data and requires the appropriate Alpaca subscription. Live mode scans a bundled universe of 100+ liquid US stocks, broad-market ETFs, and volatility products. It requests 550 calendar days of daily bars in batches of 15 symbols, paginates when needed, and caches the completed scan at Cloudflare's edge for 15 minutes. It uses REST; it does not open a WebSocket or stream every tick.
 
 ## 1. Create the Cloudflare deployment credentials
 
@@ -65,16 +65,18 @@ If it reports a missing secret, add the exact missing name above and rerun it. T
 2. Copy its workers.dev URL. It will look like https://market-lens-pro-api.<your-workers-subdomain>.workers.dev.
 3. Open Market Lens Pro, then **Data Center**.
 4. Paste that public Worker URL into **Cloudflare Worker API URL**. This URL is not a secret.
-5. Enter a ticker such as SPY, click **Test backend**, then **Fetch live bars & switch to Live**.
-6. The top-bar **Demo / Live** switch changes the data source. Selecting Live again refreshes the selected ticker's daily bars.
+5. Click **Test backend** to confirm the Worker and its encrypted Alpaca secrets are ready.
+6. Click **Scan live universe & switch to Live**, or use the top-bar **Live** switch. The app fetches the bundled universe and displays the symbols with returned bars.
+7. Use **Refresh live scan** in the Screener to refresh the universe. Repeated scans within 15 minutes are served from the Worker cache rather than sending another batch of Alpaca requests.
+8. Use the **VXX / Volatility** screener preset to restrict results to VXX, UVXY, SVXY, VIXY, VIXM, VXZ, SVIX, UVIX, ZIVB and ZVOL. It applies daily RSI below 60, 252-session drawdown below -5%, and price below daily EMA200.
 
 The Worker health endpoint reports only whether credentials are configured and which feed is selected; it never returns the keys. The browser sends requests to the Worker, not directly to Alpaca.
 
 ## What is deployed
 
-- worker/index.js: fixed Alpaca market-data proxy. It validates ticker/timeframe/date inputs, limits each request to one symbol and at most 10,000 bars, restricts browser origins, and uses a basic per-isolate request throttle.
+- worker/index.js: Alpaca market-data proxy with single-symbol history and /api/stocks/scan. The scan endpoint requests 15-symbol batches, follows pagination, caches results for 15 minutes, restricts browser origins, and uses a basic per-isolate request throttle. Single-symbol history requests remain capped at 10,000 bars.
 - wrangler.toml: non-secret Worker name, default IEX feed, and allowed browser origins.
 - .github/workflows/deploy-worker.yml: manual deployment using GitHub Secrets and Cloudflare Wrangler.
 - ALPACA_API_KEY and ALPACA_API_SECRET: encrypted Worker secrets after deployment.
 
-The Cloudflare Worker is **not deployed until the four GitHub secrets are added and the workflow is run**. The GitHub Pages front end can be deployed and used in Demo mode without any of those credentials.
+The Cloudflare Worker is **not deployed until the four GitHub secrets are added and the workflow is run**. The GitHub Pages front end can be deployed and used in Demo mode without any of those credentials. Demo scanning uses the four deterministic synthetic sample symbols; the VXX preset can return a rule match for DEMO-VXX, but that is a simulated test case, not a real market quote.
