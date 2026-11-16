@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {parseCsv,ema,rsi,aggregate,backtest,parameterSweep,sampleData,screenSymbol,statsFor} from '../src/engine.js';
+import {parseCsv,ema,rsi,aggregate,backtest,parameterSweep,sampleData,screenSymbol,statsFor,alpacaBars} from '../src/engine.js';
 
 const day = i => new Date(Date.UTC(2024,0,1+i)).toISOString().slice(0,10);
 const bar = (i,open=100,high=101,low=99,close=100) => ({time:day(i),open,high,low,close,volume:100});
@@ -79,6 +79,17 @@ test('borrow fees reduce short strategy equity',()=>{
  assert.ok(charged.metrics.endEquity<free.metrics.endEquity);
 });
 
+
+test('Alpaca daily timestamps stay daily and cannot be misread as two-hour bars',()=>{
+ const raw=Array.from({length:10},(_,i)=>({t:new Date(Date.UTC(2026,0,i+1,14,30)).toISOString(),o:100+i,h:102+i,l:99+i,c:101+i,v:1000}));
+ const daily=alpacaBars(raw,'1Day');
+ assert.equal(daily[0].time,'2026-01-01');
+ assert.equal(aggregate(daily,'2H').length,0);
+ assert.ok(Number.isFinite(statsFor(daily).rsi5));
+ const intraday=alpacaBars([{t:'2026-01-05T14:30:00Z',o:100,h:101,l:99,c:100,v:100},{t:'2026-01-05T16:30:00Z',o:100,h:102,l:99,c:101,v:100}],'1Hour');
+ assert.equal(typeof intraday[0].time,'number');
+ assert.equal(aggregate(intraday,'2H').length,1);
+});
 
 test('daily-only datasets provide a real five-day RSI instead of blank 2-hour RSI',()=>{
  const daily=sampleData()['DEMO-SPY'];
