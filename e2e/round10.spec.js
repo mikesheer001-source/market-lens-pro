@@ -1,0 +1,55 @@
+import {test,expect} from '@playwright/test';
+import {readFile} from 'node:fs/promises';
+
+test('Screener strategy picker yields dated LONG/FLAT/EXIT for all Demo symbols, sortable and filterable',async ({page})=>{
+  const errors=[];page.on('pageerror',e=>errors.push(e.message));
+  await page.goto('./');
+  await expect(page.locator('[data-option="signal-strategy"] option')).toHaveCount(6);
+  await page.locator('[data-option="signal-strategy"]').selectOption('preset:breakout');
+  await expect(page.locator('thead th').last()).toContainText('Price breakout');
+  await expect(page.locator('tbody tr[data-symbol]')).toHaveCount(4);
+  const rows=page.locator('tbody tr[data-symbol]');
+  const statuses=await rows.locator('.signal-status').allTextContents();
+  expect(statuses).toHaveLength(4);
+  expect(statuses.every(s=>['LONG','FLAT','EXIT'].includes(s.trim()))).toBe(true);
+  const dates=await rows.locator('.signal-date').allTextContents();
+  expect(dates.every(d=>/^\d{4}-\d\d-\d\d$/.test(d.trim()))).toBe(true);
+  await expect(rows.first().locator('.fresh-date')).toContainText(/^\d{4}-\d\d-\d\d$/);
+  await page.locator('[data-option="sort"]').selectOption('signal');
+  await expect(page.locator('tbody tr[data-symbol]')).toHaveCount(4);
+  const countLong=(await page.locator('.signal-long').count());
+  await page.locator('[data-option="signals-only"]').check();
+  await expect(page.locator('tbody tr[data-symbol]')).toHaveCount(countLong);
+  expect((await page.locator('tbody .signal-status').allTextContents()).every(s=>s.trim()==='LONG')).toBe(true);
+  await page.locator('[data-option="signals-only"]').uncheck();
+  await page.locator('[data-action="scan-universe"]').click();
+  await expect(page.locator('#scan-status')).toContainText('Demo scan complete');
+  await expect(page.locator('.alert-banner')).toHaveCount(0,'unchanged bars do not invent signal flips');
+  const [download]=await Promise.all([page.waitForEvent('download'),page.locator('[data-action="export-screener"]').click()]);
+  const csv=await readFile(await download.path(),'utf8');
+  expect(csv).toContain('LatestBar');
+  expect(csv).toContain('SignalStrategy');
+  expect(csv).toContain('SignalBar');
+  expect(csv).toContain('DEMO-SPY');
+  await page.reload();
+  await expect(page.locator('[data-option="signal-strategy"]')).toHaveValue('preset:breakout');
+  await expect(page.locator('tbody .signal-status')).toHaveCount(4);
+  expect(errors).toEqual([]);
+});
+
+test('saved Pine strategies appear in Screener picker and report dated position on Demo bars',async ({page})=>{
+  const errors=[];page.on('pageerror',e=>errors.push(e.message));
+  await page.goto('./');
+  await page.locator('.sidebar [data-tab="scripts"]').click();
+  await page.locator('[data-action="pine-example"][data-example="ema-cross"]').click();
+  await page.locator('#pine-name').fill('Signal Pine Crossover');
+  await page.locator('[data-action="pine-save"]').click();
+  const id=await page.locator('#pine-library option').last().getAttribute('value');
+  await page.locator('.sidebar [data-tab="screener"]').click();
+  await expect(page.locator('[data-option="signal-strategy"]')).toContainText('Signal Pine Crossover');
+  await page.locator('[data-option="signal-strategy"]').selectOption('pine:'+id);
+  await expect(page.locator('thead th').last()).toContainText('Signal Pine Crossover');
+  await expect(page.locator('tbody .signal-status')).toHaveCount(4);
+  expect((await page.locator('tbody .signal-status').allTextContents()).every(s=>['LONG','FLAT','EXIT'].includes(s.trim()))).toBe(true);
+  expect(errors).toEqual([]);
+});
