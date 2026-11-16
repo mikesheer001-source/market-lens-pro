@@ -57,3 +57,22 @@ test('published Script Lab runs a Pine oscillator and a custom strategy through 
   await expect(page.locator('#equity-chart canvas').first()).toBeVisible();
   expect(errors).toEqual([]);
 });
+
+
+test('published strategy leaderboard compares presets, renders top three, and reloads the best strategy',async ({page})=>{
+  const errors=[];page.on('pageerror',e=>errors.push(e.message));
+  await page.goto('./');
+  await page.locator('.sidebar [data-tab="backtest"]').click();
+  await page.locator('[data-action="compare-strategies"]').first().click();
+  await expect(page.locator('.leaderboard-table tbody tr')).toHaveCount(5);
+  await expect(page.locator('.leaderboard-best')).toHaveCount(1);
+  await expect(page.locator('#leaderboard-chart canvas').first()).toBeVisible();
+  await expect(page.locator('.leaderboard-legend-item')).toHaveCount(4);
+  await page.locator('[data-action="load-best-strategy"]').click();
+  await expect(page.locator('#equity-chart canvas').first()).toBeVisible();
+  await page.reload();
+  await page.locator('.sidebar [data-tab="backtest"]').click();
+  await expect(page.locator('.leaderboard-table tbody tr')).toHaveCount(5);
+  await expect(page.locator('#leaderboard-chart canvas').first()).toBeVisible();
+  expect(errors).toEqual([]);
+});
