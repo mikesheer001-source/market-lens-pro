@@ -17,7 +17,7 @@ const LIQUID_US_SYMBOLS = [
   'UNH','ISRG','SPGI','BKNG','DIS','VZ','T','NEE','C','ORLY',
   'ADP','COP','DHR','AMGN','SCHW','PLTR','PANW','CRWD','ADBE','UPS',
   'LOW','HON','DE','MDT','GILD','CME','ICE','BLK','MDLZ','MO',
-  'SO','DUK','CB','PGR','MMC','APH','ETN','KLAC','LRCX','SNPS',
+  'SO','DUK','CB','PGR','MRSH','APH','ETN','KLAC','LRCX','SNPS',
   'CDNS','SHW','TGT','CVS','FDX','USB','PNC','EOG','SLB','OXY',
   'F','UAL','DAL','LUV','TSLA'
 ];
