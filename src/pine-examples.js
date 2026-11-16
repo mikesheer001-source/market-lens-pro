@@ -12,7 +12,7 @@ export const PINE_EXAMPLES=Object.freeze([
   },
   {
     "id": "rsi-divergence",
-    "label": "RSI divergence long-only (confirmed pivot)",
+    "label": "Regular bullish RSI divergence (confirmed pivot)",
     "code": "//@version=5\n// Requested: price lower low + RSI higher low = REGULAR bullish divergence.\n// Pivot confirmed rightBars candles later. No future bar data is accessed.\nstrategy(\"RSI lower-price / higher-RSI divergence\", overlay=true)\nlength = input.int(14, \"RSI period\", minval=2, maxval=100)\nrightBars = input.int(5, \"Pivot bars left/right\", minval=2, maxval=15)\nexitRsi = input.float(65, \"Exit RSI\", minval=50, maxval=95, step=5)\nmomentum = ta.rsi(close, length)\npivotConfirmed = low[rightBars] == ta.lowest(low, rightBars * 2 + 1)\nvar float previousPriceLow = na\nvar float previousRsiLow = na\ndivergence = false\nif pivotConfirmed and not na(previousPriceLow) and not na(momentum[rightBars])\n    divergence := low[rightBars] < previousPriceLow and momentum[rightBars] > previousRsiLow\nif pivotConfirmed and not na(momentum[rightBars])\n    previousPriceLow := low[rightBars]\n    previousRsiLow := momentum[rightBars]\nstrategy.entry(\"Long\", strategy.long, when=divergence)\nstrategy.close(\"Long\", when=ta.crossover(momentum, exitRsi))\nplotshape(divergence, \"Confirmed bullish divergence\", color=color.lime, location=location.belowbar)"
   },
   {
