@@ -27,7 +27,7 @@ export function validateAlert({symbol,metric,op,threshold}){
 }
 export function checkAlerts(alerts,data,statsFor,aggregate,checkedAt=new Date().toISOString()){
   const hits=[],updated=alerts.map(alert=>{
-    if(!alert||!data.has(alert.symbol))return alert;
+    if(!alert||alert.type==='signal'||!data.has(alert.symbol))return alert;
     const bars=data.get(alert.symbol);if(!bars?.length)return alert;
     const daily=statsFor(aggregate(bars,'D'));
     const value=alert.metric==='price'?daily.price:daily.rsi;
@@ -50,8 +50,9 @@ export function makeScanSnapshot(rows,options={}){
     query:options.query||'',showOnlyMatches:!!options.showOnlyMatches,showWatch:!!options.showWatch,
     sort:options.sort||'symbol',ascending:options.ascending!==false,
     // Copy computed indicator stats: a saved scan never pretends to be fresh market data.
-    rows:rows.slice(0,200).map(({symbol,d,w,evalResult,source})=>({
-      symbol,d:{...d},w:{...w},evalResult:{pass:!!evalResult.pass,fails:[...(evalResult.fails||[])]},source
+    rows:rows.slice(0,200).map(({symbol,d,w,evalResult,source,latestBar:sourceLatestBar,signal:sourceSignal})=>({
+      symbol,d:{...d},w:{...w},evalResult:{pass:!!evalResult.pass,fails:[...(evalResult.fails||[])]},source,
+      latestBar:sourceLatestBar??null,signal:sourceSignal??null
     }))
   };
 }
