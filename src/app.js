@@ -1,6 +1,8 @@
 import './styles.css';
 import {compilePine, executePine, sweepPine, PineError} from './pine.js';
 import {PINE_EXAMPLES} from './pine-examples.js';
+import {runPortfolio,runPortfolioSweep,portfolioUniverse} from './portfolio.js';
+import {VOL_TICKERS,volatilityRow,contangoPriceProxies} from './volatility.js';
 import {restoreWatchlists,watchlistChange,validateAlert,checkAlerts,makeScanSnapshot,analysisSnapshot,restoreAnalysis,WATCHLIST_LIMIT,SCAN_LIMIT,ALERT_LIMIT} from './workspace.js';
 import { LIVE_UNIVERSE, DEMO_UNIVERSE, VOLATILITY_UNIVERSE, LIVE_EQUITY_COUNT, LIVE_ETF_COUNT, LIVE_VOLATILITY_COUNT, ALPACA_BATCH_SIZE } from './universe.js';
 async function initApp(){
@@ -15,8 +17,8 @@ async function initApp(){
   const pct=n=>n==null||!Number.isFinite(n)?'—':(n>0?'+':'')+format(n)+'%';
   const priceColor=n=>n==null?'muted':n>=0?'positive':'negative';
   const dateLabel=t=>typeof t==='number'?new Date(t*1000).toISOString().slice(0,16).replace('T',' '):String(t);
-  const tabNames={screener:'Screener',charts:'Chart Lab',backtest:'Backtest',optimize:'Optimize',scripts:'Script Lab',data:'Data Center'};
-  const tabIcons={screener:'📊',charts:'📈',backtest:'🧪',optimize:'⚙️',scripts:'🧩',data:'🗂️'};
+  const tabNames={screener:'Screener',charts:'Chart Lab',backtest:'Backtest',optimize:'Optimize',volatility:'Volatility',scripts:'Script Lab',data:'Data Center'};
+  const tabIcons={screener:'📊',charts:'📈',backtest:'🧪',optimize:'⚙️',volatility:'〽',scripts:'🧩',data:'🗂️'};
   const preset={
     trend:[{metric:'emaDist',tf:'D',op:'>',value:0},{metric:'rsi',tf:'D',op:'<',value:60}],
     original:[{metric:'emaDist',tf:'W',op:'>',value:0},{metric:'rsi',tf:'W',op:'<',value:50},{metric:'rsi',tf:'D',op:'<',value:50},{metric:'rsi',tf:'2H',op:'<',value:50}],
@@ -35,12 +37,20 @@ async function initApp(){
   const workspaceLists=restoreWatchlists(saved);
   let previousAnalysis=null;
   try{previousAnalysis=restoreAnalysis(JSON.parse(localStorage.getItem('market-lens-pro-analysis-v1')||'null'));}catch{}
+  let previousPortfolio=null;
+  try{previousPortfolio=JSON.parse(localStorage.getItem('market-lens-pro-portfolio-v1')||'null');}catch{}
   const S={tab:'screener',mode:'demo',apiBaseUrl:String(saved.apiBaseUrl||'https://market-lens-pro-api.mikesheer001.workers.dev'),liveFeed:'iex',lastDemoSymbol:'DEMO-SPY',universeFilter:saved.universeFilter||'all',scan:{status:'idle'},data:new Map(Object.entries(sampleData())),sources:new Map(),symbol:'DEMO-SPY',query:'',symbolQuery:'',watch:workspaceLists.watch,watchlists:workspaceLists.watchlists,
     watchlistId:workspaceLists.watchlistId,watchlistDraft:'',alertDraft:{symbol:'DEMO-SPY',metric:'price',op:'>',threshold:100},
     alerts:Array.isArray(saved.alerts)?saved.alerts.slice(0,ALERT_LIMIT):[],alertHits:[],
     savedScans:Array.isArray(saved.savedScans)?saved.savedScans.slice(0,SCAN_LIMIT):[],
     scanDraft:'',savedScanId:null,savedScanView:null,
-    rules:saved.rules||preset.trend.map(x=>({...x})),sort:'symbol',ascending:true,showOnlyMatches:false,showWatch:false,chart:(()=>{const restored={...defaultSettings,...saved.chart};if(!saved.chart?.style||saved.chart.style==='line')restored.style='candles';return restored;})(),bt:{...defaultBacktest,...saved.bt},result:previousAnalysis?.result||null,sweep:previousAnalysis?.sweep||null,lastAnalysis:previousAnalysis,resultSymbol:previousAnalysis?.symbol||null,resultTf:previousAnalysis?.tf||null,drawLine:false,
+    rules:saved.rules||preset.trend.map(x=>({...x})),sort:'symbol',ascending:true,showOnlyMatches:false,showWatch:false,chart:(()=>{const restored={...defaultSettings,...saved.chart};if(!saved.chart?.style||saved.chart.style==='line')restored.style='candles';return restored;})(),bt:{...defaultBacktest,...saved.bt},result:previousAnalysis?.result||null,sweep:previousAnalysis?.sweep||null,lastAnalysis:previousAnalysis,resultSymbol:previousAnalysis?.symbol||null,resultTf:previousAnalysis?.tf||null,
+    portfolioMode:!!saved.portfolioMode,portfolioScope:saved.portfolioScope==='watchlist'?'watchlist':'matches',
+    portfolioWatchlistId:saved.portfolioWatchlistId||workspaceLists.watchlistId,
+    portfolioResult:previousPortfolio?.result||null,portfolioSweep:previousPortfolio?.sweep||null,
+    portfolioTimestamp:previousPortfolio?.savedAt||null,portfolioError:'',
+    intraday:new Map(),intradayStatus:new Map(),intradayError:'',
+    drawLine:false,
     scriptCode:typeof draft.code==='string'?draft.code:PINE_EXAMPLES[0].code,
     scriptName:typeof draft.name==='string'?draft.name:'EMA crossover',
     scriptId:draft.id||null,
@@ -49,7 +59,13 @@ async function initApp(){
   for(const symbol of S.data.keys())S.sources.set(symbol,'SIMULATED');
   parseCurrentPine();
   let chart=null,equityChart=null;
-  const saveSettings=()=>{try{localStorage.setItem('market-lens-pro-settings',JSON.stringify({watch:[...S.watch],watchlists:S.watchlists,watchlistId:S.watchlistId,alerts:S.alerts,savedScans:S.savedScans,rules:S.rules,chart:S.chart,bt:S.bt,apiBaseUrl:S.apiBaseUrl,universeFilter:S.universeFilter}));}catch{}};
+  const saveSettings=()=>{try{localStorage.setItem('market-lens-pro-settings',JSON.stringify({watch:[...S.watch],watchlists:S.watchlists,watchlistId:S.watchlistId,alerts:S.alerts,savedScans:S.savedScans,rules:S.rules,chart:S.chart,bt:S.bt,portfolioMode:S.portfolioMode,portfolioScope:S.portfolioScope,portfolioWatchlistId:S.portfolioWatchlistId,apiBaseUrl:S.apiBaseUrl,universeFilter:S.universeFilter}));}catch{}};
+  function rememberPortfolio(){
+    S.portfolioTimestamp=new Date().toISOString();
+    try{localStorage.setItem('market-lens-pro-portfolio-v1',JSON.stringify({
+      version:1,result:S.portfolioResult,sweep:S.portfolioSweep,savedAt:S.portfolioTimestamp
+    }));}catch{notice('Portfolio calculated, but browser storage could not retain the full result.');}
+  }
   function rememberAnalysis(){
     S.lastAnalysis=analysisSnapshot({result:S.result,sweep:S.sweep,symbol:S.symbol,tf:S.chart.tf,strategy:S.bt.strategy,source:S.sources.get(S.symbol)});
     try{localStorage.setItem('market-lens-pro-analysis-v1',JSON.stringify(S.lastAnalysis));}
