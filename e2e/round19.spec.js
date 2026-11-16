@@ -27,7 +27,7 @@ test('Round 19: a real-five-year-length mocked scan fills W EMA200 and shows >12
   await page.locator('.mode-switch [data-action="mode-live"]').click();
   await expect(page.locator('#scan-status')).toContainText('133/133 symbols loaded',{timeout:150000});
   await expect(page.locator('tr[data-symbol]')).toHaveCount(133);
-  await expect(page.locator('thead th')).toContainText(['% vs W EMA200']);
+  await expect(page.getByRole('columnheader',{name:/% vs W EMA200/})).toBeVisible();
   const weekly=page.locator('tr[data-symbol="SPY"] [data-weekly-ema200="SPY"]');
   await expect(weekly).toBeVisible();
   await expect(weekly).not.toHaveText('—');
