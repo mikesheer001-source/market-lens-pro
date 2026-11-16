@@ -104,9 +104,11 @@ test('real Alpaca IEX OHLCV runs the entire preset strategy leaderboard on VXX w
   await page.locator('.sidebar [data-tab="backtest"]').click();
   await page.locator('[data-option="symbol"]').selectOption('VXX');
   await page.locator('[data-action="compare-strategies"]').first().click();
-  await expect(page.locator('.leaderboard-table tbody tr')).toHaveCount(5);
+  await expect(page.locator('.leaderboard-table tbody tr')).toHaveCount(12);
   await expect(page.locator('#leaderboard-source')).toContainText('Alpaca IEX OHLCV');
   await expect(page.locator('#leaderboard-source')).toContainText('VXX');
+  await expect(page.locator('#leaderboard-source')).toContainText('7 built-in examples');
+  await expect(page.locator('#leaderboard-source')).not.toContainText(/bar date \d{10}/);
   await expect(page.locator('#leaderboard-chart canvas').first()).toBeVisible();
   await page.locator('[data-action="load-best-strategy"]').click();
   await expect(page.locator('#equity-chart canvas').first()).toBeVisible();
