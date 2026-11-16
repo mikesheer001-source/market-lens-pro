@@ -129,3 +129,13 @@ test('Round 17: mismatched symbol, timeframe or source cannot display outdated n
   assert.equal(leaderboardRangeStatus(report,{bars:history,range,symbol:'DEMO-SPY',timeframe:'D',source:'ALPACA'}).matches,false);
   assert.equal(check(report,{startDate:history[1100].time,endDate:history[1000].time}).matches,false);
 });
+
+test('Round 17: error labels remain displayable for reversed or invalid date input',()=>{
+  assert.equal(rangeLabel({startDate:'2026-11-16',endDate:'2026-10-01'}),
+    'Selected range: 2026-11-16 to 2026-10-01');
+  assert.equal(rangeLabel({startDate:'not-a-date'}),'Selected range: not-a-date to Last available');
+  const report=run({startDate:history[1100].time,endDate:history[1350].time});
+  const invalid=check(report,{startDate:history[1350].time,endDate:history[1100].time});
+  assert.equal(invalid.matches,false);
+  assert.match(invalid.reason,/start date must be on or before/);
+});
