@@ -13,9 +13,9 @@ test('all five presets compare on one symbol, sort by all columns and load best 
   await expect(page.locator('.leaderboard-legend .leaderboard-legend-item')).toHaveCount(4);
   await expect(page.locator('#leaderboard-source')).toContainText('SIMULATED Demo OHLCV');
   await page.locator('[data-action="sort-leaderboard"][data-key="returnPct"]').click();
-  await expect(page.locator('.leaderboard-table th[aria-sort="descending"]')).toContainText('Total return');
+  await expect(page.locator('.leaderboard-table th[aria-sort="descending"]')).toContainText('Full return');
   await page.locator('[data-action="sort-leaderboard"][data-key="maxDD"]').click();
-  await expect(page.locator('.leaderboard-table th[aria-sort="ascending"]')).toContainText('Max DD');
+  await expect(page.locator('.leaderboard-table th[aria-sort="ascending"]')).toContainText('Full max DD');
   await page.locator('[data-action="sort-leaderboard"][data-key="name"]').click();
   await expect(page.locator('.leaderboard-table th[aria-sort="ascending"]')).toContainText('Strategy');
   await page.locator('[data-action="load-best-strategy"]').click();
