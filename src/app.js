@@ -78,6 +78,7 @@ async function initApp(){
   // Restore the default symbol's own run. Never mislabel a different symbol's global last analysis.
   restoreSymbolState(S.symbol);
   parseCurrentPine();
+  if(S.signalSelection!=='none')evaluateScreenerSignals(false);
   let chart=null,equityChart=null,leaderboardChart=null;
   const saveSettings=()=>{try{localStorage.setItem('market-lens-pro-settings',JSON.stringify({watch:[...S.watch],watchlists:S.watchlists,watchlistId:S.watchlistId,alerts:S.alerts,savedScans:S.savedScans,rules:S.rules,chart:S.chart,bt:S.bt,portfolioMode:S.portfolioMode,portfolioScope:S.portfolioScope,portfolioWatchlistId:S.portfolioWatchlistId,signalSelection:S.signalSelection,signalsOnly:S.signalsOnly,apiBaseUrl:S.apiBaseUrl,universeFilter:S.universeFilter}));}catch{}};
   function rememberPortfolio(){
@@ -149,7 +150,10 @@ async function initApp(){
     S.signalAsOf=new Date().toISOString();
     const current={};
     for(const [symbol,signal] of S.signalRows)if(['LONG','FLAT','EXIT'].includes(signal.status))current[symbol]=signal;
-    const key=S.mode+'|'+S.signalSelection+(selection.kind==='pine'?'|'+selection.code:'');
+    let codeHash=2166136261;
+    if(selection.kind==='pine')for(let i=0;i<selection.code.length;i++)
+      codeHash=Math.imul(codeHash^selection.code.charCodeAt(i),16777619)>>>0;
+    const key=S.mode+'|'+S.signalSelection+(selection.kind==='pine'?'|'+codeHash.toString(16):'');
     const prior=S.signalHistory[key]||{};
     const checked=scanSignalFlips(prior,current,{strategyId:selection.id,strategyName:selection.name,
       checkedAt:S.signalAsOf});
