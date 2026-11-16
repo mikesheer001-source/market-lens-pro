@@ -1,6 +1,7 @@
 import './styles.css';
 import {compilePine, executePine, sweepPine, PineError} from './pine.js';
 import {PINE_EXAMPLES} from './pine-examples.js';
+import {restoreWatchlists,watchlistChange,validateAlert,checkAlerts,makeScanSnapshot,analysisSnapshot,restoreAnalysis,WATCHLIST_LIMIT,SCAN_LIMIT,ALERT_LIMIT} from './workspace.js';
 import { LIVE_UNIVERSE, DEMO_UNIVERSE, VOLATILITY_UNIVERSE, LIVE_EQUITY_COUNT, LIVE_ETF_COUNT, LIVE_VOLATILITY_COUNT, ALPACA_BATCH_SIZE } from './universe.js';
 async function initApp(){
   const {
@@ -31,7 +32,15 @@ async function initApp(){
   let scriptLibrary=[];
   try{const parsed=JSON.parse(localStorage.getItem(scriptLibraryKey)||'[]');if(Array.isArray(parsed))scriptLibrary=parsed.filter(x=>x&&typeof x.code==='string'&&typeof x.name==='string').slice(0,30);}catch{}
   let draft={};try{draft=JSON.parse(localStorage.getItem(scriptDraftKey)||'{}')||{};}catch{}
-  const S={tab:'screener',mode:'demo',apiBaseUrl:String(saved.apiBaseUrl||''),liveFeed:'iex',lastDemoSymbol:'DEMO-SPY',universeFilter:saved.universeFilter||'all',scan:{status:'idle'},data:new Map(Object.entries(sampleData())),sources:new Map(),symbol:'DEMO-SPY',query:'',watch:new Set(saved.watch||[]),rules:saved.rules||preset.trend.map(x=>({...x})),sort:'symbol',ascending:true,showOnlyMatches:false,showWatch:false,chart:(()=>{const restored={...defaultSettings,...saved.chart};if(!saved.chart?.style||saved.chart.style==='line')restored.style='candles';return restored;})(),bt:{...defaultBacktest,...saved.bt},result:null,sweep:null,drawLine:false,
+  const workspaceLists=restoreWatchlists(saved);
+  let previousAnalysis=null;
+  try{previousAnalysis=restoreAnalysis(JSON.parse(localStorage.getItem('market-lens-pro-analysis-v1')||'null'));}catch{}
+  const S={tab:'screener',mode:'demo',apiBaseUrl:String(saved.apiBaseUrl||''),liveFeed:'iex',lastDemoSymbol:'DEMO-SPY',universeFilter:saved.universeFilter||'all',scan:{status:'idle'},data:new Map(Object.entries(sampleData())),sources:new Map(),symbol:'DEMO-SPY',query:'',symbolQuery:'',watch:workspaceLists.watch,watchlists:workspaceLists.watchlists,
+    watchlistId:workspaceLists.watchlistId,watchlistDraft:'',alertDraft:{symbol:'DEMO-SPY',metric:'price',op:'>',threshold:100},
+    alerts:Array.isArray(saved.alerts)?saved.alerts.slice(0,ALERT_LIMIT):[],alertHits:[],
+    savedScans:Array.isArray(saved.savedScans)?saved.savedScans.slice(0,SCAN_LIMIT):[],
+    scanDraft:'',savedScanId:null,savedScanView:null,
+    rules:saved.rules||preset.trend.map(x=>({...x})),sort:'symbol',ascending:true,showOnlyMatches:false,showWatch:false,chart:(()=>{const restored={...defaultSettings,...saved.chart};if(!saved.chart?.style||saved.chart.style==='line')restored.style='candles';return restored;})(),bt:{...defaultBacktest,...saved.bt},result:previousAnalysis?.result||null,sweep:previousAnalysis?.sweep||null,lastAnalysis:previousAnalysis,resultSymbol:previousAnalysis?.symbol||null,resultTf:previousAnalysis?.tf||null,drawLine:false,
     scriptCode:typeof draft.code==='string'?draft.code:PINE_EXAMPLES[0].code,
     scriptName:typeof draft.name==='string'?draft.name:'EMA crossover',
     scriptId:draft.id||null,
@@ -40,7 +49,24 @@ async function initApp(){
   for(const symbol of S.data.keys())S.sources.set(symbol,'SIMULATED');
   parseCurrentPine();
   let chart=null,equityChart=null;
-  const saveSettings=()=>{try{localStorage.setItem('market-lens-pro-settings',JSON.stringify({watch:[...S.watch],rules:S.rules,chart:S.chart,bt:S.bt,apiBaseUrl:S.apiBaseUrl,universeFilter:S.universeFilter}));}catch{}};
+  const saveSettings=()=>{try{localStorage.setItem('market-lens-pro-settings',JSON.stringify({watch:[...S.watch],watchlists:S.watchlists,watchlistId:S.watchlistId,alerts:S.alerts,savedScans:S.savedScans,rules:S.rules,chart:S.chart,bt:S.bt,apiBaseUrl:S.apiBaseUrl,universeFilter:S.universeFilter}));}catch{}};
+  function rememberAnalysis(){
+    S.lastAnalysis=analysisSnapshot({result:S.result,sweep:S.sweep,symbol:S.symbol,tf:S.chart.tf,strategy:S.bt.strategy,source:S.sources.get(S.symbol)});
+    try{localStorage.setItem('market-lens-pro-analysis-v1',JSON.stringify(S.lastAnalysis));}
+    catch{notice('Backtest shown, but this browser cannot save the full result to localStorage.');}
+  }
+  function evaluateLocalAlerts(){
+    const result=checkAlerts(S.alerts,S.data,statsFor,aggregate);
+    S.alerts=result.alerts;S.alertHits=result.hits;
+    saveSettings();
+    if(result.hits.length)notice(result.hits.length+' local price/RSI alert'+(result.hits.length===1?'':'s')+' triggered.');
+  }
+  function clearSavedScanView(){S.savedScanView=null;S.savedScanId=null;}
+  function selectWatchlist(id){
+    const list=S.watchlists.find(w=>w.id===id);if(!list)return;
+    S.watchlistId=list.id;S.watch=new Set(list.symbols);saveSettings();
+  }
+  function modeSymbol(symbol){return S.mode==='live'?S.sources.get(symbol)==='ALPACA':S.sources.get(symbol)!=='ALPACA';}
   function persistPineDraft(){
     try{localStorage.setItem(scriptDraftKey,JSON.stringify({code:S.scriptCode,name:S.scriptName,id:S.scriptId,settings:S.scriptSettings}));}
     catch{notice('Unable to save Script Lab draft in localStorage.');}
@@ -60,7 +86,7 @@ async function initApp(){
   async function removeImports(){try{const db=await openDb(),tx=db.transaction('symbols','readwrite');tx.objectStore('symbols').clear();await new Promise((res,rej)=>{tx.oncomplete=res;tx.onerror=()=>rej(tx.error);});db.close();}catch{}S.data=new Map(Object.entries(sampleData()));S.sources=new Map([...S.data.keys()].map(x=>[x,'SIMULATED']));S.symbol='DEMO-SPY';S.result=null;S.sweep=null;render();}
   const bars=()=>aggregate(S.data.get(S.symbol)||[],S.chart.tf);
   const status=()=>S.mode==='live'?'ALPACA LIVE · '+String(S.liveFeed||'iex').toUpperCase():S.sources.get(S.symbol)==='SIMULATED'?'SIMULATED SAMPLE':S.sources.get(S.symbol)==='IMPORTED'?'IMPORTED OHLCV':'NO DATA';
-  const isVisibleSymbol=symbol=>(S.mode==='live'?S.sources.get(symbol)==='ALPACA':S.sources.get(symbol)!=='ALPACA')&&(S.universeFilter!=='volatility'||VOLATILITY_UNIVERSE.includes(symbol));
+  const isVisibleSymbol=symbol=>modeSymbol(symbol)&&(S.universeFilter!=='volatility'||VOLATILITY_UNIVERSE.includes(symbol));
   function destroyCharts(){if(chart){chart.remove();chart=null;}if(equityChart){equityChart.remove();equityChart=null;}}
   function shell(){
     const nav=(mobile=false)=>'<nav aria-label="'+(mobile?'Mobile':'Primary')+' navigation" class="'+(mobile?'mobile-nav':'nav')+'">'+Object.entries(tabNames).map(([k,n])=>'<button class="nav-btn '+(S.tab===k?'active':'')+'" data-tab="'+k+'"><span class="nav-icon" aria-hidden="true">'+tabIcons[k]+'</span>'+n+'</button>').join('')+'</nav>';
