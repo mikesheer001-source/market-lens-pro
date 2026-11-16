@@ -213,6 +213,6 @@ test('published Round 22 validated-only toggle matches displayed validation badg
   else await expect(page.locator('#leaderboard-validation-empty')).toHaveText('No strategy validated on this window');
   await page.locator('#leaderboard-validated-only').uncheck();
   await expect(page.locator('.leaderboard-table tbody tr')).toHaveCount(12);
-  await expect(page.locator('#leaderboard-validation-count')).toContainText('positive OOS Sharpe');
+  await expect(page.locator('#leaderboard-validation-count')).toContainText('Positive OOS Sharpe');
   expect(errors).toEqual([]);
 });
