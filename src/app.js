@@ -223,13 +223,16 @@ async function initApp(){
     const response=await fetch(base+'/api/stocks/scan?feed='+encodeURIComponent(S.liveFeed||'iex'),{headers:{Accept:'application/json'}});
     const payload=await response.json().catch(()=>({}));
     if(!response.ok)throw new Error(payload.error||payload.detail||'Alpaca market scan failed ('+response.status+').');
-    const raw=payload.bars&&typeof payload.bars==='object'?payload.bars:{},loaded=[];
+    const raw=payload.bars&&typeof payload.bars==='object'?payload.bars:{},parsed=[];
     for(const [symbol,items] of Object.entries(raw)){
       const liveBars=alpacaBars(items,'1Day');
-      if(liveBars.length){S.data.set(symbol,liveBars);S.sources.set(symbol,'ALPACA');loaded.push(symbol);}
+      if(liveBars.length)parsed.push([symbol,liveBars]);
     }
-    if(!loaded.length)throw new Error('Alpaca returned no daily bars for the bundled universe. Check the feed and subscription.');
+    if(!parsed.length)throw new Error('Alpaca returned no daily bars for the bundled universe. Check the feed and subscription.');
     if(S.sources.get(S.symbol)!=='ALPACA')S.lastDemoSymbol=S.symbol;
+    for(const [symbol,source] of S.sources)if(source==='ALPACA'){S.sources.delete(symbol);S.data.delete(symbol);}
+    const loaded=[];
+    for(const [symbol,liveBars] of parsed){S.data.set(symbol,liveBars);S.sources.set(symbol,'ALPACA');loaded.push(symbol);}
     S.mode='live';S.liveFeed=payload.feed||'iex';
     const visible=loaded.filter(isVisibleSymbol);
     if(!visible.includes(S.symbol))S.symbol=visible[0]||loaded[0];
@@ -287,7 +290,7 @@ async function initApp(){
     if(ev.target.closest('#dropzone'))$('#csv-file')?.click();
   });
   document.addEventListener('input',ev=>{
-    const el=ev.target;if(el.dataset.setting){S[el.dataset.setting]=el.value;if(el.dataset.setting==='liveSymbol')S.liveSymbol=el.value.toUpperCase();saveSettings();return;}if(el.dataset.input==='search'){S.query=el.value;const focus=el.selectionStart;render();const input=$('[data-input="search"]');if(input){input.focus();input.setSelectionRange(focus,focus);}}
+    const el=ev.target;if(el.dataset.setting){S[el.dataset.setting]=el.value;saveSettings();return;}if(el.dataset.input==='search'){S.query=el.value;const focus=el.selectionStart;render();const input=$('[data-input="search"]');if(input){input.focus();input.setSelectionRange(focus,focus);}}
   });
   document.addEventListener('change',async ev=>{
     const el=ev.target;
