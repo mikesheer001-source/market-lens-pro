@@ -7,9 +7,10 @@ import {windowPortfolioData,validateBacktestRange,actualPortfolioRange} from './
 import {barDate} from './freshness.js';
 export function bestSharpeStrategy(rows){
   const eligible=(rows||[]).filter(row=>
-    row?.strategy&&Number.isFinite(row.metrics?.sharpe)&&
+    row?.strategy&&Number.isFinite(row.trainMetrics?.sharpe??row.metrics?.sharpe)&&
     Array.isArray(row.curve)&&row.curve.length);
-  eligible.sort((a,b)=>b.metrics.sharpe-a.metrics.sharpe||
+  eligible.sort((a,b)=>(b.trainMetrics?.sharpe??b.metrics.sharpe)-
+    (a.trainMetrics?.sharpe??a.metrics.sharpe)||
     String(a.id).localeCompare(String(b.id)));
   return eligible[0]||null;
 }
@@ -33,7 +34,10 @@ export function runBestFitPortfolio({data,symbols,options,backtest,
       if(!winner){unranked.push({symbol,reason:'No strategy has a finite Sharpe on the selected window'});continue;}
       picks.set(symbol,winner);
       ranked.push({symbol,strategyId:winner.id,strategyName:winner.name,
-        fitSharpe:winner.metrics.sharpe,fitReturnPct:winner.metrics.returnPct,
+        fitSharpe:winner.trainMetrics?.sharpe??winner.metrics.sharpe,
+        fitReturnPct:winner.trainMetrics?.returnPct??winner.metrics.returnPct,
+        trainMetrics:winner.trainMetrics||null,testMetrics:winner.testMetrics||null,
+        validation:winner.validation||null,
         source:sources.get(symbol)||'UNKNOWN',barDate:barDate(bars.at(-1))});
     }catch(error){unranked.push({symbol,reason:String(error.message||error)});}
   }
@@ -49,7 +53,7 @@ export function runBestFitPortfolio({data,symbols,options,backtest,
     strategyForSymbol:(symbol,bars)=>{
       const picked=picks.get(symbol);
       const choice={strategy:picked.strategy,strategyName:picked.name,
-        selectionId:picked.id,fitSharpe:picked.metrics.sharpe};
+        selectionId:picked.id,fitSharpe:picked.trainMetrics?.sharpe??picked.metrics.sharpe};
       if(picked.strategy==='pine-custom'){
         const script=picked.script;
         if(!script?.code)throw Error('Best-fitting Pine script is missing for '+symbol);
@@ -64,7 +68,14 @@ export function runBestFitPortfolio({data,symbols,options,backtest,
   });
   return {...portfolio,mode:'best-fit',range:actualPortfolioRange(portfolio.curve,dateRange),
     requestedCount:aligned.requested.length,ranked:ranked.length,
-    selections:ranked,unranked,
+    selections:ranked,
+    breakdown:portfolio.breakdown.map(row=>{
+      const selected=picks.get(row.symbol);
+      return {...row,trainMetrics:selected?.trainMetrics||null,
+        testMetrics:selected?.testMetrics||null,validation:selected?.validation||null};
+    }),
+    unranked,
     omitted:[...new Set([...aligned.omitted,...unranked.map(x=>x.symbol)])],
-    methodology:portfolio.methodology+' Each ticker was assigned its own highest finite in-sample Sharpe among executable presets, saved Pine strategies and built-in strategy examples. Strategy selection and performance evaluation share the same dates (selection bias / overfitting); do not interpret as holdout performance.'};
+    methodology:portfolio.methodology+
+      ' Each ticker is selected ONLY by the highest finite Sharpe in its first 70% training bars across executable presets, saved Pine strategies and built-in examples. The final 30% is reserved for a separate independent-capital holdout backtest with the frozen selected strategy. Combined equity and headline performance still span the full available window (training + test); read the per-symbol OOS metrics for genuine holdout evidence. Positive OOS Sharpe is a descriptive label, not statistically rigorous proof of edge. Training selection may still overfit.'};
 }
