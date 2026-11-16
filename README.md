@@ -111,3 +111,11 @@ The Worker can be tested locally with Wrangler (npx wrangler dev). For local sec
 - Cloudflare Worker deploy is a separate manual workflow: .github/workflows/deploy-worker.yml.
 
 Nothing here submits live orders.
+
+
+## Round 12 — universe-wide strategy fit and stale ticker investigation
+
+- **Fit across universe** runs any preset or active Pine `strategy()` on the original 133-symbol curated Alpaca universe (105 equities, 18 ETFs, 10 volatility instruments), with the **same** daily-bar strategy settings, starting capital, commission, slippage, and stop/target assumptions. Sort all 133 rows by Sharpe (default) or any column, inspect per-symbol source and last bar, or load the top Sharpe symbol into a full backtest. Unavailable symbols remain visible, not treated as zero-return positions. These are **in-sample rankings, not proof of future results**. History lengths may vary.
+- **MMC → MRSH:** Marsh changed the NYSE symbol effective January 14, 2026 ([issuer notice](https://www.marsh.com/en/corp/about/news/marsh-mclennan-to-change-nyse-symbol-to-mrsh.html)). The legacy MMC data ending January 13 is not current trading data, so the universe entry is now MRSH. The 133-symbol count is unchanged; prior MMC daily bars are neither relabeled nor invented.
+- **VXZ:** iPath Series B VXZ remains Cboe-listed. The Nov. 13, 2026 daily bar is expected before Monday Nov. 16 is finished, so the site waits until **16:30 ET** to expect a new daily candle. The Worker already retries genuinely stale daily bars; it now queries the per-symbol Alpaca asset endpoint for inactive/missing/tradable status and supplies an explicit no-new-bars reason. A read-only `GET /api/stocks/diagnostics?symbols=MMC,MRSH,VXZ` endpoint performs bounded asset and latest-bar checks (maximum five symbols). Failed asset API authorization remains **unknown**, never mislabeled as a delisting.
+- The Pages workflow runs `npm test`, `npm run build`, local Playwright, and then deployed-site Playwright. The Worker workflow deploys on backend/universe/freshness changes when Cloudflare repository secrets are configured.
