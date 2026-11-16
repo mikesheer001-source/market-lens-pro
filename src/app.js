@@ -5,6 +5,8 @@ import {readableBarDate,normalizeStartupPreferences,intradayCacheFresh,intradayF
 import {availableStrategySignals,evaluateStrategySignals,scanSignalFlips} from './signals.js';
 import {expectedNyseBarDate,scanFreshness,explainStaleSymbol} from './freshness.js';
 import {FIT_COLUMNS,sortUniverseFit,bestUniverseFit,fitAcrossUniverse} from './fit.js';
+import {compileDailyBriefing,briefingToText,pruneBriefingHistory,saveBriefingHistory} from './briefing.js';
+import {renderBriefingView} from './briefing-view.js';
 import {compareStrategies,sortLeaderboard,leaderboardBest,updateSymbolMemory,pruneSymbolMemory,symbolMemoryItem,compactLeaderboard,LEADERBOARD_METRICS} from './leaderboard.js';
 import {runPortfolio,runPortfolioSweep,portfolioUniverse} from './portfolio.js';
 import {VOL_TICKERS,volatilityRow,contangoPriceProxies} from './volatility.js';
@@ -22,8 +24,8 @@ async function initApp(){
   const pct=n=>n==null||!Number.isFinite(n)?'—':(n>0?'+':'')+format(n)+'%';
   const priceColor=n=>n==null?'muted':n>=0?'positive':'negative';
   const dateLabel=t=>typeof t==='number'?new Date(t*1000).toISOString().slice(0,16).replace('T',' '):String(t);
-  const tabNames={screener:'Screener',charts:'Chart Lab',backtest:'Backtest',optimize:'Optimize',volatility:'Volatility',scripts:'Script Lab',data:'Data Center'};
-  const tabIcons={screener:'📊',charts:'📈',backtest:'🧪',optimize:'⚙️',volatility:'〽',scripts:'🧩',data:'🗂️'};
+  const tabNames={screener:'Screener',briefing:'Briefing',charts:'Chart Lab',backtest:'Backtest',optimize:'Optimize',volatility:'Volatility',scripts:'Script Lab',data:'Data Center'};
+  const tabIcons={screener:'📊',briefing:'▤',charts:'📈',backtest:'🧪',optimize:'⚙️',volatility:'〽',scripts:'🧩',data:'🗂️'};
   const preset={
     trend:[{metric:'emaDist',tf:'D',op:'>',value:0},{metric:'rsi',tf:'D',op:'<',value:60}],
     original:[{metric:'emaDist',tf:'W',op:'>',value:0},{metric:'rsi',tf:'W',op:'<',value:50},{metric:'rsi',tf:'D',op:'<',value:50},{metric:'rsi',tf:'2H',op:'<',value:50}],
@@ -49,6 +51,10 @@ async function initApp(){
   try{previousAnalysis=restoreAnalysis(JSON.parse(localStorage.getItem('market-lens-pro-analysis-v1')||'null'));}catch{}
   let previousPortfolio=null;
   try{previousPortfolio=JSON.parse(localStorage.getItem('market-lens-pro-portfolio-v1')||'null');}catch{}
+  const briefingStorageKey='market-lens-pro-briefing-history-v1';
+  let savedBriefings=[];
+  try{savedBriefings=pruneBriefingHistory(JSON.parse(localStorage.getItem(briefingStorageKey)||'[]'));}
+  catch{savedBriefings=[];}
   const S={tab:startupPrefs.tab,mode:'demo',preferredMode:startupPrefs.mode,
     lastDemoSymbol:startupPrefs.lastDemoSymbol,lastLiveSymbol:startupPrefs.lastLiveSymbol,
     lastBacktestSymbol:startupPrefs.lastBacktestSymbol,lastSymbol:startupPrefs.lastSymbol,
@@ -60,6 +66,7 @@ async function initApp(){
     signalSelection:typeof saved.signalSelection==='string'?saved.signalSelection:'none',
     signalsOnly:!!saved.signalsOnly,signalRows:new Map(),signalErrors:[],
     signalHistory:priorSignalHistory,signalAsOf:null,freshness:null,staleDiagnostics:{},
+    lastSignalFlips:[],lastSignalFlipBaseline:false,lastSignalFlipStrategy:null,
     rules:saved.rules||preset.trend.map(x=>({...x})),sort:'symbol',ascending:true,showOnlyMatches:false,showWatch:false,chart:(()=>{const restored={...defaultSettings,...saved.chart};if(!saved.chart?.style||saved.chart.style==='line')restored.style='candles';return restored;})(),bt:{...defaultBacktest,...saved.bt},result:previousAnalysis?.result||null,sweep:previousAnalysis?.sweep||null,lastAnalysis:previousAnalysis,resultSymbol:previousAnalysis?.symbol||null,resultTf:previousAnalysis?.tf||null,
     portfolioMode:!!saved.portfolioMode,portfolioScope:saved.portfolioScope==='watchlist'?'watchlist':'matches',
     portfolioWatchlistId:saved.portfolioWatchlistId||workspaceLists.watchlistId,
@@ -68,7 +75,7 @@ async function initApp(){
     intraday:new Map(),intradayStatus:new Map(),intradayPromises:new Map(),intradayError:'',
     analysisLoading:'',analysisError:'',
     symbolMemory:previousSymbolMemory,leaderboard:null,leaderboardSort:'sharpe',leaderboardDescending:true,leaderboardError:'',fitReport:null,fitSort:'sharpe',fitDescending:true,fitStatus:'',fitError:'',
-    drawLine:false,
+    briefing:null,briefingHistory:savedBriefings,briefingLoading:false,briefingError:'',drawLine:false,
     scriptCode:typeof draft.code==='string'?draft.code:PINE_EXAMPLES[0].code,
     scriptName:typeof draft.name==='string'?draft.name:'EMA crossover',
     scriptId:draft.id||null,
@@ -145,10 +152,12 @@ async function initApp(){
     }catch{notice('Signal history could not be saved locally. Flip detection may reset after reload.');}
   }
   function evaluateScreenerSignals(detectFlips=false){
-    if(S.signalSelection==='none'){S.signalRows=new Map();S.signalErrors=[];return;}
+    if(S.signalSelection==='none'){S.signalRows=new Map();S.signalErrors=[];
+      S.lastSignalFlips=[];S.lastSignalFlipBaseline=false;S.lastSignalFlipStrategy=null;return;}
     const selection=screenerStrategies().find(x=>x.id===S.signalSelection);
     if(!selection){
       S.signalSelection='none';S.signalRows=new Map();S.signalErrors=[];
+      S.lastSignalFlips=[];S.lastSignalFlipBaseline=false;S.lastSignalFlipStrategy=null;
       saveSettings();return;
     }
     const available=new Map([...S.data].filter(([symbol])=>modeSymbol(symbol)));
@@ -167,6 +176,9 @@ async function initApp(){
     const prior=S.signalHistory[key]||{};
     const checked=scanSignalFlips(prior,current,{strategyId:selection.id,strategyName:selection.name,
       checkedAt:S.signalAsOf});
+    S.lastSignalFlips=detectFlips&&Object.keys(prior).length?checked.flips:[];
+    S.lastSignalFlipBaseline=!!(detectFlips&&Object.keys(prior).length);
+    S.lastSignalFlipStrategy=S.signalSelection;
     S.signalHistory[key]=checked.states;persistSignalHistory();
     if(detectFlips&&Object.keys(prior).length){
       for(const flip of checked.flips){
