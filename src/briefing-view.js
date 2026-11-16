@@ -1,4 +1,5 @@
 // Round 13 — presentation-only Daily Briefing, using existing graphite UI classes.
+import {briefingLeaderLines} from './briefing.js';
 export function renderBriefingView({snapshot:b,history=[],loading=false,error='',
   strategies=[],selection='none',head,button,select,metric,esc,format,pct}){
   const strategySelect='<label class="control">Strategy '+select([
@@ -62,6 +63,14 @@ export function renderBriefingView({snapshot:b,history=[],loading=false,error=''
     '<strong>'+esc(x.symbol)+'</strong> · '+esc(x.reason)+
     '<small>'+esc(x.source)+' · last bar '+esc(x.barDate||'missing')+'</small></div>').join(''):
     '<p class="section-note">No older or missing bars relative to the expected NYSE daily session.</p>';
+  const leaders=briefingLeaderLines(b);
+  const leadersBody='<p class="briefing-line" id="briefing-top-validated">'+
+    esc(leaders.validated)+'</p><p class="briefing-line" id="briefing-top-full-period">'+
+    esc(leaders.fullPeriod)+'</p>'+
+    '<p class="section-note">Out-of-sample validation is distinct from full-period Sharpe. '+
+    'Rolling leaders are ranked by rolling mean OOS Sharpe only among strategies that passed the selected validation rule. '+
+    'Strategies with no assessable rolling mean are never presented as rolling winners. '+
+    'The independent selected strategy above still drives LONG/flip signals.</p>';
   const panel=(id,title,label,date,body,extra='')=>'<section class="panel" id="'+id+'">'+
     '<div class="panel-header"><h2>'+title+'</h2>'+extra+'</div><div class="panel-body">'+
     source(label,date)+body+'</div></section>';
@@ -76,6 +85,11 @@ export function renderBriefingView({snapshot:b,history=[],loading=false,error=''
         b.strategy.name||'No selected strategy')+
       metric('Stale warnings',b.stale.items.length,'Expected session '+(b.stale.expected||'unknown'))+
     '</div>'+
+    panel('briefing-strategy-leaders','Strategy validation highlights',
+      b.strategyLeaders?.source||'Backtester comparison unavailable',
+      b.scan.barDate,leadersBody,
+      '<span class="muted">'+esc(b.strategyLeaders?.symbol||'No symbol')+
+        ' · '+esc(b.strategyLeaders?.timeframe||'D')+'</span>')+
     panel('briefing-scan','Daily scan matches',b.scan.source,b.scan.barDate,matchTable,
       '<span class="muted">'+b.scan.matched+' matches</span>')+
     panel('briefing-signals','Strategy LONG / flips',b.strategy.source,b.strategy.barDate,
