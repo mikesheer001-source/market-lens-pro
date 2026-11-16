@@ -1,6 +1,7 @@
 import './styles.css';
 import {compilePine, executePine, sweepPine, PineError} from './pine.js';
 import {PINE_EXAMPLES} from './pine-examples.js';
+import {compareStrategies,sortLeaderboard,leaderboardBest,updateSymbolMemory,pruneSymbolMemory,symbolMemoryItem,LEADERBOARD_METRICS} from './leaderboard.js';
 import {runPortfolio,runPortfolioSweep,portfolioUniverse} from './portfolio.js';
 import {VOL_TICKERS,volatilityRow,contangoPriceProxies} from './volatility.js';
 import {restoreWatchlists,watchlistChange,validateAlert,checkAlerts,makeScanSnapshot,analysisSnapshot,restoreAnalysis,WATCHLIST_LIMIT,SCAN_LIMIT,ALERT_LIMIT} from './workspace.js';
@@ -34,6 +35,8 @@ async function initApp(){
   let scriptLibrary=[];
   try{const parsed=JSON.parse(localStorage.getItem(scriptLibraryKey)||'[]');if(Array.isArray(parsed))scriptLibrary=parsed.filter(x=>x&&typeof x.code==='string'&&typeof x.name==='string').slice(0,30);}catch{}
   let draft={};try{draft=JSON.parse(localStorage.getItem(scriptDraftKey)||'{}')||{};}catch{}
+  let previousSymbolMemory={};
+  try{previousSymbolMemory=pruneSymbolMemory(JSON.parse(localStorage.getItem('market-lens-pro-symbol-memory-v1')||'{}'));}catch{}
   const workspaceLists=restoreWatchlists(saved);
   let previousAnalysis=null;
   try{previousAnalysis=restoreAnalysis(JSON.parse(localStorage.getItem('market-lens-pro-analysis-v1')||'null'));}catch{}
@@ -50,6 +53,7 @@ async function initApp(){
     portfolioResult:previousPortfolio?.result||null,portfolioSweep:previousPortfolio?.sweep||null,
     portfolioTimestamp:previousPortfolio?.savedAt||null,portfolioError:'',
     intraday:new Map(),intradayStatus:new Map(),intradayError:'',
+    symbolMemory:previousSymbolMemory,leaderboard:null,leaderboardSort:'sharpe',leaderboardDescending:true,leaderboardError:'',
     drawLine:false,
     scriptCode:typeof draft.code==='string'?draft.code:PINE_EXAMPLES[0].code,
     scriptName:typeof draft.name==='string'?draft.name:'EMA crossover',
@@ -57,8 +61,16 @@ async function initApp(){
     scriptSettings:draft.settings&&typeof draft.settings==='object'?draft.settings:{},
     scriptParsed:null,scriptError:'',scriptOutput:null,scriptLibrary,activeIndicators:[],activeStrategy:null};
   for(const symbol of S.data.keys())S.sources.set(symbol,'SIMULATED');
+  if(!Object.keys(S.symbolMemory).length&&previousAnalysis?.symbol===S.symbol&&previousAnalysis?.result){
+    S.symbolMemory=updateSymbolMemory(S.symbolMemory,S.symbol,{backtest:{
+      result:previousAnalysis.result,sweep:previousAnalysis.sweep,options:{...S.bt},
+      timeframe:previousAnalysis.tf||S.chart.tf,source:previousAnalysis.source,
+      savedAt:previousAnalysis.savedAt
+    }});
+  }
+  S.leaderboard=symbolMemoryItem(S.symbolMemory,S.symbol)?.leaderboard||null;
   parseCurrentPine();
-  let chart=null,equityChart=null;
+  let chart=null,equityChart=null,leaderboardChart=null;
   const saveSettings=()=>{try{localStorage.setItem('market-lens-pro-settings',JSON.stringify({watch:[...S.watch],watchlists:S.watchlists,watchlistId:S.watchlistId,alerts:S.alerts,savedScans:S.savedScans,rules:S.rules,chart:S.chart,bt:S.bt,portfolioMode:S.portfolioMode,portfolioScope:S.portfolioScope,portfolioWatchlistId:S.portfolioWatchlistId,apiBaseUrl:S.apiBaseUrl,universeFilter:S.universeFilter}));}catch{}};
   function rememberPortfolio(){
     S.portfolioTimestamp=new Date().toISOString();
@@ -66,10 +78,39 @@ async function initApp(){
       version:1,result:S.portfolioResult,sweep:S.portfolioSweep,savedAt:S.portfolioTimestamp
     }));}catch{notice('Portfolio calculated, but browser storage could not retain the full result.');}
   }
+  function persistSymbolState(symbol,changes){
+    S.symbolMemory=updateSymbolMemory(S.symbolMemory,symbol,changes);
+    try{localStorage.setItem('market-lens-pro-symbol-memory-v1',JSON.stringify(S.symbolMemory));}
+    catch(err){notice('Per-symbol history is visible but could not be saved in browser storage. Older comparisons may need deleting.');}
+  }
+  function rememberLeaderboard(){
+    if(S.leaderboard?.symbol===S.symbol)persistSymbolState(S.symbol,{leaderboard:S.leaderboard});
+  }
+  function restoreSymbolState(symbol){
+    S.symbol=symbol;S.symbolQuery='';
+    const savedEntry=symbolMemoryItem(S.symbolMemory,symbol);
+    const run=savedEntry?.backtest||null;
+    S.leaderboard=savedEntry?.leaderboard||null;
+    S.leaderboardSort='sharpe';S.leaderboardDescending=true;S.leaderboardError='';
+    S.result=run?.result||null;S.sweep=run?.sweep||null;
+    S.resultSymbol=run?symbol:null;
+    S.resultTf=run?.timeframe||null;
+    if(run){
+      S.bt={...S.bt,...run.options};S.chart.tf=run.timeframe||'D';
+      S.lastAnalysis=analysisSnapshot({result:run.result,sweep:run.sweep,symbol,
+        tf:run.timeframe,strategy:run.options?.strategy,source:run.source,savedAt:run.savedAt});
+      S.activeStrategy=run.activeStrategy||null;
+    }else S.lastAnalysis=null;
+    return savedEntry;
+  }
   function rememberAnalysis(){
     S.lastAnalysis=analysisSnapshot({result:S.result,sweep:S.sweep,symbol:S.symbol,tf:S.chart.tf,strategy:S.bt.strategy,source:S.sources.get(S.symbol)});
     try{localStorage.setItem('market-lens-pro-analysis-v1',JSON.stringify(S.lastAnalysis));}
     catch{notice('Backtest shown, but this browser cannot save the full result to localStorage.');}
+    if(S.result&&S.resultSymbol===S.symbol)persistSymbolState(S.symbol,{backtest:{
+      result:S.result,sweep:S.sweep,options:{...S.bt},timeframe:S.resultTf||S.chart.tf,
+      source:S.sources.get(S.symbol),activeStrategy:S.bt.strategy==='pine-custom'?S.activeStrategy:null,savedAt:S.lastAnalysis.savedAt
+    }});
   }
   function evaluateLocalAlerts(){
     const result=checkAlerts(S.alerts,S.data,statsFor,aggregate);
