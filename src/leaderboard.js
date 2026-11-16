@@ -19,7 +19,7 @@ export function leaderboardMetric(row,key){
   if(key==='testReturnPct')return row.testMetrics?.returnPct??null;
   if(key==='testSharpe')return row.validation?.enoughTestBars?row.testMetrics?.sharpe??null:null;
   if(key==='validation')return row.validation?.validated?1:0;
-  if(key==='sharpe')return row.trainMetrics?.sharpe??row.metrics?.sharpe??null;
+  if(key==='sharpe')return row.trainMetrics?row.trainMetrics.sharpe??null:row.metrics?.sharpe??null;
   return row.metrics?.[key]??null;
 }
 const instant=t=>typeof t==='number'?t:Date.parse(String(t).includes('T')?String(t):String(t)+'T00:00:00Z')/1000;
@@ -40,7 +40,8 @@ export function sortLeaderboard(rows,key='sharpe',descending=key!=='name'){
   });
 }
 export function leaderboardBest(rows){
-  return sortLeaderboard(rows,'sharpe',true)[0]||null;
+  return sortLeaderboard(rows,'sharpe',true).find(r=>r.strategy&&
+    Number.isFinite(leaderboardMetric(r,'sharpe')))||null;
 }
 export function buildEquityOverlay(leaderboard,bars){
   if(!leaderboard?.rows?.length)return {series:[],benchmark:[],labels:[]};
