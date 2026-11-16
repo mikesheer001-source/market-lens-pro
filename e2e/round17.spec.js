@@ -16,7 +16,7 @@ test('Round 17: changing the date pickers automatically rebuilds all leaderboard
   await page.locator('.sidebar [data-tab="backtest"]').click();
   await page.locator('[data-action="compare-strategies"]').first().click();
   await expect(page.locator('#leaderboard-window')).toContainText('Full range');
-  const initial=await page.locator('tr[data-leaderboard-id="preset:ema-cross"] td').nth(6).textContent();
+  const initial=await page.locator('tr[data-leaderboard-id="preset:ema-cross"] td').nth(9).textContent();
   const priorSummary=await page.locator('#walk-forward-summary').textContent();
   await page.locator('[data-bt-range="startDate"]').fill(history[start].time);
   await page.locator('[data-bt-range="endDate"]').fill(history[end].time);
@@ -29,7 +29,7 @@ test('Round 17: changing the date pickers automatically rebuilds all leaderboard
   const row=page.locator('tr[data-leaderboard-id="preset:ema-cross"]');
   const expectedFull=backtest(history.slice(start,end+1),parameters);
   const expectedOos=backtest(history.slice(start,end+1),{...parameters,startIndex:cut});
-  await expect(row.locator('td').nth(6)).toHaveText(pct(expectedFull.metrics.returnPct));
+  await expect(row.locator('td').nth(9)).toHaveText(pct(expectedFull.metrics.returnPct));
   await expect(row.locator('td').nth(3)).toHaveText(pct(expectedOos.metrics.returnPct));
   await expect(page.locator('#walk-forward-summary')).toContainText(
     'holdout '+history[start+cut].time+' to '+history[end].time);
@@ -39,11 +39,11 @@ test('Round 17: changing the date pickers automatically rebuilds all leaderboard
   await page.reload();
   await page.locator('.sidebar [data-tab="backtest"]').click();
   await expect(page.locator('#leaderboard-window')).toContainText(history[start].time);
-  await expect(page.locator('tr[data-leaderboard-id="preset:ema-cross"] td').nth(6))
+  await expect(page.locator('tr[data-leaderboard-id="preset:ema-cross"] td').nth(9))
     .toHaveText(pct(expectedFull.metrics.returnPct));
   await page.locator('[data-action="clear-bt-dates"]').click();
   await expect(page.locator('#leaderboard-window')).toHaveText('Full range');
-  await expect(page.locator('tr[data-leaderboard-id="preset:ema-cross"] td').nth(6)).toHaveText(initial.trim());
+  await expect(page.locator('tr[data-leaderboard-id="preset:ema-cross"] td').nth(9)).toHaveText(initial.trim());
   await expect(page.locator('#leaderboard-range-mismatch')).toHaveCount(0);
   expect(errors).toEqual([]);
 });
