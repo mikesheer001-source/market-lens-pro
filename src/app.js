@@ -104,6 +104,8 @@ async function initApp(){
   }
   function restoreSymbolState(symbol){
     S.symbol=symbol;S.symbolQuery='';
+    if(S.mode==='live'&&LIVE_UNIVERSE.includes(symbol))S.lastLiveSymbol=symbol;
+    else if(S.mode==='demo'&&symbol.startsWith('DEMO-'))S.lastDemoSymbol=symbol;
     const savedEntry=symbolMemoryItem(S.symbolMemory,symbol);
     const run=savedEntry?.backtest||null;
     S.leaderboard=savedEntry?.leaderboard||null;
@@ -580,12 +582,14 @@ async function initApp(){
     const top=lb.rows.find(row=>row.id===lb.bestId);
     const note=S.chart.tf!==lb.timeframe?'Current timeframe '+esc(S.chart.tf)+' differs from saved comparison timeframe '+esc(lb.timeframe)+'. Results are not recalculated until you rerun comparison.':'';
     const provenance='<div class="info-strip" id="leaderboard-source"><strong>'+esc(lb.symbol)+'</strong> · '+esc(lb.timeframe)+' · '+esc(lb.source)+
-      ' · bar date '+esc(String(lb.asOf))+' · compared '+lb.compared+' strategies ('+lb.savedPineStrategies+' saved Pine) · ran '+esc(lb.runAt)+
+      ' · bar date '+esc(readableBarDate(lb.asOf))+' · compared '+lb.compared+' strategies ('+
+      (lb.builtInExamples||0)+' built-in examples, '+lb.savedPineStrategies+' saved Pine) · ran '+esc(lb.runAt)+
       ' · same capital, allocation, side, costs and stop/target assumptions for all strategies.'+(note?' '+note:'')+'</div>';
     const cells=order.map((row,index)=>{
       const best=row.id===lb.bestId,m=row.metrics;
       return '<tr data-leaderboard-id="'+esc(row.id)+'" class="'+(best?'leaderboard-best':'')+'"><td><span class="leaderboard-rank">'+(index+1)+'.</span> '+
-        esc(row.name)+(best?' <strong class="best-note">Best Sharpe</strong>':'')+'</td>'+
+        esc(row.name)+(row.kind==='example-indicator'?' <small class="muted">Indicator · N/A</small>':'')+
+        (best?' <strong class="best-note">Best Sharpe</strong>':'')+'</td>'+
         '<td class="'+priceColor(m.returnPct)+'">'+pct(m.returnPct)+'</td>'+
         '<td>'+pct(m.cagrPct)+'</td><td>'+format(m.sharpe,3)+'</td>'+
         '<td>'+pct(-m.maxDD)+'</td><td>'+pct(m.winPct)+'</td><td>'+format(m.trades,0)+'</td>'+
@@ -600,7 +604,7 @@ async function initApp(){
       button('Compare all strategies','compare-strategies','small')+
       (top?button('Load best into Backtester','load-best-strategy','primary'):'')+
       '</div></div><div class="panel-body">'+provenance+
-      (lb.skipped.length?'<div class="info-strip warning" role="status">'+lb.skipped.length+' saved scripts not compared: '+
+      (lb.skipped.length?'<div class="info-strip warning" role="status">'+lb.skipped.length+' scripts unavailable: '+
         lb.skipped.map(x=>esc(x.name)+': '+esc(x.reason)).join('; ')+'</div>':'')+
       '<div class="table-wrap"><table class="data-table leaderboard-table"><thead><tr>'+headers+'</tr></thead><tbody>'+cells+'</tbody></table></div>'+
       '<p class="section-note">Sorted by '+esc(definitions.find(x=>x[0]===S.leaderboardSort)?.[1]||'Sharpe')+
@@ -853,7 +857,7 @@ async function initApp(){
     evaluateLocalAlerts();S.tab='screener';render();
     notice('Demo scan complete: '+matches.length+' '+(matches.length===1?'match':'matches')+' across '+symbols.length+' symbols.');
   }
-  async function fetchLiveUniverse(){
+  async function fetchLiveUniverse(options={}){
     let base=S.apiBaseUrl.trim();while(base.endsWith('/'))base=base.slice(0,-1);
     if(!base.startsWith('https://'))throw new Error('Enter the Cloudflare Worker URL in Data Center first.');
     clearSavedScanView();S.scan={status:'loading',source:'ALPACA'};S.tab='screener';render();
@@ -872,8 +876,11 @@ async function initApp(){
     for(const [symbol,liveBars] of parsed){S.data.set(symbol,liveBars);S.sources.set(symbol,'ALPACA');loaded.push(symbol);}
     S.mode='live';S.liveFeed=payload.feed||'iex';
     const visible=loaded.filter(isVisibleSymbol);
-    if(!visible.includes(S.symbol))S.symbol=visible[0]||loaded[0];
-    restoreSymbolState(S.symbol);
+    const remembered=options.restoreSymbol||S.lastBacktestSymbol||S.lastLiveSymbol||S.symbol;
+    const target=loaded.includes(remembered)?remembered:
+      loaded.includes(S.lastLiveSymbol)?S.lastLiveSymbol:loaded.includes(S.symbol)?S.symbol:visible[0]||loaded[0];
+    S.preferredMode='live';
+    restoreSymbolState(target);
     const matched=visible.filter(symbol=>screenSymbol(S.data.get(symbol),S.rules).pass).length;
     const expected=payload.freshness?.expected||expectedNyseBarDate(new Date());
     const allBars=Object.fromEntries(LIVE_UNIVERSE.map(sym=>[sym,S.sources.get(sym)==='ALPACA'?S.data.get(sym):[]]));
@@ -882,13 +889,14 @@ async function initApp(){
       matched,missing:payload.missing||[],cached:response.headers.get('X-Scan-Cache')==='HIT',
       retry:payload.retry||null,at:new Date().toISOString()};
     evaluateScreenerSignals(true);
-    evaluateLocalAlerts();S.tab='screener';render();
+    evaluateLocalAlerts();S.tab=options.restoreTab||'screener';render();
     notice('Live scan complete: '+matched+' '+(matched===1?'match':'matches')+' across '+visible.length+' visible symbols ('+loaded.length+'/'+S.scan.requested+' returned).');
   }
-  async function switchToLive(){
-    try{await fetchLiveUniverse();}
+  async function switchToLive(options={}){
+    S.preferredMode='live';
+    try{await fetchLiveUniverse(options);}
     catch(err){
-      S.mode='demo';
+      S.mode='demo';S.preferredMode=options.restoreTab?'live':'demo';
       if(S.sources.get(S.symbol)==='ALPACA')S.symbol=S.lastDemoSymbol&&S.sources.get(S.lastDemoSymbol)!=='ALPACA'?S.lastDemoSymbol:'DEMO-SPY';
       S.scan={status:'fallback',source:'DEMO',error:err.message};
       S.result=null;S.sweep=null;S.tab='screener';render();
@@ -1034,7 +1042,7 @@ async function initApp(){
   function runComparison(){
     try{
       const history=bars();
-      const report=compareStrategies({symbol:S.symbol,bars:history,
+      const report=compareStrategies({symbol:S.symbol,bars:history,builtInExamples:PINE_EXAMPLES,
         options:{...S.bt,timeframe:S.chart.tf},source:S.sources.get(S.symbol)==='ALPACA'?
           'Alpaca '+String(S.liveFeed).toUpperCase()+' OHLCV':S.sources.get(S.symbol)==='SIMULATED'?
           'SIMULATED Demo OHLCV':'IMPORTED CSV OHLCV',
@@ -1107,12 +1115,12 @@ async function initApp(){
     'pine-delete':()=>{const id=S.scriptId;if(!id){notice('Load a saved script to delete it.');return;}if(!window.confirm('Delete this locally saved script?'))return;S.scriptLibrary=S.scriptLibrary.filter(x=>x.id!==id);persistPineLibrary();loadPineSource(PINE_EXAMPLES[0].code,'EMA crossover');},
     'pine-clear-plots':()=>{S.activeIndicators=[];S.scriptOutput='Removed all custom indicator plots from Chart Lab.';render();},
     import:()=>$('#csv-file')?.click(),
-    'mode-demo':()=>{clearSavedScanView();S.mode='demo';if(S.sources.get(S.symbol)==='ALPACA')S.symbol=S.lastDemoSymbol&&S.sources.get(S.lastDemoSymbol)!=='ALPACA'?S.lastDemoSymbol:'DEMO-SPY';restoreSymbolState(S.symbol);S.scan={status:'idle'};render();},
-    'mode-live':()=>switchToLive(),
+    'mode-demo':()=>{clearSavedScanView();S.mode='demo';S.preferredMode='demo';if(S.sources.get(S.symbol)==='ALPACA')S.symbol=S.lastDemoSymbol&&S.sources.get(S.lastDemoSymbol)!=='ALPACA'?S.lastDemoSymbol:'DEMO-SPY';restoreSymbolState(S.symbol);S.scan={status:'idle'};render();},
+    'mode-live':()=>switchToLive({restoreSymbol:S.lastLiveSymbol}),
     'scan-universe':()=>{clearSavedScanView();return S.mode==='live'?switchToLive():runDemoScan();},
     'test-live':()=>testLiveBackend().catch(err=>notice('Backend test failed: '+err.message)),
     'view-charts':()=>{S.tab='charts';render();},
-    'refresh-intraday':()=>{if(S.mode==='live')void loadLiveIntraday(S.symbol,true);
+    'refresh-intraday':()=>{if(S.mode==='live')void loadLiveIntraday(S.symbol,true).catch(()=>{});
       else notice('Only Alpaca Live mode can refresh real intraday bars.');},
     'view-backtest':()=>{S.tab='backtest';render();},
     'view-optimize':()=>{S.tab='optimize';render();},
@@ -1131,8 +1139,18 @@ async function initApp(){
     'draw-line':()=>{S.drawLine=!S.drawLine;render();},
     'clear-lines':()=>{S.chart.lines[S.symbol]=[];render();},
     'chart-png':()=>{if(!chart)return;try{const canvas=chart.takeScreenshot();canvas.toBlob(blob=>{if(!blob)return;const url=URL.createObjectURL(blob),a=document.createElement('a');a.href=url;a.download='market-lens-'+S.symbol+'.png';a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);});}catch{notice('Chart image export is unsupported in this browser.');}},
-    'run-backtest':()=>{if(S.portfolioMode){runPortfolioCurrent();return;}if(runBt())render();},
-    'compare-strategies':()=>{if(S.portfolioMode){notice('Switch to Single symbol mode to compare individual strategies.');return;}runComparison();},
+    'run-backtest':async ()=>{
+      if(S.portfolioMode){runPortfolioCurrent();return;}
+      S.lastBacktestSymbol=S.symbol;saveSettings();
+      if(!await ensureAnalysisBars('Backtest'))return;
+      if(runBt())render();
+    },
+    'compare-strategies':async ()=>{
+      if(S.portfolioMode){notice('Switch to Single symbol mode to compare individual strategies.');return;}
+      S.lastBacktestSymbol=S.symbol;saveSettings();
+      if(!await ensureAnalysisBars('Compare all strategies'))return;
+      runComparison();
+    },
     'load-best-strategy':()=>{const id=S.leaderboard?.bestId;if(id)loadComparisonStrategy(id);},
     'sort-leaderboard':el=>{
       const key=el.dataset.key;
@@ -1218,7 +1236,10 @@ async function initApp(){
       if(opt==='portfolio-watchlist'){S.portfolioWatchlistId=val;saveSettings();render();return;}
       if(opt==='saved-scan-select'){if(val)loadSavedScan(val);else{clearSavedScanView();render();}return;}
       if(opt==='preset'){if(val==='custom')return;clearSavedScanView();S.rules=(preset[val]||[]).map(x=>({...x}));S.universeFilter=val==='volatility'?'volatility':'all';S.scan={status:'idle'};}
-      else if(opt==='symbol'){restoreSymbolState(val);}
+      else if(opt==='symbol'){
+        restoreSymbolState(val);
+        if(['backtest','optimize'].includes(S.tab))S.lastBacktestSymbol=val;
+      }
       else if(opt==='tf'){S.chart.tf=val;S.result=null;S.sweep=null;}
       else if(opt==='style')S.chart.style=val;
       else if(opt==='log')S.chart.log=val==='true';
