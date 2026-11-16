@@ -22,8 +22,8 @@ import {restoreWatchlists,watchlistChange,validateAlert,checkAlerts,makeScanSnap
 import { LIVE_UNIVERSE, DEMO_UNIVERSE, VOLATILITY_UNIVERSE, LIVE_EQUITY_COUNT, LIVE_ETF_COUNT, LIVE_VOLATILITY_COUNT, ALPACA_BATCH_SIZE, ALPACA_SCAN_LOOKBACK_DAYS } from './universe.js';
 import {DEFAULT_ALPACA_WORKER,inspectLiveHistory,shouldTryDefaultWorker,liveScanUrl,canonicalWorkerBase}
   from './live-history.js';
-import {INDICATOR_SETTINGS,activeIndicatorReadings,updateChartField,updateIndicatorSetting,
-  nextFullscreenState,chartScaleOptions,resetPriceScale,macdSeries,bollingerSeries} from './chart-usability.js';
+import {INDICATOR_ORDER,activeIndicatorReadings,indicatorInputs,indicatorLabel,updateIndicatorSetting,
+  nextFullscreenState,chartScaleOptions,resetPriceScale,mountPriceAxisTouch,macdSeries,bollingerSeries} from './chart-usability.js';
 async function initApp(){
   const {
     parseCsv,normalizeBars,alpacaBars,aggregate,ema,sma,rsi,indicators,statsFor,screenSymbol,backtest,parameterSweep,sampleData,csvDownload,stamp
@@ -46,7 +46,7 @@ async function initApp(){
     volatility:[{metric:'rsi',tf:'D',op:'<',value:60},{metric:'drawdown',tf:'D',op:'<',value:-5},{metric:'emaDist',tf:'D',op:'<',value:0}],
     all:[]
   };
-  const defaultSettings={tf:'D',style:'candles',log:false,ema20:true,ema50:false,ema200:true,sma20:false,bollinger:false,volume:true,rsi:true,macd:false,rsiPeriod:14,bollPeriod:20,ema20Len:20,ema50Len:50,ema200Len:200,sma20Len:20,macdFast:12,macdSlow:26,macdSignal:9,lines:{}};
+  const defaultSettings={tf:'D',style:'candles',log:false,ema20:true,ema50:false,ema200:true,sma20:false,bollinger:false,volume:true,rsi:true,macd:false,rsiPeriod:14,bollPeriod:20,ema20Len:20,ema50Len:50,ema200Len:200,sma20Len:20,volumeHeight:17,macdFast:12,macdSlow:26,macdSignal:9,lines:{}};
   const defaultBacktest={strategy:'ema-cross',side:'long',borrowAnnualPct:0,fast:20,slow:100,rsiPeriod:14,buyLevel:30,sellLevel:65,period:20,multiplier:2,capital:10000,allocation:100,feeBps:1,slipBps:2,stopPct:0,targetPct:0};
   let saved={};try{saved=JSON.parse(localStorage.getItem('market-lens-pro-settings')||'{}')||{};}catch{}
   const startupPrefs=normalizeStartupPreferences(saved);
@@ -91,7 +91,7 @@ async function initApp(){
     symbolMemory:previousSymbolMemory,leaderboard:null,leaderboardSort:'sharpe',leaderboardDescending:true,
     leaderboardValidatedOnly:!!saved.leaderboardValidatedOnly,leaderboardError:'',fitReport:null,fitValidatedReport:null,fitValidatedOnly:!!saved.fitValidatedOnly,fitSort:'sharpe',fitDescending:true,fitStatus:'',fitError:'',
     briefing:null,briefingHistory:savedBriefings,briefingLoading:false,briefingError:'',drawLine:false,
-    chartFullscreen:false,indicatorEditor:null,pendingChartRange:null,fullscreenScrollY:0,
+    chartFullscreen:false,pendingChartRange:null,fullscreenScrollY:0,
     scriptCode:typeof draft.code==='string'?draft.code:PINE_EXAMPLES[0].code,
     scriptName:typeof draft.name==='string'?draft.name:'EMA crossover',
     scriptId:draft.id||null,
@@ -435,8 +435,10 @@ async function initApp(){
   const button=(label,action,variant='')=>'<button type="button" class="btn '+variant+'" data-action="'+action+'">'+label+'</button>';
   const select=(items,value,attr)=>'<select '+attr+'>'+items.map(([v,t])=>'<option value="'+esc(v)+'"'+(v===value?' selected':'')+'>'+esc(t)+'</option>').join('')+'</select>';
   const timeframes=[['D','1 Day · daily OHLCV'],['W','1 Week · daily aggregation'],['M','1 Month · daily aggregation'],['2H','2 Hours · requires 15m OHLCV'],['15m','15 Minutes · requires 15m OHLCV']];
-  const symbolSelect=()=>{
+  const symbolSelect=(compact=false)=>{
     const options=[...S.data.keys()].filter(modeSymbol).sort(),selected=options.includes(S.symbol)?S.symbol:options[0]||'';
+    if(compact)return '<input class="chart-symbol-search" type="search" data-input="symbol-search" aria-label="Find symbol" placeholder="Find symbol" value="'+esc(S.symbolQuery)+'"/>'+
+      select(options.map(symbol=>[symbol,symbol]),selected,'data-option="symbol" aria-label="Symbol"');
     return '<div class="symbol-picker"><label class="control">Find symbol <input type="search" class="symbol-search" data-input="symbol-search" aria-label="Find symbol" placeholder="Search all '+options.length+' loaded tickers" value="'+esc(S.symbolQuery)+'"/></label>'+
       '<label class="control">Symbol '+select(options.map(symbol=>[symbol,symbol]),selected,'data-option="symbol"')+'</label></div>';
   };
@@ -604,67 +606,109 @@ async function initApp(){
       document.querySelector('[data-action="chart-fullscreen"]')?.focus();
     }else document.querySelector('[data-action="chart-exit-fullscreen"]')?.focus();
   }
+  const chartIcon=path=>'<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.65" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">'+path+'</svg>';
+  const gearIcon=chartIcon('<circle cx="12" cy="12" r="3"/><path d="M9 3h6l.6 3 2.6 1.5 2.8-1 3 5-2.2 2.1v3L24 19l-3 5-2.8-1-2.6 1.5-.6 3H9l-.6-3-2.6-1.5-2.8 1-3-5 2.2-2.4v-3L0 11.5l3-5 2.8 1L8.4 6z" transform="translate(2 0) scale(.83)"/>');
+  const closeIcon=chartIcon('<path d="m6 6 12 12M6 18 18 6"/>');
+  const indicatorColors={ema20:'#e9bd68',ema50:'#71b8b3',ema200:'#d69c65',sma20:'#f7a75c',
+    bollinger:'#8fa9c7',volume:'#76b2a1',rsi:'#d69c65',macd:'#71b8b3'};
+  const volumeFormat=new Intl.NumberFormat('en-US',{notation:'compact',maximumFractionDigits:1});
   function chartIndicatorLegend(b){
-    const rows=activeIndicatorReadings(b,S.chart);
-    const num=n=>format(n,2);
-    return '<div class="chart-indicator-legend" id="chart-indicator-legend" role="group" aria-label="Active chart indicators">'+
-      '<div class="chart-indicator-legend-title">Active indicators</div>'+
-      (rows.length?rows.map(row=>{
-        const spec=INDICATOR_SETTINGS[row.key],editing=S.indicatorEditor===row.key;
-        const details=row.key==='bollinger'?' · U '+num(row.details[0])+' · L '+num(row.details[1]):
-          row.key==='macd'?' · Signal '+num(row.details[0]):'';
-        const fields=spec.periods.map(([field,label,min,max])=>
-          '<label class="chart-indicator-param" for="chart-indicator-'+esc(field)+'">'+esc(label)+
-          '<input id="chart-indicator-'+esc(field)+'" type="number" min="'+min+'" max="'+max+
-          '" step="1" data-indicator-key="'+esc(row.key)+'" data-indicator-field="'+esc(field)+
-          '" value="'+esc(S.chart[field])+'"/></label>').join('');
-        return '<div class="chart-indicator-row" data-indicator-row="'+esc(row.key)+'">'+
-          '<span class="chart-indicator-name">'+esc(row.label)+'</span>'+
-          '<span class="chart-indicator-value">'+num(row.value)+esc(details)+'</span>'+
-          '<button type="button" class="chart-indicator-gear" data-action="indicator-settings" '+
-          'data-indicator-key="'+esc(row.key)+'" aria-label="Settings for '+esc(row.label)+
-          '" aria-expanded="'+editing+'" aria-controls="indicator-settings-'+esc(row.key)+'">'+
-          '<span aria-hidden="true">⚙</span></button></div>'+
-          (editing?'<div class="chart-indicator-editor" id="indicator-settings-'+esc(row.key)+
-            '" aria-label="'+esc(row.label)+' settings">'+
-            '<label class="chart-indicator-visibility"><input type="checkbox" '+
-            'data-indicator-key="'+esc(row.key)+'" data-indicator-field="enabled" checked/> Show</label>'+
-            (fields||'<span class="chart-indicator-static">Raw volume · no period</span>')+
-            '<button type="button" class="chart-indicator-close" data-action="indicator-close" '+
-            'aria-label="Close '+esc(row.label)+' settings">Close</button></div>':'');
-      }).join(''):'<span class="chart-indicator-static">No active indicators. Use the toggles below.</span>')+
-    '</div>';
+    const readings=new Map(activeIndicatorReadings(b,S.chart).map(row=>[row.key,row]));
+    const rows=INDICATOR_ORDER.filter(key=>S.chart[key]).map(key=>{
+      const label=indicatorLabel(key,S.chart);
+      const value=readings.get(key)?.value;
+      const formatted=key==='volume'&&Number.isFinite(value)?volumeFormat.format(value):format(value);
+      return '<div class="chart-indicator-row" data-indicator-row="'+key+'" style="--indicator-color:'+indicatorColors[key]+'">'+
+        '<span class="chart-indicator-name">'+esc(label)+'</span>'+
+        '<span class="chart-indicator-value">'+formatted+'</span>'+
+        '<button type="button" class="chart-icon chart-indicator-gear" data-action="indicator-settings" data-indicator-key="'+key+
+        '" aria-label="Settings for '+esc(label)+'" title="Settings for '+esc(label)+'" aria-haspopup="dialog">'+gearIcon+'</button></div>';
+    }).join('');
+    return '<div class="chart-indicator-legend" id="chart-indicator-legend" role="group" aria-label="Active chart indicators">'+rows+'</div>';
+  }
+  function openIndicatorDialog(key){
+    const dialog=$('#chart-indicator-dialog');
+    if(!dialog||dialog.open)return;
+    const title=key?indicatorLabel(key,S.chart)+' settings':'New indicator';
+    const header='<div class="chart-dialog-header"><h2 id="chart-dialog-title">'+esc(title)+'</h2>'+
+      '<button type="button" class="chart-icon" data-action="indicator-close" aria-label="Close">'+closeIcon+'</button></div>';
+    if(key){
+      const inputs=indicatorInputs(key).map(([field,label,min,max])=>
+        '<label for="chart-indicator-'+field+'">'+esc(label)+
+        '<input id="chart-indicator-'+field+'" type="number" name="'+field+'" data-indicator-field="'+field+'" min="'+min+
+        '" max="'+max+'" step="1" required value="'+esc(S.chart[field])+'"/></label>').join('');
+      dialog.innerHTML=header+'<form id="indicator-settings-'+key+'" data-indicator-key="'+key+'">'+
+        '<div class="chart-indicator-fields">'+inputs+'</div><div class="chart-dialog-actions">'+
+        '<button type="button" class="chart-remove-indicator" data-action="indicator-remove" data-indicator-key="'+key+'">Remove</button>'+
+        '<button type="submit" class="chart-dialog-apply">Apply</button></div></form>';
+    }else{
+      const choices=INDICATOR_ORDER.filter(id=>!S.chart[id]).map(id=>
+        '<button type="button" data-action="indicator-add" data-indicator-key="'+id+'" style="--indicator-color:'+indicatorColors[id]+'">'+
+        '<span>'+esc(indicatorLabel(id,S.chart))+'</span><span aria-hidden="true">+</span></button>').join('');
+      dialog.innerHTML=header+'<div class="chart-indicator-choices">'+(choices||'<p>All available indicators are on the chart.</p>')+'</div>';
+    }
+    dialog.showModal();
+  }
+  function applyIndicatorChange(key,changes){
+    $('#chart-indicator-dialog')?.close();
+    preserveChartViewport();
+    S.chart=changes;
+    render();
+    const target=S.chart[key]?'[data-action="indicator-settings"][data-indicator-key="'+key+'"]':'[data-action="indicator-picker"]';
+    $(target)?.focus({preventScroll:true});
+  }
+  function chartReadout(bar,time=bar?.time){
+    if(!bar)return '';
+    const close=bar.close??bar.value;
+    const valueClass=close>=bar.open?'up':'down';
+    return '<time>'+esc(dateLabel(time))+'</time>'+[['O',bar.open],['H',bar.high],['L',bar.low],['C',close]]
+      .filter(([,value])=>Number.isFinite(value)).map(([label,value])=>'<span>'+label+' <b class="'+valueClass+'">'+format(value)+'</b></span>').join('');
   }
   function chartControls(){
-    const styles=[['candles','Candlesticks'],['bars','OHLC bars'],['line','Line'],['area','Area']];
-    const box=(k,label)=>'<label><input type="checkbox" data-chart="'+k+'" '+(S.chart[k]?'checked':'')+'/>'+label+'</label>';
-    return '<div class="chart-toolbar">'+symbolSelect()+tfSelect()+'<label class="control">Style '+select(styles,S.chart.style,'data-option="style"')+'</label><label class="control">Scale '+select([['false','Linear'],['true','Log']],String(S.chart.log),'data-option="log"')+'</label><div class="flex chart-actions">'+button('1M','range-1m','small')+button('3M','range-3m','small')+button('1Y','range-1y','small')+button('Show all bars','range-all','small')+button('Fit chart','range-fit','small')+button('Reset scale','reset-price-scale','small')+button(S.chartFullscreen?'Exit fullscreen':'Fullscreen',S.chartFullscreen?'chart-exit-fullscreen':'chart-fullscreen','small primary')+'</div></div><div class="chart-readout" id="readout">Move over the chart to inspect OHLCV and indicators.</div><div class="chart-area" id="price-chart"></div><div class="chart-footer"><div class="indicator-options">'+box('ema20','EMA 20')+box('ema50','EMA 50')+box('ema200','EMA 200')+box('sma20','SMA 20')+box('bollinger','Bollinger')+box('volume','Volume')+box('rsi','RSI')+box('macd','MACD')+'<label>EMA A <input type="number" data-chart="ema20Len" min="2" max="500" value="'+S.chart.ema20Len+'"/></label><label>EMA B <input type="number" data-chart="ema50Len" min="2" max="500" value="'+S.chart.ema50Len+'"/></label><label>EMA C <input type="number" data-chart="ema200Len" min="2" max="500" value="'+S.chart.ema200Len+'"/></label><label>SMA <input type="number" data-chart="sma20Len" min="2" max="500" value="'+S.chart.sma20Len+'"/></label><label>Boll <input type="number" data-chart="bollPeriod" min="2" max="500" value="'+S.chart.bollPeriod+'"/></label><label>RSI period <input type="number" data-chart="rsiPeriod" min="2" max="100" value="'+S.chart.rsiPeriod+'"/></label></div><div class="flex">'+button(S.drawLine?'Click price to draw…':'Horizontal line','draw-line',S.drawLine?'selected small':'small')+button('Clear price levels','clear-lines','small')+button('Export PNG','chart-png','small')+'</div></div>';
+    const styles=[['candles','Candles'],['bars','Bars'],['line','Line'],['area','Area']];
+    const frames=timeframes.map(([id])=>[id,id.length===1?'1'+id:id]);
+    const fullscreenLabel=S.chartFullscreen?'Exit fullscreen':'Fullscreen';
+    const fullscreenIcon=S.chartFullscreen?
+      chartIcon('<path d="M4 9h5V4m6 0v5h5m0 6h-5v5m-6 0v-5H4"/>'):
+      chartIcon('<path d="M9 4H4v5m11-5h5v5m0 6v5h-5m-6 0H4v-5"/>');
+    return '<div class="chart-toolbar"><div class="chart-toolbar-symbol">'+symbolSelect(true)+
+      select(frames,S.chart.tf,'data-option="tf" aria-label="Timeframe"')+
+      select(styles,S.chart.style,'data-option="style" aria-label="Chart style"')+
+      '</div><div class="chart-toolbar-actions">'+
+      '<button type="button" class="chart-add-indicator" data-action="indicator-picker" aria-haspopup="dialog"><span aria-hidden="true">+</span> New indicator</button>'+
+      select([['false','Linear'],['true','Log']],String(S.chart.log),'data-option="log" aria-label="Price scale"')+
+      '<button type="button" data-action="reset-price-scale" title="Reset price scale" aria-label="Reset price scale">Auto</button>'+
+      '<button type="button" class="chart-icon" data-action="'+(S.chartFullscreen?'chart-exit-fullscreen':'chart-fullscreen')+
+      '" aria-label="'+fullscreenLabel+'" title="'+fullscreenLabel+'">'+fullscreenIcon+'</button>'+
+      '<details class="chart-tools"><summary class="chart-icon" aria-label="Chart tools" title="Chart tools">'+
+      chartIcon('<circle cx="5" cy="12" r="1"/><circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/>')+
+      '</summary><div class="chart-tools-menu">'+
+      button(S.drawLine?'Cancel price line':'Horizontal line','draw-line','small')+
+      button('Clear price levels','clear-lines','small')+button('Export PNG','chart-png','small')+'</div></details></div></div>';
   }
   function chartsView(){
     const b=bars(),source=S.sources.get(S.symbol);
-    const intro=S.chartFullscreen?'':head('Chart Lab','Drag to pan, wheel/pinch to zoom. Daily charts use Alpaca 1Day bars; 15m and 2H require real 15Min bars.',button('Backtest this symbol','view-backtest','primary'));
+    const intro=S.chartFullscreen?'':'<div class="headrow chart-page-heading"><h1>Chart Lab</h1>'+
+      button('Backtest this symbol','view-backtest','small')+'</div>';
     const stale=!S.chartFullscreen&&staleReason(S.symbol)?
       '<div class="info-strip warning" id="chart-stale-warning" role="status">'+
       '<strong>'+esc(S.symbol)+' daily bars lag the observed universe reference '+esc(S.freshness.expected)+'</strong>'+
       staleNote(S.symbol)+'</div>':'';
-    const chartMarkup=chartControls().replace(
-      '<div class="chart-area" id="price-chart"></div>',
-      '<div class="chart-stage" id="chart-stage">'+
-      '<div class="chart-axis-hint" id="chart-axis-hint">Drag the price scale to rescale · double-click the axis to reset</div>'+
-      '<div class="chart-area" id="price-chart"></div>'+
-      chartIndicatorLegend(b)+'</div>');
     const panel='<div class="panel '+(S.chartFullscreen?'chart-is-fullscreen':'')+
-      '" id="chart-lab-panel" data-fullscreen="'+S.chartFullscreen+'">'+
-      chartMarkup+'<div class="chart-intraday-control">'+
-      (intradayTf(S.chart.tf)?button('Refresh Alpaca 15m candles','refresh-intraday','small'):'')+
-      '</div></div>';
-    const footer=S.chartFullscreen?'':'<div class="info-strip">Data: <strong>'+
-      esc(S.symbol)+'</strong> · '+
-      (source==='SIMULATED'?'simulated':source==='ALPACA'?'Alpaca '+String(S.liveFeed).toUpperCase():'imported')+
-      ' · '+b.length+' '+S.chart.tf+
-      ' bars. Price scaling, crosshair, volume, indicator panes, and annotations are interactive. Charts use TradingView Lightweight Charts, not the full TradingView platform.</div>';
+      '" id="chart-lab-panel" data-fullscreen="'+S.chartFullscreen+'">'+chartControls()+
+      '<div class="chart-readout" id="readout">'+chartReadout(b.at(-1))+'</div>'+
+      '<div class="chart-stage" id="chart-stage"><div class="chart-area" id="price-chart"></div>'+
+      chartIndicatorLegend(b)+'</div><div class="chart-ranges" aria-label="Chart range" role="group">'+
+      button('1M','range-1m','small')+button('3M','range-3m','small')+button('1Y','range-1y','small')+
+      button('All','range-all','small')+button('Fit','range-fit','small')+
+      (intradayTf(S.chart.tf)?button('Refresh 15m bars','refresh-intraday','small chart-refresh'):'')+
+      '<span class="visually-hidden" id="chart-axis-hint" role="status"></span></div>'+
+      '<dialog id="chart-indicator-dialog" class="chart-dialog" aria-labelledby="chart-dialog-title"></dialog></div>';
+    const footer=S.chartFullscreen?'':'<p class="chart-data">'+esc(S.symbol)+' · '+
+      (source==='SIMULATED'?'Simulated':source==='ALPACA'?'Alpaca '+esc(String(S.liveFeed).toUpperCase()):'Imported')+
+      ' · '+b.length+' '+esc(S.chart.tf)+' bars</p>';
     return intro+stale+panel+(S.chartFullscreen?'':'<div id="pine-chart-error" role="alert"></div>')+
-      (S.chartFullscreen?'':sourceStrip())+footer;
+      footer+(S.chartFullscreen?'':sourceStrip());
   }
   function btOptions(){
     if(S.bt.strategy==='pine-custom'){
@@ -1152,6 +1196,7 @@ async function initApp(){
       el.innerHTML='<div class="empty"><strong>'+ (state?.status==='loading'?'Loading real Alpaca intraday bars':state?.status==='error'?'Live intraday unavailable':'No genuine '+esc(S.chart.tf)+' bars available')+
         '</strong>'+esc(state?.error||'Select a daily timeframe or import timestamped intraday OHLCV. We do not simulate market data.')+'</div>';return;}
     chart=newChart(el);
+    mountPriceAxisTouch(el,chart);
     const baseOptions={priceLineVisible:false,lastValueVisible:true};
     const type=S.chart.style==='line'?LineSeries:S.chart.style==='area'?AreaSeries:S.chart.style==='bars'?BarSeries:CandlestickSeries;
     const style=S.chart.style==='candles'?{upColor:colors.up,downColor:colors.down,borderVisible:false,wickUpColor:colors.up,wickDownColor:colors.down}:S.chart.style==='bars'?{upColor:colors.up,downColor:colors.down}:{color:colors.blue,lineColor:colors.blue,topColor:'#278cb263',bottomColor:'#278cb200',lineWidth:2};
@@ -1161,30 +1206,29 @@ async function initApp(){
     const c=b.map(x=>x.close);
     for(const [name,vals,color] of [['ema20',ema(c,S.chart.ema20Len),colors.yellow],['ema50',ema(c,S.chart.ema50Len),colors.blue],['ema200',ema(c,S.chart.ema200Len),colors.indicator],['sma20',sma(c,S.chart.sma20Len),'#f7a75c']]){
       if(!S.chart[name])continue;
-      const series=chart.addSeries(LineSeries,{color,lineWidth:2,priceLineVisible:false,lastValueVisible:true,title:name.toUpperCase()+'('+S.chart[name+'Len']+')'});
+      const series=chart.addSeries(LineSeries,{color,lineWidth:1,priceLineVisible:false,lastValueVisible:true});
       series.setData(vals.flatMap((v,i)=>v==null?[]:[{time:b[i].time,value:v}]));
     }
     if(S.chart.bollinger){
       const bb=bollingerSeries(c,S.chart.bollPeriod);
-      for(const direction of [-1,1]){const ln=chart.addSeries(LineSeries,{color:'#758ead',lineWidth:1,priceLineVisible:false,title:direction>0?'Upper BB':'Lower BB'});
+      for(const direction of [-1,1]){const ln=chart.addSeries(LineSeries,{color:indicatorColors.bollinger,lineWidth:1,priceLineVisible:false});
         const values=direction>0?bb.upper:bb.lower;
         ln.setData(values.flatMap((v,i)=>v==null?[]:[{time:b[i].time,value:v}]));}
     }
-    if(S.chart.volume){const vol=chart.addSeries(HistogramSeries,{priceScaleId:'volume',priceLineVisible:false,lastValueVisible:false,priceFormat:{type:'volume'}});vol.setData(b.map(x=>({time:x.time,value:x.volume||0,color:x.close>=x.open?'#317c6c88':'#8a3c5388'})));vol.priceScale().applyOptions({scaleMargins:{top:.83,bottom:0}});}
+    if(S.chart.volume){const vol=chart.addSeries(HistogramSeries,{priceScaleId:'volume',priceLineVisible:false,lastValueVisible:false,priceFormat:{type:'volume'}});vol.setData(b.map(x=>({time:x.time,value:x.volume||0,color:x.close>=x.open?'#317c6c88':'#8a3c5388'})));vol.priceScale().applyOptions({scaleMargins:{top:1-S.chart.volumeHeight/100,bottom:0}});}
     let pane=1;
     if(S.chart.rsi){
-      const rs=chart.addSeries(LineSeries,{color:colors.indicator,lineWidth:2,priceLineVisible:false,title:'RSI('+S.chart.rsiPeriod+')'},pane++);
+      const rs=chart.addSeries(LineSeries,{color:colors.indicator,lineWidth:1,priceLineVisible:false},pane++);
       rs.setData(rsi(c,S.chart.rsiPeriod).flatMap((v,i)=>v==null?[]:[{time:b[i].time,value:v}]));
       for(const v of [30,50,70])rs.createPriceLine({price:v,color:v===50?'#536980':'#9c6a70',lineWidth:1,lineStyle:2,axisLabelVisible:false});
     }
     if(S.chart.macd){
-      const m=chart.addSeries(LineSeries,{color:colors.blue,lineWidth:2,priceLineVisible:false,title:'MACD'},pane);
-      const sig=chart.addSeries(LineSeries,{color:colors.yellow,lineWidth:1,priceLineVisible:false,title:'Signal'},pane);
+      const m=chart.addSeries(LineSeries,{color:colors.blue,lineWidth:1,priceLineVisible:false},pane);
+      const sig=chart.addSeries(LineSeries,{color:colors.yellow,lineWidth:1,priceLineVisible:false},pane);
       const macdValues=macdSeries(c,S.chart);
       m.setData(macdValues.macd.flatMap((v,i)=>v==null?[]:[{time:b[i].time,value:v}]));
       sig.setData(macdValues.signal.flatMap((v,i)=>v==null?[]:[{time:b[i].time,value:v}]));
     }
-    if(pane>1){try{chart.panes()[0].setHeight(S.chart.macd?310:360);}catch{}}
     if(S.chart.log)base.priceScale().applyOptions({mode:PriceScaleMode.Logarithmic});
     for(const p of S.chart.lines[S.symbol]||[])base.createPriceLine({price:p,color:'#e4b766',lineWidth:1,lineStyle:2,axisLabelVisible:true,title:'Level'});
     const pineMarkers=[];
@@ -1219,13 +1263,17 @@ async function initApp(){
         else pineMarkers.push(...scriptMarkers);
       }catch(error){pineErrors.push((item.name||'Custom script')+': '+error.message);}
     }
+    const panes=chart.panes();
+    if(panes.length>1)panes[0].setStretchFactor(3);
     if(pineMarkers.length)createSeriesMarkers(base,pineMarkers.sort((a,b)=>stamp(a.time)-stamp(b.time)));
     const errorBox=$('#pine-chart-error');
     if(errorBox&&pineErrors.length){errorBox.className='pine-error';errorBox.textContent=pineErrors.join(' | ');}
 
     chart.subscribeClick(param=>{if(!S.drawLine||!param.point)return;const p=base.coordinateToPrice(param.point.y);if(p==null||!Number.isFinite(p))return;const price=Number(p.toFixed(4));(S.chart.lines[S.symbol]??=[]).push(price);base.createPriceLine({price,color:'#e4b766',lineWidth:1,lineStyle:2,axisLabelVisible:true,title:'Level'});S.drawLine=false;saveSettings();notice('Added horizontal price level at '+format(price,4));});
-    chart.subscribeCrosshairMove(param=>{const d=param.seriesData.get(base),el=$('#readout');if(!el||!d)return;const v=('close' in d?d.close:d.value),o='open'in d?d.open:null;
-      el.innerHTML='<b>'+dateLabel(param.time||b.at(-1).time)+'</b><span>Open '+format(o)+'</span><span>High '+format('high' in d?d.high:null)+'</span><span>Low '+format('low' in d?d.low:null)+'</span><span>Close <b>'+format(v)+'</b></span>';});
+    chart.subscribeCrosshairMove(param=>{
+      const readout=$('#readout');
+      if(readout)readout.innerHTML=chartReadout(param.seriesData.get(base)||b.at(-1),param.time||b.at(-1).time);
+    });
     showRange(180);
     if(S.pendingChartRange){
       try{chart.timeScale().setVisibleLogicalRange(S.pendingChartRange);}catch{}
@@ -1752,28 +1800,23 @@ async function initApp(){
     'range-all':()=>showRange(0),
     'range-fit':()=>showRange(180),
     'reset-price-scale':()=>{
-      if(resetPriceScale(chart)){
-        const hint=$('#chart-axis-hint');
-        if(hint)hint.textContent='Price scale reset · drag the price scale to rescale';
-      }
+      if(resetPriceScale(chart))$('#chart-axis-hint').textContent='Price scale reset';
     },
     'chart-fullscreen':()=>setChartFullscreen(true),
     'chart-exit-fullscreen':()=>setChartFullscreen(false),
-    'indicator-settings':el=>{
-      preserveChartViewport();
-      S.indicatorEditor=S.indicatorEditor===el.dataset.indicatorKey?null:el.dataset.indicatorKey;
-      render();
-      const current=S.indicatorEditor;
-      if(current)document.querySelector('#indicator-settings-'+current+' input')?.focus();
-      else document.querySelector('[data-action="indicator-settings"][data-indicator-key="'+el.dataset.indicatorKey+'"]')?.focus();
+    'indicator-picker':()=>openIndicatorDialog(),
+    'indicator-settings':el=>openIndicatorDialog(el.dataset.indicatorKey),
+    'indicator-close':()=>$('#chart-indicator-dialog')?.close(),
+    'indicator-add':el=>{
+      const key=el.dataset.indicatorKey;
+      applyIndicatorChange(key,updateIndicatorSetting(S.chart,key,'enabled',true));
     },
-    'indicator-close':()=>{
-      const id=S.indicatorEditor;
-      preserveChartViewport();S.indicatorEditor=null;render();
-      if(id)document.querySelector('[data-action="indicator-settings"][data-indicator-key="'+id+'"]')?.focus();
+    'indicator-remove':el=>{
+      const key=el.dataset.indicatorKey;
+      applyIndicatorChange(key,updateIndicatorSetting(S.chart,key,'enabled',false));
     },
-    'draw-line':()=>{S.drawLine=!S.drawLine;render();},
-    'clear-lines':()=>{S.chart.lines[S.symbol]=[];render();},
+    'draw-line':()=>{S.drawLine=!S.drawLine;preserveChartViewport();render();},
+    'clear-lines':()=>{S.chart.lines[S.symbol]=[];preserveChartViewport();render();},
     'chart-png':()=>{if(!chart)return;try{const canvas=chart.takeScreenshot();canvas.toBlob(blob=>{if(!blob)return;const url=URL.createObjectURL(blob),a=document.createElement('a');a.href=url;a.download='market-lens-'+S.symbol+'.png';a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);});}catch{notice('Chart image export is unsupported in this browser.');}},
     'run-backtest':async ()=>{
       if(S.portfolioMode){if(S.bestFitMode)void runBestFitCurrent();else runPortfolioCurrent();return;}
@@ -1869,24 +1912,29 @@ async function initApp(){
           catch(error){S.briefingError=String(error.message||error);}
         render();return;
       }
-      const handler=action[btn.dataset.action];if(handler){ev.stopPropagation();handler(btn);return;}
+      const handler=action[btn.dataset.action];
+      if(handler){ev.stopPropagation();btn.closest('.chart-tools')?.removeAttribute('open');handler(btn);return;}
     }
     const row=ev.target.closest('tr[data-symbol]');if(row){restoreSymbolState(row.dataset.symbol);S.tab='charts';render();}
     if(ev.target.closest('#dropzone'))$('#csv-file')?.click();
+  });
+  document.addEventListener('submit',ev=>{
+    const form=ev.target;
+    if(!form.closest('#chart-indicator-dialog'))return;
+    ev.preventDefault();
+    const key=form.dataset.indicatorKey;
+    let changes=S.chart;
+    for(const [field,value] of new FormData(form))changes=updateIndicatorSetting(changes,key,field,value);
+    applyIndicatorChange(key,changes);
   });
   document.addEventListener('keydown',ev=>{
     const row=ev.target.closest('tr[data-symbol]');
     if(row&&(ev.key==='Enter'||ev.key===' ')&&!ev.target.closest('button,input,select')){
       ev.preventDefault();restoreSymbolState(row.dataset.symbol);S.tab='charts';render();
     }
+    if(ev.key==='Escape'&&$('#chart-indicator-dialog')?.open)return;
     if(ev.key==='Escape'&&S.chartFullscreen&&S.tab==='charts'){
       ev.preventDefault();setChartFullscreen(false);return;
-    }
-    if(ev.key==='Escape'&&S.indicatorEditor){
-      const key=S.indicatorEditor;
-      preserveChartViewport();S.indicatorEditor=null;render();
-      document.querySelector('[data-action="indicator-settings"][data-indicator-key="'+key+'"]')?.focus();
-      return;
     }
     if(ev.key==='Escape'&&S.drawLine){S.drawLine=false;render();}
   });
@@ -1954,17 +2002,6 @@ async function initApp(){
       render();return;
     }
     if(el.dataset.rule!==undefined){clearSavedScanView();const r=S.rules[Number(el.dataset.rule)];if(r){r[el.dataset.key]=el.dataset.key==='value'?Number(el.value):el.value;render();}return;}
-    if(el.dataset.indicatorKey&&el.dataset.indicatorField){
-      const key=el.dataset.indicatorKey,field=el.dataset.indicatorField;
-      S.chart=updateIndicatorSetting(S.chart,key,field,el.type==='checkbox'?el.checked:el.value);
-      if(field==='enabled'&&!S.chart[key])S.indicatorEditor=null;
-      preserveChartViewport();saveSettings();render();return;
-    }
-    if(el.dataset.chart){
-      preserveChartViewport();
-      S.chart=updateChartField(S.chart,el.dataset.chart,el.type==='checkbox'?el.checked:el.value);
-      saveSettings();render();return;
-    }
     if(el.dataset.btRange){
       S.btRange={...S.btRange,[el.dataset.btRange]:el.value};
       S.backtestError='';S.portfolioError='';saveSettings();

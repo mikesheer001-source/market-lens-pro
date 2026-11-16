@@ -39,7 +39,7 @@ test('Round 20: desktop fullscreen covers viewport, keeps symbol, returns to pri
   expect(errors).toEqual([]);
 });
 
-test('Round 20: on-chart EMA settings gear updates original footer, live label and persists on reload',async ({page})=>{
+test('Chart Lab adds and removes indicators and persists their independent settings',async ({page})=>{
   const errors=[];page.on('pageerror',e=>errors.push(e.message));
   await page.goto('./');
   await page.locator('.sidebar [data-tab="charts"]').click();
@@ -52,30 +52,31 @@ test('Round 20: on-chart EMA settings gear updates original footer, live label a
   await expect(page.getByRole('button',{name:'Settings for EMA 20',exact:true})).toBeVisible();
   await page.getByRole('button',{name:'Settings for EMA 20',exact:true}).click();
   await expect(page.locator('#indicator-settings-ema20')).toBeVisible();
-  await expect(page.locator('#indicator-settings-ema20 input[type="checkbox"]')).toBeChecked();
+  await expect(page.locator('.indicator-options')).toHaveCount(0);
   const period=page.locator('[data-indicator-field="ema20Len"]');
   await period.fill('34');
-  await period.press('Tab');
-  await expect(page.locator('[data-chart="ema20Len"]')).toHaveValue('34');
+  await page.getByRole('button',{name:'Apply',exact:true}).click();
   await expect(page.locator('[data-indicator-row="ema20"]')).toContainText('EMA 34');
-  await expect(page.getByRole('button',{name:'Settings for EMA 34',exact:true})).toBeVisible();
-  // The legend and old controls use one state, including visibility.
-  await page.locator('#indicator-settings-ema20 input[type="checkbox"]').click();
+  await expect(page.locator('[data-indicator-row="ema200"]')).toContainText('EMA 200');
+
+  await page.getByRole('button',{name:'Settings for EMA 34',exact:true}).click();
+  await page.getByRole('button',{name:'Remove',exact:true}).click();
   await expect(page.locator('[data-indicator-row="ema20"]')).toHaveCount(0);
-  await expect(page.locator('[data-chart="ema20"]')).not.toBeChecked();
-  await page.locator('[data-chart="ema20"]').check();
+  const picker=page.getByRole('button',{name:'New indicator',exact:true});
+  await picker.click();
+  await page.getByRole('button',{name:'EMA 34',exact:true}).click();
   await expect(page.locator('[data-indicator-row="ema20"]')).toContainText('EMA 34');
-  // MACD's editable periods affect both actual plots and readout.
-  await page.locator('[data-chart="macd"]').check();
+
+  await picker.click();
+  await page.getByRole('button',{name:'MACD 12/26/9',exact:true}).click();
   await expect(page.locator('[data-indicator-row="macd"]')).toContainText('MACD 12/26/9');
   await page.getByRole('button',{name:'Settings for MACD 12/26/9'}).click();
   await page.locator('[data-indicator-field="macdFast"]').fill('8');
-  await page.locator('[data-indicator-field="macdFast"]').press('Tab');
+  await page.getByRole('button',{name:'Apply',exact:true}).click();
   await expect(page.locator('[data-indicator-row="macd"]')).toContainText('MACD 8/26/9');
   await expect(page.locator('#price-chart canvas').first()).toBeVisible();
   await page.reload();
   await page.locator('.sidebar [data-tab="charts"]').click();
-  await expect(page.locator('[data-chart="ema20Len"]')).toHaveValue('34');
   await expect(page.locator('[data-indicator-row="ema20"]')).toContainText('EMA 34');
   await expect(page.locator('[data-indicator-row="macd"]')).toContainText('MACD 8/26/9');
   await expect(page.locator('#price-chart canvas').first()).toBeVisible();
@@ -86,7 +87,6 @@ test('Round 20: right price-axis dragging and reset remain functional without ch
   const errors=[];page.on('pageerror',e=>errors.push(e.message));
   await page.goto('./');
   await page.locator('.sidebar [data-tab="charts"]').click();
-  await expect(page.locator('#chart-axis-hint')).toContainText('Drag the price scale to rescale');
   await expect(page.locator('#price-chart canvas').first()).toBeVisible();
   const box=await page.locator('#price-chart').boundingBox();
   const x=box.x+box.width-12,y=box.y+box.height*.48;
@@ -99,6 +99,33 @@ test('Round 20: right price-axis dragging and reset remain functional without ch
   await expect(page.locator('#price-chart canvas').first()).toBeVisible();
   await expect(page.locator('[data-action="range-all"]')).toBeVisible();
   expect(errors).toEqual([]);
+});
+
+test.describe('mobile price-axis gestures',()=>{
+  test.use({viewport:{width:390,height:844},hasTouch:true,isMobile:true});
+
+  test('mobile touch drag changes the right price-axis scale and Auto restores it',async ({page,browserName})=>{
+    test.skip(browserName!=='chromium','Touch input uses Chromium DevTools');
+    await page.goto('./');
+    await page.locator('.mobile-nav [data-tab="charts"]').click();
+    await page.getByRole('button',{name:'Fullscreen',exact:true}).click();
+    const axis=page.locator('#price-chart tr:first-child > td:last-child canvas').first();
+    await expect(axis).toBeVisible();
+    const before=await axis.screenshot();
+    const box=await axis.boundingBox();
+    const x=Math.round(box.x+box.width/2),y=Math.round(box.y+box.height/2);
+    const cdp=await page.context().newCDPSession(page);
+    try{
+      await cdp.send('Input.dispatchTouchEvent',{type:'touchStart',touchPoints:[{x,y}]});
+      for(let offset=12;offset<=84;offset+=12){
+        await cdp.send('Input.dispatchTouchEvent',{type:'touchMove',touchPoints:[{x,y:y-offset}]});
+      }
+      await cdp.send('Input.dispatchTouchEvent',{type:'touchEnd',touchPoints:[]});
+      await expect.poll(async()=>(await axis.screenshot()).equals(before)).toBe(false);
+      await page.getByRole('button',{name:'Reset price scale',exact:true}).click();
+      await expect.poll(async()=>(await axis.screenshot()).equals(before)).toBe(true);
+    }finally{await cdp.detach();}
+  });
 });
 
 test('Round 20: mobile fullscreen fills small viewport while indicator gear and exit remain usable',async ({page})=>{
@@ -120,7 +147,7 @@ test('Round 20: mobile fullscreen fills small viewport while indicator gear and 
   await page.getByRole('button',{name:'Settings for EMA 20',exact:true}).click();
   await expect(page.locator('#indicator-settings-ema20')).toBeVisible();
   await page.locator('[data-indicator-field="ema20Len"]').fill('28');
-  await page.locator('[data-indicator-field="ema20Len"]').press('Tab');
+  await page.getByRole('button',{name:'Apply',exact:true}).click();
   await expect(page.locator('[data-indicator-row="ema20"]')).toContainText('EMA 28');
   await expect(page.getByRole('button',{name:'Exit fullscreen'})).toBeVisible();
   await page.locator('[data-action="chart-exit-fullscreen"]').click();

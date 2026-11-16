@@ -186,8 +186,8 @@ test('published Round 20 fullscreen Chart Lab, indicator gear, and right-axis re
   await page.getByRole('button',{name:'Settings for EMA 20',exact:true}).click();
   await expect(page.locator('#indicator-settings-ema20')).toBeVisible();
   await page.locator('[data-indicator-field="ema20Len"]').fill('32');
-  await page.locator('[data-indicator-field="ema20Len"]').press('Tab');
-  await expect(page.locator('[data-chart="ema20Len"]')).toHaveValue('32');
+  await page.getByRole('button',{name:'Apply',exact:true}).click();
+  await expect(page.getByRole('button',{name:'New indicator',exact:true})).toBeVisible();
   await expect(page.locator('[data-indicator-row="ema20"]')).toContainText('EMA 32');
   await page.locator('[data-action="reset-price-scale"]').click();
   await expect(page.locator('#chart-axis-hint')).toContainText('Price scale reset');
