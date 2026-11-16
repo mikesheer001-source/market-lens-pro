@@ -96,10 +96,10 @@ function indicators(bars,params={}){
 }
 
 function statsFor(bars) {
-  if(!bars?.length)return {price:null,ema200:null,rsi:null,ret20:null,drawdown:null,atrPct:null,volume:null,bars:0};
-  const c=bars.map(b=>b.close),i=c.length-1,last=c[i],e=ema(c,200)[i],rs=rsi(c,14)[i],a=atr(bars,14)[i];
+  if(!bars?.length)return {price:null,ema200:null,rsi:null,rsi5:null,ret20:null,drawdown:null,atrPct:null,volume:null,bars:0};
+  const c=bars.map(b=>b.close),i=c.length-1,last=c[i],e=ema(c,200)[i],rsi14=rsi(c,14),rsi5=rsi(c,5),a=atr(bars,14)[i];
   const peak=Math.max(...c.slice(Math.max(0,c.length-252))),prev=c[i-20];
-  return {price:last,ema200:e,rsi:rs,ret20:prev?100*(last/prev-1):null,drawdown:100*(last/peak-1),atrPct:a?100*a/last:null,volume:bars[i].volume||0,bars:bars.length};
+  return {price:last,ema200:e,rsi:rsi14[i],rsi5:rsi5[i],ret20:prev?100*(last/prev-1):null,drawdown:100*(last/peak-1),atrPct:a?100*a/last:null,volume:bars[i].volume||0,bars:bars.length};
 }
 
 function valueFor(stats,metric) {
