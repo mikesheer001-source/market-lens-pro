@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import worker from '../worker/index.js';
 import { LIVE_UNIVERSE, ALPACA_BATCH_SIZE } from '../src/universe.js';
+import { expectedNyseBarDate } from '../src/freshness.js';
 
 const allowed = 'https://mikesheer001-source.github.io';
 const base = 'https://market-lens-pro-api.example.workers.dev';
@@ -78,6 +79,7 @@ test('bars endpoint rejects browser origins outside the configured allowlist', a
 });
 
 test('market scan batches the bundled universe and caches the Alpaca response', async () => {
+  const today=expectedNyseBarDate(new Date());
   const originalFetch=globalThis.fetch,originalCaches=globalThis.caches;
   const cached=new Map(),batches=[];
   let upstreamCalls=0;
@@ -94,7 +96,7 @@ test('market scan batches the bundled universe and caches the Alpaca response', 
     assert.equal(parsed.searchParams.get('feed'),'iex');
     assert.equal(options.headers['APCA-API-KEY-ID'],'scan-key');
     return new Response(JSON.stringify({
-      bars:Object.fromEntries(symbols.map(symbol=>[symbol,[{t:'2026-11-13T00:00:00Z',o:100,h:101,l:99,c:100,v:1000}]])),
+      bars:Object.fromEntries(symbols.map(symbol=>[symbol,[{t:today+'T00:00:00Z',o:100,h:101,l:99,c:100,v:1000}]])),
       next_page_token:null
     }),{status:200,headers:{'Content-Type':'application/json'}});
   };
@@ -107,6 +109,8 @@ test('market scan batches the bundled universe and caches the Alpaca response', 
     assert.equal(first.headers.get('X-Scan-Cache'),'MISS');
     assert.equal(body.requested,LIVE_UNIVERSE.length);
     assert.equal(body.returned,LIVE_UNIVERSE.length);
+    assert.equal(body.freshness.allFresh,true);
+    assert.deepEqual(body.retry.attempted,[]);
     assert.ok(body.bars.VXX?.length);
     assert.equal(upstreamCalls,expectedBatches);
     assert.ok(batches.every(batch=>batch.length<=ALPACA_BATCH_SIZE));
