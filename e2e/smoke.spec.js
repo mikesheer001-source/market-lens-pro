@@ -5,6 +5,15 @@ test('desktop screener, chart, backtest, optimization and CSV import',async ({pa
   await page.goto('./');
   await expect(page.getByRole('heading',{name:'Screener'})).toBeVisible();
   await expect(page.locator('tr[data-symbol]')).toHaveCount(4);
+  await expect(page.locator('thead th').nth(4)).toHaveText('RSI 5D');
+  const shortRsi = await page.locator('tbody tr td:nth-child(5)').allTextContents();
+  expect(shortRsi).toHaveLength(4);
+  expect(shortRsi.every(value => value.trim() !== '—')).toBeTruthy();
+  await page.locator('.mode-switch [data-action="mode-live"]').click();
+  await expect(page.getByRole('heading',{name:'Data Center'})).toBeVisible();
+  await expect(page.locator('[data-setting="apiBaseUrl"]')).toBeVisible();
+  await page.locator('.mode-switch [data-action="mode-demo"]').click();
+  await expect(page.getByRole('heading',{name:'Screener'})).toBeVisible();
   await page.locator('.sidebar [data-tab="charts"]').click();
   await expect(page.getByRole('heading',{name:'Chart Lab'})).toBeVisible();
   await expect(page.locator('#price-chart canvas').first()).toBeVisible();
