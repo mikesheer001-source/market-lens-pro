@@ -33,6 +33,18 @@ function normalizeBars(bars){
   return [...map.values()].sort((a,b)=>stamp(a.time)-stamp(b.time));
 }
 
+function alpacaBars(items,timeframe='1Day') {
+  const daily=/^(?:1Day|1Week|1Month)$/.test(timeframe);
+  const bars=(items||[]).map(b=>{
+    const timestamp=Date.parse(b.t);
+    return {
+      time:daily?new Date(timestamp).toISOString().slice(0,10):Math.floor(timestamp/1000),
+      open:Number(b.o),high:Number(b.h),low:Number(b.l),close:Number(b.c),volume:Number(b.v)||0
+    };
+  }).filter(b=>Number.isFinite(stamp(b.time))&&[b.open,b.high,b.low,b.close].every(Number.isFinite));
+  return normalizeBars(bars);
+}
+
 function nyParts(t) {
   const d=new Date(stamp(t)*1000);
   const f=new Intl.DateTimeFormat('en-CA',{timeZone:'America/New_York',year:'numeric',month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit',hourCycle:'h23'});
@@ -226,4 +238,4 @@ function csvDownload(rows){
   return [cols.join(','),...rows.map(row=>cols.map(k=>q(row[k])).join(','))].join('\r\n');
 }
 
-export { parseCsv, stamp, normalizeBars, nyParts, aggregate, sma, ema, rsi, atr, indicators, statsFor, valueFor, screenSymbol, signalSets, backtest, parameterSweep, sampleData, csvDownload };
+export { parseCsv, stamp, normalizeBars, alpacaBars, nyParts, aggregate, sma, ema, rsi, atr, indicators, statsFor, valueFor, screenSymbol, signalSets, backtest, parameterSweep, sampleData, csvDownload };
