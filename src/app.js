@@ -197,9 +197,11 @@ async function initApp(){
     return '<div class="table-wrap"><table class="data-table"><thead><tr><th>Entry</th><th>Exit</th><th>Entry price</th><th>Exit price</th><th>Quantity</th><th>Net P&amp;L</th><th>Return</th><th>Bars</th><th>Reason</th></tr></thead><tbody>'+r.trades.slice().reverse().slice(0,300).map(t=>'<tr><td>'+dateLabel(t.entry)+'</td><td>'+dateLabel(t.exit)+'</td><td>'+format(t.buy)+'</td><td>'+format(t.sell)+'</td><td>'+format(t.qty,4)+'</td><td class="'+priceColor(t.pnl)+'">'+format(t.pnl)+'</td><td class="'+priceColor(t.pnlPct)+'">'+pct(t.pnlPct)+'</td><td>'+t.barsHeld+'</td><td>'+esc(t.reason)+'</td></tr>').join('')+'</tbody></table></div>';
   }
   function backtestView(){
+    const analysisNotice=S.result&&S.lastAnalysis?'<div class="info-strip">Saved analysis for <strong>'+esc(S.resultSymbol||S.symbol)+'</strong> · '+esc(S.resultTf||S.chart.tf)+' · '+esc(S.lastAnalysis.savedAt)+
+      (S.resultSymbol!==S.symbol?' · Historical result from another symbol; select the original symbol and rerun for a matching chart.':'')+'</div>':'';
     return head('Backtest','Signals use completed bars and next-open fills. One position at a time, long or short.',symbolSelect()+tfSelect())+
       '<div class="panel"><div class="panel-header"><h2>Strategy settings</h2><div class="flex">'+button('Run backtest','run-backtest','primary')+button('Optimize parameters','view-optimize')+'</div></div><div class="panel-body">'+btOptions()+'<p class="section-note">Stop-first rule when stop and target are both hit inside the same bar. Costs are modeled on each side. Short borrow fees are approximate; the engine does not model margin calls, locate availability, dividends, partial fills, taxes, or corporate actions.</p></div></div>'+
-      sourceStrip()+'<div class="panel"><div class="panel-header"><h2>Performance</h2><div class="flex">'+button('Export trades CSV','export-trades','small')+button('View trade markers','view-charts','small')+'</div></div><div class="panel-body">'+resultCards(S.result)+'</div></div>'+
+      sourceStrip()+analysisNotice+'<div class="panel"><div class="panel-header"><h2>Performance</h2><div class="flex">'+button('Export trades CSV','export-trades','small')+button('View trade markers','view-charts','small')+'</div></div><div class="panel-body">'+resultCards(S.result)+'</div></div>'+
       '<div class="panel"><div class="panel-header"><h2>Equity curve vs. buy-and-hold</h2></div>'+(S.result?.curve?.length?'<div class="equity-legend"><span><i class="equity-swatch strategy"></i>Strategy</span><span><i class="equity-swatch benchmark"></i>Buy &amp; hold</span></div><div id="equity-chart" class="equity-plot"></div>':'<div class="empty">Run a backtest to generate an equity curve.</div>')+'</div>'+
       '<div class="panel"><div class="panel-header"><h2>Trade log</h2></div>'+tradeTable(S.result)+'</div>';
   }
@@ -369,7 +371,7 @@ async function initApp(){
         const calculated=executePine(program,b,active.settings);
         cfg.customSignals=calculated.signals;
       }
-      S.result=backtest(b,cfg);S.resultSymbol=S.symbol;S.resultTf=S.chart.tf;return true;
+      S.result=backtest(b,cfg);S.resultSymbol=S.symbol;S.resultTf=S.chart.tf;rememberAnalysis();return true;
     }catch(err){
       S.scriptError=err.message;S.tab='scripts';render();notice(err.message);return false;
     }
@@ -386,13 +388,13 @@ async function initApp(){
     const symbols=[...S.data.keys()].filter(symbol=>S.sources.get(symbol)!=='ALPACA'&&isVisibleSymbol(symbol));
     const matches=symbols.filter(symbol=>screenSymbol(S.data.get(symbol),S.rules).pass);
     S.scan={status:'complete',source:'DEMO',requested:symbols.length,returned:symbols.length,matched:matches.length,missing:[],cached:false,at:new Date().toISOString()};
-    S.result=null;S.sweep=null;S.tab='screener';render();
+    evaluateLocalAlerts();S.tab='screener';render();
     notice('Demo scan complete: '+matches.length+' '+(matches.length===1?'match':'matches')+' across '+symbols.length+' symbols.');
   }
   async function fetchLiveUniverse(){
     let base=S.apiBaseUrl.trim();while(base.endsWith('/'))base=base.slice(0,-1);
     if(!base.startsWith('https://'))throw new Error('Enter the Cloudflare Worker URL in Data Center first.');
-    S.scan={status:'loading',source:'ALPACA'};S.tab='screener';render();
+    clearSavedScanView();S.scan={status:'loading',source:'ALPACA'};S.tab='screener';render();
     const response=await fetch(base+'/api/stocks/scan?feed='+encodeURIComponent(S.liveFeed||'iex'),{headers:{Accept:'application/json'}});
     const payload=await response.json().catch(()=>({}));
     if(!response.ok)throw new Error(payload.error||payload.detail||'Alpaca market scan failed ('+response.status+').');
@@ -411,7 +413,7 @@ async function initApp(){
     if(!visible.includes(S.symbol))S.symbol=visible[0]||loaded[0];
     const matched=visible.filter(symbol=>screenSymbol(S.data.get(symbol),S.rules).pass).length;
     S.scan={status:'complete',source:'ALPACA',requested:payload.requested||LIVE_UNIVERSE.length,returned:loaded.length,matched,missing:payload.missing||[],cached:response.headers.get('X-Scan-Cache')==='HIT',at:new Date().toISOString()};
-    S.result=null;S.sweep=null;S.tab='screener';render();
+    evaluateLocalAlerts();S.tab='screener';render();
     notice('Live scan complete: '+matched+' '+(matched===1?'match':'matches')+' across '+visible.length+' visible symbols ('+loaded.length+'/'+S.scan.requested+' returned).');
   }
   async function switchToLive(){
@@ -453,7 +455,7 @@ async function initApp(){
         S.activeStrategy={code:S.scriptCode,settings:{...S.scriptSettings},name:program.title};
         S.bt.strategy='pine-custom';
         S.result=backtest(bars(),{...S.bt,timeframe:S.chart.tf,customSignals:evaluated.signals});
-        S.resultSymbol=S.symbol;S.resultTf=S.chart.tf;S.sweep=null;
+        S.resultSymbol=S.symbol;S.resultTf=S.chart.tf;S.sweep=null;rememberAnalysis();
         S.scriptOutput='Strategy backtest completed: '+S.result.trades.length+' trades.';
         S.tab='backtest';
       }
@@ -466,7 +468,7 @@ async function initApp(){
       if(program.mode!=='strategy')throw new PineError(1,'A parameter sweep needs a strategy() script');
       const settings=S.activeStrategy?.settings||S.scriptSettings;
       const rows=sweepPine(program,bars(),backtest,{...S.bt,timeframe:S.chart.tf},settings);
-      S.sweep=rows;S.bt.strategy='pine-custom';S.scriptError='';S.scriptOutput='Tested '+rows.length+' Pine input variations with 70/30 train and holdout periods.';
+      S.sweep=rows;S.bt.strategy='pine-custom';rememberAnalysis();S.scriptError='';S.scriptOutput='Tested '+rows.length+' Pine input variations with 70/30 train and holdout periods.';
       S.tab='optimize';render();
     }catch(err){S.scriptError=err.message;S.tab='scripts';render();}
   }
@@ -574,7 +576,7 @@ async function initApp(){
     'clear-lines':()=>{S.chart.lines[S.symbol]=[];render();},
     'chart-png':()=>{if(!chart)return;try{const canvas=chart.takeScreenshot();canvas.toBlob(blob=>{if(!blob)return;const url=URL.createObjectURL(blob),a=document.createElement('a');a.href=url;a.download='market-lens-'+S.symbol+'.png';a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);});}catch{notice('Chart image export is unsupported in this browser.');}},
     'run-backtest':()=>{if(runBt())render();},
-    'run-sweep':()=>{if(bars().length<60){notice('A parameter sweep needs at least 60 bars.');return;}if(S.bt.strategy==='pine-custom'){sweepCurrentPine();return;}S.sweep=parameterSweep(bars(),{...S.bt,timeframe:S.chart.tf});render();},
+    'run-sweep':()=>{if(bars().length<60){notice('A parameter sweep needs at least 60 bars.');return;}if(S.bt.strategy==='pine-custom'){sweepCurrentPine();return;}S.sweep=parameterSweep(bars(),{...S.bt,timeframe:S.chart.tf});rememberAnalysis();render();},
     'apply-sweep':el=>{const params=S.sweep[Number(el.dataset.index)].params;if(S.bt.strategy==='pine-custom'){S.scriptSettings={...S.scriptSettings,...params};if(S.activeStrategy)S.activeStrategy.settings={...S.activeStrategy.settings,...params};persistPineDraft();}else Object.assign(S.bt,params);if(runBt()){S.tab='backtest';render();}},
     'export-trades':()=>{if(!S.result){notice('Run a backtest before exporting.');return;}exportFile(S.symbol+'-trades.csv',csvDownload(S.result.trades.map(t=>({symbol:S.symbol,strategy:S.bt.strategy,...t}))));},
     'export-sweep':()=>{if(!S.sweep){notice('Run a parameter sweep first.');return;}exportFile(S.symbol+'-sweep.csv',csvDownload(S.sweep.map(r=>({params:JSON.stringify(r.params),trainReturn:r.train.returnPct,trainDrawdown:r.train.maxDD,trainTrades:r.train.trades,testReturn:r.test.returnPct,testDrawdown:r.test.maxDD,testTrades:r.test.trades,testProfitFactor:r.test.profitFactor}))));},
