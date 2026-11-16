@@ -704,6 +704,22 @@ async function initApp(){
   function leaderboardView(){
     const lb=S.leaderboard?.symbol===S.symbol?S.leaderboard:null;
     if(!lb)return S.leaderboardError?'<div role="alert" class="info-strip warning">'+esc(S.leaderboardError)+'</div>':'';
+    const match=leaderboardRangeStatus(lb,comparisonContext());
+    if(!match.matches){
+      // NEVER display historical ranking data or a mismatched walk-forward
+      // summary under newly selected date controls.
+      const oldFull=!lb.range?.startDate&&!lb.range?.endDate;
+      const savedLabel=oldFull?'Full-history leaderboard — range not applied':
+        'Saved leaderboard — selected date range not applied';
+      return '<section class="panel" aria-label="Strategy comparison">'+
+        '<div class="panel-header"><h2>Strategy leaderboard</h2>'+
+        button('Recompute on selected range','compare-strategies','primary')+'</div>'+
+        '<div class="panel-body"><div role="alert" class="info-strip warning" id="leaderboard-range-mismatch">'+
+        '<strong>'+savedLabel+'</strong> · '+esc(rangeLabel(S.btRange))+
+        '. '+esc(S.leaderboardError||match.reason||'Recompute required.')+
+        ' Previous returns, Sharpe, equity overlays and walk-forward results are hidden to avoid misleading comparisons.'+
+        '</div></div></section>';
+    }
     const definitions=[['name','Strategy'],['trainReturnPct','Train return (70%)'],
       ['sharpe','Train Sharpe (rank)'],['testReturnPct','OOS return (30%)'],
       ['testSharpe','OOS Sharpe (30%)'],['validation','Validation'],
@@ -757,8 +773,10 @@ async function initApp(){
         'No strategy has an assessable out-of-sample Sharpe.')+
       ' · Source: '+esc(lb.source)+' · bar date: '+esc(readableBarDate(lb.asOf))+
       (split?' · holdout '+esc(split.testStart||'—')+' to '+esc(split.testEnd||'—'):'')+
+      ' · '+esc(rangeLabel(lb.range||{}))+
       '</div>';
     return '<section class="panel" aria-label="Strategy comparison"><div class="panel-header"><h2>Strategy leaderboard</h2><div class="flex">'+
+      '<span class="source-badge" id="leaderboard-window">'+esc(rangeLabel(lb.range||{}))+'</span>'+
       button('Compare all strategies','compare-strategies','small')+
       (top?button('Load best into Backtester','load-best-strategy','primary'):'')+
       '</div></div><div class="panel-body">'+provenance+
