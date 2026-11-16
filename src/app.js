@@ -256,7 +256,22 @@ async function initApp(){
   function exportFile(name,contents,mime='text/csv'){
     const obj=new Blob([contents],{type:mime}),url=URL.createObjectURL(obj),link=document.createElement('a');link.href=url;link.download=name;document.body.append(link);link.click();link.remove();setTimeout(()=>URL.revokeObjectURL(url),1000);
   }
-  const runBt=()=>{const b=bars();if(b.length<40){notice('Need at least 40 bars for a meaningful backtest.');return false;}S.result=backtest(b,{...S.bt,timeframe:S.chart.tf});S.resultSymbol=S.symbol;S.resultTf=S.chart.tf;return true;};
+  const runBt=()=>{
+    const b=bars();if(b.length<40){notice('Need at least 40 bars for a meaningful backtest.');return false;}
+    try{
+      const cfg={...S.bt,timeframe:S.chart.tf};
+      if(cfg.strategy==='pine-custom'){
+        const active=S.activeStrategy||{code:S.scriptCode,settings:{...S.scriptSettings}};
+        const program=compilePine(active.code);
+        if(program.mode!=='strategy')throw new PineError(1,'Select a strategy() script to backtest');
+        const calculated=executePine(program,b,active.settings);
+        cfg.customSignals=calculated.signals;
+      }
+      S.result=backtest(b,cfg);S.resultSymbol=S.symbol;S.resultTf=S.chart.tf;return true;
+    }catch(err){
+      S.scriptError=err.message;S.tab='scripts';render();notice(err.message);return false;
+    }
+  };
   async function testLiveBackend(){
     let base=S.apiBaseUrl.trim();while(base.endsWith('/'))base=base.slice(0,-1);
     if(!base.startsWith('https://'))throw new Error('Enter the Cloudflare Worker URL in Data Center first.');
@@ -307,7 +322,62 @@ async function initApp(){
       notice('Live scan failed; switched back to Demo mode. '+err.message);
     }
   }
+  function loadPineSource(code,name,id=null){
+    S.scriptCode=code;S.scriptName=name;S.scriptId=id;S.scriptSettings={};S.scriptOutput=null;
+    parseCurrentPine();persistPineDraft();S.tab='scripts';render();
+  }
+  function savePine(asCopy=false){
+    const name=String(S.scriptName||'').trim();
+    if(!name){S.scriptError='line 1: Enter a script name before saving';render();return;}
+    if(S.scriptCode.length>32000){S.scriptError='line 1: Script must have fewer than 32,000 characters';render();return;}
+    if(S.scriptLibrary.length>=30&&(asCopy||!S.scriptId)){notice('Local script library is limited to 30 scripts.');return;}
+    const exists=S.scriptLibrary.find(x=>x.id===S.scriptId);
+    const id=asCopy||!exists?'pine-'+Date.now()+'-'+Math.random().toString(36).slice(2,7):exists.id;
+    const record={id,name,code:S.scriptCode,settings:{...S.scriptSettings}};
+    if(exists&&!asCopy)Object.assign(exists,record);else S.scriptLibrary.push(record);
+    S.scriptId=id;persistPineLibrary();persistPineDraft();S.scriptOutput='Saved locally: '+name;render();
+  }
+  function executeCurrentPine(){
+    try{
+      const program=compilePine(S.scriptCode);
+      S.scriptParsed=program;S.scriptError='';
+      const evaluated=executePine(program,bars(),S.scriptSettings);
+      if(program.mode==='indicator'){
+        const id=S.scriptId||'draft',record={id,name:S.scriptName,code:S.scriptCode,settings:{...S.scriptSettings}};
+        S.activeIndicators=[...S.activeIndicators.filter(x=>x.id!==id),record].slice(-4);
+        S.scriptOutput='Indicator applied to Chart Lab: '+program.title+' ('+evaluated.plots.length+' lines, '+evaluated.shapes.length+' shape series).';
+        S.tab='charts';
+      }else{
+        S.activeStrategy={code:S.scriptCode,settings:{...S.scriptSettings},name:program.title};
+        S.bt.strategy='pine-custom';
+        S.result=backtest(bars(),{...S.bt,timeframe:S.chart.tf,customSignals:evaluated.signals});
+        S.resultSymbol=S.symbol;S.resultTf=S.chart.tf;S.sweep=null;
+        S.scriptOutput='Strategy backtest completed: '+S.result.trades.length+' trades.';
+        S.tab='backtest';
+      }
+      persistPineDraft();render();
+    }catch(err){S.scriptError=err.message;S.scriptOutput=null;S.tab='scripts';render();}
+  }
+  function sweepCurrentPine(){
+    try{
+      const program=compilePine(S.activeStrategy?.code||S.scriptCode);
+      if(program.mode!=='strategy')throw new PineError(1,'A parameter sweep needs a strategy() script');
+      const settings=S.activeStrategy?.settings||S.scriptSettings;
+      const rows=sweepPine(program,bars(),backtest,{...S.bt,timeframe:S.chart.tf},settings);
+      S.sweep=rows;S.bt.strategy='pine-custom';S.scriptError='';S.scriptOutput='Tested '+rows.length+' Pine input variations with 70/30 train and holdout periods.';
+      S.tab='optimize';render();
+    }catch(err){S.scriptError=err.message;S.tab='scripts';render();}
+  }
   const action={
+    'pine-check':()=>{parseCurrentPine();S.scriptOutput=S.scriptError?null:'Pine syntax OK — '+S.scriptParsed.mode+' script with '+S.scriptParsed.inputs.length+' inputs.';render();},
+    'pine-example':el=>{const ex=PINE_EXAMPLES.find(x=>x.id===el.dataset.example);if(ex)loadPineSource(ex.code,ex.label);},
+    'pine-run':()=>executeCurrentPine(),
+    'pine-sweep':()=>sweepCurrentPine(),
+    'pine-save':()=>savePine(false),
+    'pine-copy':()=>savePine(true),
+    'pine-rename':()=>{const item=S.scriptLibrary.find(x=>x.id===S.scriptId);if(!item){notice('Load a saved script to rename it.');return;}item.name=S.scriptName;persistPineLibrary();persistPineDraft();S.scriptOutput='Renamed saved script to '+S.scriptName;render();},
+    'pine-delete':()=>{const id=S.scriptId;if(!id){notice('Load a saved script to delete it.');return;}if(!window.confirm('Delete this locally saved script?'))return;S.scriptLibrary=S.scriptLibrary.filter(x=>x.id!==id);persistPineLibrary();loadPineSource(PINE_EXAMPLES[0].code,'EMA crossover');},
+    'pine-clear-plots':()=>{S.activeIndicators=[];S.scriptOutput='Removed all custom indicator plots from Chart Lab.';render();},
     import:()=>$('#csv-file')?.click(),
     'mode-demo':()=>{S.mode='demo';if(S.sources.get(S.symbol)==='ALPACA')S.symbol=S.lastDemoSymbol&&S.sources.get(S.lastDemoSymbol)!=='ALPACA'?S.lastDemoSymbol:'DEMO-SPY';S.scan={status:'idle'};S.result=null;S.sweep=null;render();},
     'mode-live':()=>switchToLive(),
@@ -329,8 +399,8 @@ async function initApp(){
     'clear-lines':()=>{S.chart.lines[S.symbol]=[];render();},
     'chart-png':()=>{if(!chart)return;try{const canvas=chart.takeScreenshot();canvas.toBlob(blob=>{if(!blob)return;const url=URL.createObjectURL(blob),a=document.createElement('a');a.href=url;a.download='market-lens-'+S.symbol+'.png';a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);});}catch{notice('Chart image export is unsupported in this browser.');}},
     'run-backtest':()=>{if(runBt())render();},
-    'run-sweep':()=>{if(bars().length<60){notice('A parameter sweep needs at least 60 bars.');return;}S.sweep=parameterSweep(bars(),{...S.bt,timeframe:S.chart.tf});render();},
-    'apply-sweep':el=>{Object.assign(S.bt,S.sweep[Number(el.dataset.index)].params);if(runBt()){S.tab='backtest';render();}},
+    'run-sweep':()=>{if(bars().length<60){notice('A parameter sweep needs at least 60 bars.');return;}if(S.bt.strategy==='pine-custom'){sweepCurrentPine();return;}S.sweep=parameterSweep(bars(),{...S.bt,timeframe:S.chart.tf});render();},
+    'apply-sweep':el=>{const params=S.sweep[Number(el.dataset.index)].params;if(S.bt.strategy==='pine-custom'){S.scriptSettings={...S.scriptSettings,...params};if(S.activeStrategy)S.activeStrategy.settings={...S.activeStrategy.settings,...params};persistPineDraft();}else Object.assign(S.bt,params);if(runBt()){S.tab='backtest';render();}},
     'export-trades':()=>{if(!S.result){notice('Run a backtest before exporting.');return;}exportFile(S.symbol+'-trades.csv',csvDownload(S.result.trades.map(t=>({symbol:S.symbol,strategy:S.bt.strategy,...t}))));},
     'export-sweep':()=>{if(!S.sweep){notice('Run a parameter sweep first.');return;}exportFile(S.symbol+'-sweep.csv',csvDownload(S.sweep.map(r=>({params:JSON.stringify(r.params),trainReturn:r.train.returnPct,trainDrawdown:r.train.maxDD,trainTrades:r.train.trades,testReturn:r.test.returnPct,testDrawdown:r.test.maxDD,testTrades:r.test.trades,testProfitFactor:r.test.profitFactor}))));},
     'export-sample':()=>{const b=S.data.get('DEMO-SPY');exportFile('SIMULATED-DEMO-SPY.csv',csvDownload(b.map(x=>({Date:x.time,Symbol:'DEMO-SPY',Open:x.open,High:x.high,Low:x.low,Close:x.close,Volume:x.volume}))));},
@@ -353,11 +423,17 @@ async function initApp(){
     if(ev.key==='Escape'&&S.drawLine){S.drawLine=false;render();}
   });
   document.addEventListener('input',ev=>{
-    const el=ev.target;if(el.dataset.setting){S[el.dataset.setting]=el.value;saveSettings();return;}if(el.dataset.input==='search'){S.query=el.value;const focus=el.selectionStart;render();const input=$('[data-input="search"]');if(input){input.focus();input.setSelectionRange(focus,focus);}}
+    const el=ev.target;
+    if(el.id==='pine-editor'){S.scriptCode=el.value;S.scriptOutput=null;persistPineDraft();return;}
+    if(el.id==='pine-name'){S.scriptName=el.value;persistPineDraft();return;}
+    if(el.dataset.setting){S[el.dataset.setting]=el.value;saveSettings();return;}
+    if(el.dataset.input==='search'){S.query=el.value;const focus=el.selectionStart;render();const input=$('[data-input="search"]');if(input){input.focus();input.setSelectionRange(focus,focus);}}
   });
   document.addEventListener('change',async ev=>{
     const el=ev.target;
     if(el.id==='csv-file'){if(el.files?.length)await importFiles(el.files);el.value='';return;}
+    if(el.id==='pine-library'){const found=S.scriptLibrary.find(x=>x.id===el.value);if(found){loadPineSource(found.code,found.name,found.id);S.scriptSettings={...(found.settings||{})};persistPineDraft();render();}return;}
+    if(el.dataset.pineInput){S.scriptSettings[el.dataset.pineInput]=el.type==='checkbox'?el.checked:Number(el.value);persistPineDraft();return;}
     if(el.dataset.option){
       const opt=el.dataset.option,val=el.value;
       if(opt==='preset'){if(val==='custom')return;S.rules=(preset[val]||[]).map(x=>({...x}));S.universeFilter=val==='volatility'?'volatility':'all';S.scan={status:'idle'};}
