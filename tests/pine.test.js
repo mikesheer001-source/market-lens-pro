@@ -153,3 +153,27 @@ test('unsafe Pine constructs cannot execute arbitrary JavaScript',()=>{
   assert.throws(()=>compilePine('indicator("No JS")\nfoo = eval("alert(1)")'),/Unsupported function/);
   assert.throws(()=>compilePine('indicator("No JS")\nwhile true'),/Unexpected token|Expected/);
 });
+
+test('input.bool controls custom indicator visibility without changing the original OHLCV bars',()=>{
+  const source=[
+    '//@version=5',
+    'indicator("Boolean input")',
+    'visible = input.bool(true, "Show line")',
+    'plot(visible ? close : na, "Selected close")'
+  ].join('\n');
+  const show=executePine(source,bars,{visible:true}),hide=executePine(source,bars,{visible:false});
+  assert.ok(show.plots[0].values.some(Number.isFinite));
+  assert.ok(hide.plots[0].values.every(x=>x===null));
+  assert.equal(bars.length,1800);
+});
+
+test('history references and series arithmetic use only past bar values',()=>{
+  const source=[
+    'indicator("History arithmetic", overlay=false)',
+    'difference = close - close[1]',
+    'plot(difference, "Daily change")'
+  ].join('\n');
+  const computed=executePine(source,bars);
+  assert.equal(computed.plots[0].values[0],null);
+  assert.equal(computed.plots[0].values[1],bars[1].close-bars[0].close);
+});
