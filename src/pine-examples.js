@@ -29,7 +29,7 @@ export const PINE_EXAMPLES=Object.freeze([
     "id": "macd-indicator",
     "label": "MACD indicator",
     "code": "//@version=5\nindicator(\"MACD\", overlay=false)\nfastLength = input.int(12, \"Fast length\", minval=2, maxval=100)\nslowLength = input.int(26, \"Slow length\", minval=3, maxval=200)\nsignalLength = input.int(9, \"Signal length\", minval=2, maxval=100)\n[macdLine, signalLine, histogram] = ta.macd(close, fastLength, slowLength, signalLength)\nplot(macdLine, \"MACD\", color=color.aqua)\nplot(signalLine, \"Signal\", color=color.orange)\nplot(histogram, \"Histogram\", color=color.gray)"
-  }
+  },
   {
     id: 'hidden-rsi-divergence',
     label: 'Hidden bullish RSI divergence · trend pullback',
