@@ -287,6 +287,10 @@ test('published Round 25 rankings download CSV with correct mode and row counts'
   expect(file.suggestedFilename()).toMatch(/^leaderboard-validated-only-/);
   expect(content.trimEnd().split(/\r?\n/).length).toBe(
     1+await page.locator('.leaderboard-table tbody tr').count());
+  // Explicitly populate the source; the default trend scan can match zero symbols.
+  await page.locator('.sidebar [data-tab="screener"]').click();
+  await page.locator('[data-option="preset"]').selectOption('all');
+  await page.locator('.sidebar [data-tab="backtest"]').click();
   await page.locator('[data-option="portfolio-mode"]').selectOption('best-fit');
   await page.locator('[data-action="run-best-fit"]').click();
   await expect(page.locator('#portfolio-breakdown tbody tr').first()).toBeVisible({timeout:100000});
