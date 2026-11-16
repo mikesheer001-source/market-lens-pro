@@ -1,7 +1,7 @@
 // Curated, bundled liquid-US market universe for Alpaca daily-bar scans.
 // Kept in source control so the Worker and browser always use the same symbols.
 export const VOLATILITY_UNIVERSE = Object.freeze([
-  'VXX','UVXY','SVXY','VIXY','VIXM','VXZ','SVIX','UVIX','ZIVB','ZVOL','DEMO-VXX'
+  'VXX','UVXY','SVXY','VIXY','VIXM','VXZ','SVIX','UVIX','SVOL','ZVOL','DEMO-VXX'
 ]);
 
 export const DEMO_UNIVERSE = Object.freeze([
