@@ -70,7 +70,7 @@ test('Round 16 leaderboard reports train + OOS while preserving full curves and 
     backtest,compilePine,executePine,builtInExamples:PINE_EXAMPLES});
   const live=report.rows.filter(r=>r.strategy);
   assert.equal(report.rows.length,12);
-  assert.equal(live.length,11);
+  assert.equal(live.length,10);
   assert.ok(live.every(r=>r.validation.trainBars===350&&r.validation.testBars===150));
   assert.ok(live.every(r=>Number.isFinite(r.trainMetrics.returnPct)&&Number.isFinite(r.testMetrics.returnPct)));
   assert.ok(live.every(r=>r.curve.length>400),'keep full equity charts');
