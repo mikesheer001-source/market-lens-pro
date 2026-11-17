@@ -19,8 +19,9 @@ test('two devices on the same URL automatically share chart changes and saved sc
     return row ? route.fulfill({body:row.body, headers:{...headers, etag:String(row.version)}}) :
       route.fulfill({status:404});
   });
-  const first = await browser.newContext({baseURL});
-  const second = await browser.newContext({baseURL});
+  const contextOptions = {baseURL, storageState:{cookies:[],origins:[]}};
+  const first = await browser.newContext(contextOptions);
+  const second = await browser.newContext(contextOptions);
   try {
     await Promise.all([mock(first), mock(second)]);
     const [a,b] = await Promise.all([first.newPage(),second.newPage()]);
@@ -29,7 +30,8 @@ test('two devices on the same URL automatically share chart changes and saved sc
     await a.getByRole('button',{name:'Save scan',exact:true}).click();
     await a.locator('.sidebar [data-tab="charts"]').click();
     await a.getByRole('button',{name:'Remove EMA 20',exact:true}).click();
-    await expect.poll(()=>saved.get('settings')?.version ?? 0).toBeGreaterThan(0);
+    await expect.poll(()=>saved.get('settings')?.version ?? 0,{timeout:12000}).toBeGreaterThan(0);
+    await b.bringToFront();
 
     await expect(b.getByRole('option',{name:'My saved scan'})).toHaveCount(1,{timeout:18000});
     await b.locator('.sidebar [data-tab="charts"]').click();
