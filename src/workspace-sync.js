@@ -1,9 +1,28 @@
-const codeKey = 'market-lens-workspace-code';
-const dirtyKey = 'market-lens-workspace-pending';
-const prefix = 'ML1-';
-const encode = bytes => btoa(String.fromCharCode(...bytes)).replaceAll('+','-').replaceAll('/','_').replace(/=+$/, '');
+const dirtyKey = 'market-lens-public-sync-pending';
+
+async function transform(blob, stream) {
+  return new Response(blob.stream().pipeThrough(stream)).blob();
+}
+
+async function encode(value) {
+  return transform(new Blob([JSON.stringify(value)]), new CompressionStream('gzip'));
+}
+
+async function decode(blob) {
+  let length = 0;
+  const bounded = new TransformStream({
+    transform(chunk, controller) {
+      length += chunk.byteLength;
+      if (length > 64 * 1024 * 1024) throw new Error('Shared data is too large.');
+      controller.enqueue(chunk);
+    }
+  });
+  return new Response(blob.stream().pipeThrough(new DecompressionStream('gzip')).pipeThrough(bounded)).json();
+}
+
 const same = (a,b) => JSON.stringify(a) === JSON.stringify(b);
 const object = value => value && typeof value === 'object' && !Array.isArray(value);
+const safeKeys = keys => [...keys].filter(key => !['__proto__','prototype','constructor'].includes(key));
 const recordKey = item => item?.id ?? (Array.isArray(item?.bars) ? item.symbol : undefined);
 
 export function mergeWorkspace(base, local, remote) {
@@ -17,38 +36,13 @@ export function mergeWorkspace(base, local, remote) {
   if (object(local) && object(remote) && (base === undefined || object(base))) {
     const previous = base || {};
     const keys = new Set([...Object.keys(previous), ...Object.keys(local), ...Object.keys(remote)]);
-    return Object.fromEntries([...keys].map(key => [key, mergeWorkspace(previous[key], local[key], remote[key])])
+    return Object.fromEntries(safeKeys(keys).map(key => [key, mergeWorkspace(previous[key], local[key], remote[key])])
       .filter(([,value]) => value !== undefined));
   }
   return local;
 }
 
-async function codec(code) {
-  const value = code.trim();
-  if (!/^ML1-[A-Za-z0-9_-]{43}$/.test(value)) throw new Error('Enter the complete workspace pairing code.');
-  const bytes = Uint8Array.from(atob(value.slice(prefix.length).replaceAll('-','+').replaceAll('_','/')), c => c.charCodeAt(0));
-  const tokenBytes = await crypto.subtle.digest('SHA-256', bytes);
-  const token = Array.from(new Uint8Array(tokenBytes), b => b.toString(16).padStart(2,'0')).join('');
-  const key = await crypto.subtle.importKey('raw', bytes, 'AES-GCM', false, ['encrypt','decrypt']);
-  const transform = async (blob, stream) => new Response(blob.stream().pipeThrough(stream)).arrayBuffer();
-  return {
-    token,
-    async seal(name, value) {
-      const iv = crypto.getRandomValues(new Uint8Array(12));
-      const compressed = await transform(new Blob([JSON.stringify(value)]), new CompressionStream('gzip'));
-      const encrypted = await crypto.subtle.encrypt({name:'AES-GCM', iv, additionalData:new TextEncoder().encode(name)}, key, compressed);
-      return new Blob([iv, encrypted]);
-    },
-    async open(name, blob) {
-      const bytes = new Uint8Array(await blob.arrayBuffer());
-      const clear = await crypto.subtle.decrypt({name:'AES-GCM', iv:bytes.slice(0,12), additionalData:new TextEncoder().encode(name)}, key, bytes.slice(12));
-      return JSON.parse(new TextDecoder().decode(await transform(new Blob([clear]), new DecompressionStream('gzip'))));
-    }
-  };
-}
-
-export function workspaceSync({endpoint, names, read, write, notify}) {
-  let code = localStorage.getItem(codeKey) || '';
+export function workspaceSync({endpoint, names, read, write, notify, enabled = true}) {
   let pending;
   try { pending = new Set(JSON.parse(localStorage.getItem(dirtyKey) || '[]')); }
   catch { pending = new Set(); }
@@ -59,25 +53,25 @@ export function workspaceSync({endpoint, names, read, write, notify}) {
   const persist = () => localStorage.setItem(dirtyKey, JSON.stringify([...pending]));
   const schedule = () => { clearTimeout(timer); timer = setTimeout(() => void flush(), 800); };
 
-  function changed(name) {
-    if (!code) return;
+  function changed(name, previous) {
+    if (!enabled) return;
+    if (!pending.has(name)) baselines.set(name, previous);
     mutations.set(name,(mutations.get(name) || 0)+1);
     pending.add(name);
     persist();
     schedule();
   }
 
-  async function exchange(cipher, mode) {
+  async function exchange(mode) {
+    let hasUpdates = false;
     const request = (name, options = {}) => {
       const url = new URL(endpoint);
       if (name) url.searchParams.set('document', name);
-      return fetch(url, {...options, cache:'no-store', signal:AbortSignal.timeout(12000),
-        headers:{Authorization:'Bearer '+cipher.token, ...options.headers}});
+      return fetch(url, {...options, cache:'no-store', signal:AbortSignal.timeout(12000)});
     };
     const index = await request();
     if (!index.ok) throw new Error('Workspace server returned '+index.status+'.');
     const versions = await index.json();
-    if (mode === 'join' && !Object.keys(versions).length) throw new Error('Workspace not found. Check the pairing code on your other device.');
     for (const name of names) {
       if (versions[name] === applied.get(name) && !pending.has(name)) continue;
       if (!versions[name] && !pending.has(name)) continue;
@@ -88,27 +82,47 @@ export function workspaceSync({endpoint, names, read, write, notify}) {
         const response = await request(name);
         if (!response.ok && response.status !== 404) throw new Error('Could not read workspace '+name+'.');
         let version = Number(response.headers.get('ETag') || 0);
-        const remote = version ? await cipher.open(name, await response.blob()) : undefined;
+        let remote;
+        if (version) {
+          try {
+            remote = await decode(await response.blob());
+            const list = name === 'library' || name === 'imports';
+            if (list ? !Array.isArray(remote) : remote!==null&&!object(remote)) throw new Error('Invalid workspace document.');
+          } catch {
+            if (!pending.has(name)) {
+              applied.set(name,version);
+              break;
+            }
+          }
+        }
+        const sending = pending.has(name);
+        const receivedNewer = version > 0 && version !== applied.get(name);
         let value = remote;
-        if (pending.has(name) && mode !== 'join') {
+        if (sending) {
           if (version && name === 'market' && local && remote) {
             value = local.session > remote.session || local.session === remote.session &&
               (local.id !== remote.id || local.next >= remote.next) ? local : remote;
-          } else value = version ? mergeWorkspace(baselines.get(name), local, remote) : local;
+          } else {
+            const previous = baselines.get(name);
+            const initial = Array.isArray(local) ? [] : object(local) ? {} : undefined;
+            value = mergeWorkspace(previous, local, remote ?? initial);
+          }
           if (!same(value, remote)) {
-            const saved = await request(name,{method:'PUT', headers:{'If-Match':String(version)}, body:await cipher.seal(name,value)});
+            const saved = await request(name,{method:'PUT', headers:{'If-Match':String(version)}, body:await encode(value)});
             if (saved.status === 409) continue;
             if (saved.status === 413) throw new Error('Workspace '+name+' exceeds the 16 MB compressed limit.');
             if (!saved.ok) throw new Error('Could not sync workspace '+name+' ('+saved.status+').');
             version = Number(saved.headers.get('ETag'));
           }
         }
-        const willStage = mode !== 'startup' && mode !== 'join' && !same(local,value);
-        baselines.set(name,willStage ? local : value);
-        if (mode !== 'startup' && mode !== 'join' && !same(local,value)) staged = true;
-        else if (!same(local,value)) await write(name,value);
         if (mutation === mutations.get(name)) {
-          if (!staged || mode === 'startup' || mode === 'join' || same(local,value)) applied.set(name,version);
+          const willStage = mode !== 'startup' && (!sending || receivedNewer) && !same(local,value);
+          if (willStage) hasUpdates = true;
+          else {
+            if ((!sending || receivedNewer || mode === 'startup') && !same(local,value)) await write(name,value);
+            applied.set(name,version);
+          }
+          baselines.set(name,willStage ? local : value);
           pending.delete(name);
           persist();
         }
@@ -116,15 +130,16 @@ export function workspaceSync({endpoint, names, read, write, notify}) {
       }
       if (!finished) throw new Error('Another device is updating this workspace. Retrying shortly.');
     }
+    staged = hasUpdates;
   }
 
   function flush(mode = 'background') {
-    if (!code) return Promise.resolve(true);
+    if (!enabled) return Promise.resolve(true);
     if (inFlight) return inFlight;
     inFlight = (async () => {
       try {
-        await exchange(await codec(code),mode);
-        notify(staged ? 'Updates ready on this device' : 'Workspace synced',staged);
+        await exchange(mode);
+        notify(staged ? 'Updating shared workspace…' : 'Shared workspace saved',staged);
         return true;
       } catch (error) {
         notify(error.message || 'Sync paused while offline.',staged);
@@ -134,36 +149,5 @@ export function workspaceSync({endpoint, names, read, write, notify}) {
     return inFlight;
   }
 
-  async function connect(input) {
-    const next = input ? input.trim() : prefix + encode(crypto.getRandomValues(new Uint8Array(32)));
-    await inFlight;
-    const previous = code;
-    if (previous && previous !== next) throw new Error('Disconnect this device before pairing a different workspace.');
-    const cipher = await codec(next);
-    if (input) {
-      await exchange(cipher,'join');
-    } else {
-      for (const name of names) {
-        if (await read(name) !== undefined) pending.add(name);
-      }
-      await exchange(cipher,'startup');
-    }
-    code = next;
-    localStorage.setItem(codeKey,code);
-    return code;
-  }
-
-  async function disconnect() {
-    clearTimeout(timer);
-    await inFlight;
-    code = '';
-    pending.clear();
-    localStorage.removeItem(codeKey);
-    persist();
-    baselines.clear();
-    applied.clear();
-    staged = false;
-  }
-
-  return {code:()=>code, changed, flush, connect, disconnect};
+  return {changed, flush};
 }

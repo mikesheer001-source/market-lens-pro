@@ -1,8 +1,8 @@
 import {test, expect} from '@playwright/test';
 
-test('pairing restores chart changes and a saved scan in a fresh browser context', async ({browser, baseURL}) => {
+test('two devices on the same URL automatically share chart changes and saved scans', async ({browser, baseURL}) => {
   const saved = new Map();
-  const mock = context => context.route('**/api/workspace**', async route => {
+  const mock = context => context.route('**/api/shared-workspace**', async route => {
     const request = route.request();
     const document = new URL(request.url()).searchParams.get('document');
     if (!document) {
@@ -11,6 +11,7 @@ test('pairing restores chart changes and a saved scan in a fresh browser context
     const row = saved.get(document);
     const headers = {'access-control-expose-headers':'ETag'};
     if (request.method() === 'PUT') {
+      if (request.headers()['if-match'] !== String(row?.version || 0)) return route.fulfill({status:409});
       const version = (row?.version || 0) + 1;
       saved.set(document, {version, body:request.postDataBuffer()});
       return route.fulfill({status:204, headers:{...headers, etag:String(version)}});
@@ -22,30 +23,21 @@ test('pairing restores chart changes and a saved scan in a fresh browser context
   const second = await browser.newContext({baseURL});
   try {
     await Promise.all([mock(first), mock(second)]);
-    const a = await first.newPage();
-    await a.goto('./');
+    const [a,b] = await Promise.all([first.newPage(),second.newPage()]);
+    await Promise.all([a.goto('./'),b.goto('./')]);
     await a.getByLabel('Scan name').fill('My saved scan');
     await a.getByRole('button',{name:'Save scan',exact:true}).click();
     await a.locator('.sidebar [data-tab="charts"]').click();
     await a.getByRole('button',{name:'Remove EMA 20',exact:true}).click();
-    await a.locator('.sidebar [data-tab="data"]').click();
-    await a.getByRole('button',{name:'Create synced workspace'}).click();
-    const code = a.getByLabel('Private pairing code');
-    await expect(code).toHaveValue(/^ML1-/);
-    const joinCode = await code.inputValue();
+    await expect.poll(()=>saved.get('settings')?.version ?? 0).toBeGreaterThan(0);
 
-    const b = await second.newPage();
-    await b.goto('./');
-    await b.locator('.sidebar [data-tab="data"]').click();
-    await b.getByRole('button',{name:'Join a workspace'}).click();
-    await b.getByLabel('Private pairing code').fill(joinCode);
-    await b.getByRole('button',{name:'Join workspace',exact:true}).click();
-    await expect(b.getByRole('button',{name:'Show pairing code'})).toBeVisible();
+    await expect(b.getByRole('option',{name:'My saved scan'})).toHaveCount(1,{timeout:18000});
     await b.locator('.sidebar [data-tab="charts"]').click();
     await expect(b.getByRole('button',{name:'Remove EMA 200',exact:true})).toBeVisible();
     await expect(b.getByRole('button',{name:'Remove EMA 20',exact:true})).toHaveCount(0);
-    await b.locator('.sidebar [data-tab="screener"]').click();
-    await expect(b.getByRole('option',{name:'My saved scan'})).toHaveCount(1);
+    await b.locator('.sidebar [data-tab="data"]').click();
+    await expect(b.getByRole('heading',{name:'Shared workspace'})).toBeVisible();
+    await expect(b.getByRole('button',{name:'Join a workspace'})).toHaveCount(0);
   } finally {
     await Promise.all([first.close(),second.close()]);
   }

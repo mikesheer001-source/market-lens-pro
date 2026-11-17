@@ -1,4 +1,4 @@
-import { workspaceRequest } from "./workspace.js";
+import { workspaceRequest, publicWorkspaceRequest } from "./workspace.js";
 export { Workspace } from "./workspace.js";
 import { marketScan } from "./market-scan.js";
 import { LIVE_UNIVERSE, ALPACA_BATCH_SIZE, ALPACA_SCAN_LOOKBACK_DAYS, ALPACA_SCAN_CACHE_SECONDS } from "../src/universe.js";
@@ -97,12 +97,13 @@ export default {
     if (request.method === "OPTIONS") {
       return new Response(null, { status: 204, headers: corsHeaders(origin, env) });
     }
-    if (url.pathname === "/api/workspace" && ["GET", "PUT"].includes(request.method)) {
+    const sharedWorkspace = url.pathname === "/api/shared-workspace";
+    if ((sharedWorkspace || url.pathname === "/api/workspace") && ["GET", "PUT"].includes(request.method)) {
       const ip = request.headers.get("CF-Connecting-IP") || "unknown";
       if (overRateLimit("workspace:" + ip, 120)) {
         return json({ error: "Workspace sync rate limit reached." }, 429, origin, env, { "Retry-After": "60" });
       }
-      const response = await workspaceRequest(request, env);
+      const response = await (sharedWorkspace ? publicWorkspaceRequest : workspaceRequest)(request, env);
       const headers = new Headers(response.headers);
       for (const [key, value] of Object.entries(corsHeaders(origin, env))) headers.set(key, value);
       headers.set("Cache-Control", "no-store");

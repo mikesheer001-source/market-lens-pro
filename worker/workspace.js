@@ -37,7 +37,7 @@ export class Workspace {
       if (length > limit) { await reader.cancel(); return new Response(null, {status:413}); }
       pieces.push(value);
     }
-    if (length < 29) return new Response(null, {status:400});
+    if (!length) return new Response(null, {status:400});
     const bytes = new Uint8Array(await new Blob(pieces).arrayBuffer());
     // Another request may commit while the upload is streaming.
     return this.storage.transactionSync(() => {
@@ -58,4 +58,10 @@ export function workspaceRequest(request, env) {
   if (!token) return new Response(null, {status:401});
   if (!env.WORKSPACES) return new Response(null, {status:503});
   return env.WORKSPACES.get(env.WORKSPACES.idFromName(token)).fetch(request);
+}
+
+export function publicWorkspaceRequest(request, env) {
+  if (!env.WORKSPACES) return new Response(null, {status:503});
+  const id = env.WORKSPACES.idFromName('market-lens-public-workspace-v1');
+  return env.WORKSPACES.get(id).fetch(request);
 }

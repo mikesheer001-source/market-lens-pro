@@ -54,34 +54,47 @@ async function initApp(){
     signals:'market-lens-pro-signal-history-v1',analysis:'market-lens-pro-analysis-v1',portfolio:'market-lens-pro-portfolio-v1'
   };
   let syncText='',syncUpdate=false;
+  const sharedSettings=({tab,apiBaseUrl,...rest}={})=>rest;
+  const syncEnabled=localStorage.getItem('market-lens-sync-disabled')!=='1';
+  let lastWorkspaceInput=0;
   const workspace=workspaceSync({
-    endpoint:DEFAULT_ALPACA_WORKER+'/api/workspace',names:[...Object.keys(workspaceKeys),'imports','market'],
+    endpoint:DEFAULT_ALPACA_WORKER+'/api/shared-workspace',enabled:syncEnabled,names:[...Object.keys(workspaceKeys),'imports','market'],
     read:async name=>{
       if(name==='imports')return databaseRead('symbols');
       if(name==='market')return (await databaseRead('workspace','market'))?.value;
       const raw=localStorage.getItem(workspaceKeys[name]);
-      return raw===null?undefined:JSON.parse(raw);
+      if(raw===null)return undefined;
+      const value=JSON.parse(raw);
+      return name==='settings'?sharedSettings(value):value;
     },
     write:async (name,value)=>{
       if(name==='imports'){await replaceDatasets(value);return;}
       if(name==='market'){await storeMarket(value);return;}
+      if(name==='settings'){
+        const {tab,apiBaseUrl}=JSON.parse(localStorage.getItem(workspaceKeys.settings)||'{}');
+        value={...sharedSettings(value),tab,apiBaseUrl};
+      }
       localStorage.setItem(workspaceKeys[name],JSON.stringify(value));
     },
     notify:(message,updated)=>{
       syncText=message;syncUpdate=updated;
       const status=$('#workspace-sync-status');
       if(status)status.textContent=message;
-      const update=$('.panel [data-action="workspace-update"]');
-      if(update)update.textContent=updated?'Apply synced changes':'Sync now';
-      const banner=$('#workspace-update-banner');
-      if(banner)banner.hidden=!updated;
+
     }
   });
   const saveLocal=(name,value)=>{
     const key=workspaceKeys[name];
-    if(localStorage.getItem(key)===value)return;
+    const previous=localStorage.getItem(key);
+    if(previous===value)return;
     localStorage.setItem(key,value);
-    if(workspaceReady)workspace.changed(name);
+    if(!workspaceReady)return;
+    const prior=previous===null?undefined:JSON.parse(previous);
+    if(name==='settings'){
+      const before=sharedSettings(prior);
+      if(JSON.stringify(before)===JSON.stringify(sharedSettings(JSON.parse(value))))return;
+      workspace.changed(name,before);
+    }else workspace.changed(name,prior);
   };
   let workspaceReady=false;
   await workspace.flush('startup');
@@ -348,7 +361,7 @@ async function initApp(){
       if(rows.length)render();
     }catch{notice('Local database unavailable. Imports still work until this tab closes.');}
   }
-  async function storeDataset(symbol,bars){try{const db=await openDb(),tx=db.transaction('symbols','readwrite');tx.objectStore('symbols').put({symbol,bars});await new Promise((res,rej)=>{tx.oncomplete=res;tx.onerror=()=>rej(tx.error);});db.close();workspace.changed('imports');}catch{notice('Import loaded, but this browser could not save it for future visits.');}}
+  async function storeDataset(symbol,bars){try{const previous=syncEnabled?await databaseRead('symbols'):undefined;const db=await openDb(),tx=db.transaction('symbols','readwrite');tx.objectStore('symbols').put({symbol,bars});await new Promise((res,rej)=>{tx.oncomplete=res;tx.onerror=()=>rej(tx.error);});db.close();workspace.changed('imports',previous);}catch{notice('Import loaded, but this browser could not save it for future visits.');}}
   async function removeImports(){try{const db=await openDb(),tx=db.transaction('symbols','readwrite');tx.objectStore('symbols').clear();await new Promise((res,rej)=>{tx.oncomplete=res;tx.onerror=()=>rej(tx.error);});db.close();workspace.changed('imports');}catch{}S.data=new Map(Object.entries(sampleData()));S.sources=new Map([...S.data.keys()].map(x=>[x,'SIMULATED']));S.symbol='DEMO-SPY';S.result=null;S.sweep=null;render();}
   const intradayTf=tf=>tf==='15m'||tf==='2H';
   const intradayKey=symbol=>symbol+'|'+String(S.liveFeed||'iex');
@@ -525,7 +538,7 @@ async function initApp(){
         '<details class="mobile-more"><summary class="nav-btn '+(extra.includes(S.tab)?'active':'')+
         '">More <span aria-hidden="true">⌄</span></summary><div class="mobile-more-links">'+links(extra)+'</div></details></nav>';
     };
-    $('#app').innerHTML='<a href="#main" class="skip-link">Skip to workspace</a><div class="shell"><aside class="sidebar"><div class="brand"><div class="brand-mark" aria-hidden="true">ML</div><div><strong>MARKET LENS</strong><small>PRO WORKSTATION</small></div></div><div><div class="nav-label">Workspace</div>'+nav()+'</div><div class="sidebar-bottom">DATA NOTICE<br/>Workspaces can sync between paired devices. Sample prices are simulated.<p>No trades sent.</p></div></aside><div class="workspace"><header class="topbar"><div class="top-left"><strong>Market Lens Pro</strong><span class="workspace-label">/ Independent strategy laboratory</span></div><div class="top-actions"><span class="status"><span class="dot"></span>'+ (S.mode==='live'?'Alpaca data':'Local workspace') +'</span><span class="source-badge">'+status()+'</span><div class="mode-switch flex"><button class="btn small '+(S.mode==='demo'?'selected':'')+'" aria-pressed="'+(S.mode==='demo')+'" data-action="mode-demo">Use Demo</button><button class="btn small '+(S.mode==='live'?'selected':'')+'" aria-pressed="'+(S.mode==='live')+'" data-action="mode-live">Use Live</button></div><button class="btn" data-action="import">Import CSV</button></div></header>'+nav(true)+'<main id="main" class="main" tabindex="-1"></main></div></div><input id="csv-file" type="file" accept=".csv,text/csv" multiple hidden/>';
+    $('#app').innerHTML='<a href="#main" class="skip-link">Skip to workspace</a><div class="shell"><aside class="sidebar"><div class="brand"><div class="brand-mark" aria-hidden="true">ML</div><div><strong>MARKET LENS</strong><small>PRO WORKSTATION</small></div></div><div><div class="nav-label">Workspace</div>'+nav()+'</div><div class="sidebar-bottom">DATA NOTICE<br/>Changes sync to the public site automatically. Anyone using the site can view and edit shared data.<p>No trades sent.</p></div></aside><div class="workspace"><header class="topbar"><div class="top-left"><strong>Market Lens Pro</strong><span class="workspace-label">/ Independent strategy laboratory</span></div><div class="top-actions"><span class="status"><span class="dot"></span>'+ (S.mode==='live'?'Alpaca data':'Demo data') +'</span><span class="source-badge">'+status()+'</span><div class="mode-switch flex"><button class="btn small '+(S.mode==='demo'?'selected':'')+'" aria-pressed="'+(S.mode==='demo')+'" data-action="mode-demo">Use Demo</button><button class="btn small '+(S.mode==='live'?'selected':'')+'" aria-pressed="'+(S.mode==='live')+'" data-action="mode-live">Use Live</button></div><button class="btn" data-action="import">Import CSV</button></div></header>'+nav(true)+'<main id="main" class="main" tabindex="-1"></main></div></div><input id="csv-file" type="file" accept=".csv,text/csv" multiple hidden/>';
   }
   const head=(name,desc,tools='')=>'<div class="headrow"><div><div class="eyebrow">Market Lens / '+name+'</div><h1>'+name+'</h1><p class="subtle">'+desc+'</p></div><div class="flex">'+tools+'</div></div>';
   const button=(label,action,variant='')=>'<button type="button" class="btn '+variant+'" data-action="'+action+'">'+label+'</button>';
@@ -799,7 +812,7 @@ async function initApp(){
     const rules=S.rules.map((r,i)=>'<div class="rule"><span class="visually-hidden" id="rule-label-'+i+'">Filter condition '+(i+1)+'</span>'+select([['D','D'],['W','W'],['M','M'],['2H','2H']],r.tf,'aria-label="Filter '+(i+1)+' timeframe" data-rule="'+i+'" data-key="tf"')+select([['rsi','RSI'],['emaDist','% vs EMA200'],['ret20','20-bar %'],['drawdown','Drawdown %'],['atrPct','ATR %'],['price','Price'],['volume','Volume']],r.metric,'aria-label="Filter '+(i+1)+' indicator" data-rule="'+i+'" data-key="metric"')+select([['<','<'],['<=','≤'],['>','>'],['>=','≥']],r.op,'aria-label="Filter '+(i+1)+' comparison" data-rule="'+i+'" data-key="op"')+'<input aria-label="Filter threshold '+(i+1)+'" type="number" step="any" data-rule="'+i+'" data-key="value" value="'+esc(r.value)+'"/><button data-action="remove-rule" data-index="'+i+'" aria-label="Remove filter">×</button></div>').join('');
     const table=pageRows.map(r=>{const dd=r.d.ema200==null?null:(r.d.price/r.d.ema200-1)*100;
       const wd=r.w?.ema200==null||r.w?.price==null?null:(r.w.price/r.w.ema200-1)*100;
-      return '<tr tabindex="0" role="button" aria-label="View '+esc(r.symbol)+'" class="'+(r.symbol===S.symbol?'chosen':'')+'" data-symbol="'+r.symbol+'"><td><button class="star '+(S.watch.has(r.symbol)?'on':'')+'" data-action="watch" data-symbol="'+r.symbol+'" aria-label="Toggle watchlist">'+(S.watch.has(r.symbol)?'★':'☆')+'</button><span class="table-table-label">'+r.symbol+'</span> <span class="muted">'+(r.source==='ALPACA'?'LIVE':r.source==='SIMULATED'?'DEMO':'CSV')+'</span></td><td>'+format(r.d.price)+'</td><td>'+format(r.d.rsi,1)+'</td><td>'+format(r.w.rsi,1)+'</td><td>'+format(r.d.rsi5,1)+'</td><td class="'+priceColor(dd)+'">'+pct(dd)+'</td><td class="'+priceColor(r.d.ret20)+'">'+pct(r.d.ret20)+'</td><td class="'+priceColor(r.d.drawdown)+'">'+pct(r.d.drawdown)+'</td><td>'+r.d.bars+'</td><td><span class="pill '+(r.evalResult.pass?'':'dim')+'" title="'+esc(r.evalResult.fails.join('; '))+'">'+(r.evalResult.pass?'MATCH':'NO MATCH')+'</span></td>'+
+      return '<tr tabindex="0" role="button" aria-label="View '+esc(r.symbol)+'" class="'+(r.symbol===S.symbol?'chosen':'')+'" data-symbol="'+esc(r.symbol)+'"><td><button class="star '+(S.watch.has(r.symbol)?'on':'')+'" data-action="watch" data-symbol="'+esc(r.symbol)+'" aria-label="Toggle watchlist">'+(S.watch.has(r.symbol)?'★':'☆')+'</button><span class="table-table-label">'+esc(r.symbol)+'</span> <span class="muted">'+(r.source==='ALPACA'?'LIVE':r.source==='SIMULATED'?'DEMO':'CSV')+'</span></td><td>'+format(r.d.price)+'</td><td>'+format(r.d.rsi,1)+'</td><td>'+format(r.w.rsi,1)+'</td><td>'+format(r.d.rsi5,1)+'</td><td class="'+priceColor(dd)+'">'+pct(dd)+'</td><td class="'+priceColor(r.d.ret20)+'">'+pct(r.d.ret20)+'</td><td class="'+priceColor(r.d.drawdown)+'">'+pct(r.d.drawdown)+'</td><td>'+esc(r.d.bars)+'</td><td><span class="pill '+(r.evalResult.pass?'':'dim')+'" title="'+esc(r.evalResult.fails.join('; '))+'">'+(r.evalResult.pass?'MATCH':'NO MATCH')+'</span></td>'+
         '<td class="fresh-date">'+esc(r.latestBar||'—')+staleNote(r.symbol)+'</td>'+
         '<td class="'+priceColor(wd)+'" data-weekly-ema200="'+esc(r.symbol)+'">'+pct(wd)+'</td>'+
         '<td><span class="signal-status '+(r.signal?.status==='LONG'?'signal-long':r.signal?.status==='EXIT'?'signal-exit':'signal-flat')+
@@ -1605,36 +1618,9 @@ async function initApp(){
   }
 
   function workspacePanel(){
-    const linked=!!workspace.code();
-    return '<section class="panel"><div class="panel-header"><h2>Workspace sync</h2><span id="workspace-sync-status" role="status">'+
-      esc(syncText||(linked?'Paired on this device':'Saved on this device'))+'</span></div><div class="panel-body">'+
-      '<p class="section-note">'+(linked?'Pair another device with your private code. Anyone with the code can open and edit this workspace.':
-        'Create a private workspace here, or enter its code from another device. Joining loads that workspace on this device.')+'</p>'+
-      '<div class="flex">'+(linked?button('Show pairing code','workspace-code','small')+
-        button(syncUpdate?'Apply synced changes':'Sync now','workspace-update','small')+button('Disconnect this device','workspace-disconnect','small'):
-        button('Create synced workspace','workspace-create','primary')+button('Join a workspace','workspace-join','small'))+
-      '</div><dialog class="chart-dialog" id="workspace-dialog" aria-labelledby="workspace-title"></dialog></div></section>';
-  }
-  function showWorkspaceCode(join=false){
-    const dialog=$('#workspace-dialog');
-    dialog.innerHTML=dialogHeader(join?'Join a workspace':'Pair another device','workspace-title')+
-      '<div class="panel-body"><form id="workspace-pair-form"><label class="field">Private pairing code'+
-      '<input name="code" autocomplete="off" '+(join?'required':'readonly value="'+esc(workspace.code())+'"')+'></label>'+
-      (join?'<button class="btn primary" type="submit">Join workspace</button>':button('Copy code','workspace-copy','small'))+
-      '<p role="status" id="workspace-dialog-status"></p></form></div>';
-    dialog.showModal();
-  }
-  let connectingWorkspace=false;
-  async function connectWorkspace(code){
-    if(connectingWorkspace)return;
-    connectingWorkspace=true;
-    const status=$('#workspace-dialog-status')||$('#workspace-sync-status');
-    if(status)status.textContent=code?'Joining workspace…':'Creating encrypted workspace…';
-    try{
-      await workspace.connect(code);
-      if(code){location.reload();return;}
-      render();showWorkspaceCode();
-    }catch(error){if(status)status.textContent=error.message;}finally{connectingWorkspace=false;}
+    return '<section class="panel"><div class="panel-header"><h2>Shared workspace</h2><span id="workspace-sync-status" role="status">'+
+      esc(syncText||'Changes saved automatically')+'</span></div><div class="panel-body">'+
+      '<p class="section-note">Open this same site on any device. Charts, scripts, scans, and imported data are shared publicly.</p></div></section>';
   }
   function dataView(){
     const imported=[...S.data].filter(([k])=>S.sources.get(k)==='IMPORTED');
@@ -1664,8 +1650,7 @@ async function initApp(){
     document.body.classList.toggle('chart-fullscreen-active',S.chartFullscreen&&S.tab==='charts');
     document.body.classList.toggle('chart-page-active',S.tab==='charts');
     const views={screener:screenerView,charts:chartsView,backtest:backtestView,optimize:optimizeView,scripts:scriptView,data:dataView};
-    $('#main').innerHTML='<div id="workspace-update-banner" class="notice" '+(syncUpdate?'':'hidden')+'>'+
-      button('Apply changes from another device','workspace-update','small')+'</div>'+views[S.tab]();
+    $('#main').innerHTML=views[S.tab]();
     if(S.tab==='charts'){
       if(S.data.has(S.symbol)){
         S.chartRecentSymbols=[S.symbol,...S.chartRecentSymbols.filter(symbol=>symbol!==S.symbol)].slice(0,6);
@@ -2065,7 +2050,7 @@ async function initApp(){
     const id=asCopy||!exists?'pine-'+Date.now()+'-'+Math.random().toString(36).slice(2,7):exists.id;
     const record={id,name,code:S.scriptCode,settings:{...S.scriptSettings}};
     if(exists&&!asCopy)Object.assign(exists,record);else S.scriptLibrary.push(record);
-    S.scriptId=id;persistPineLibrary();persistPineDraft();S.scriptOutput='Saved locally: '+name;render();
+    S.scriptId=id;persistPineLibrary();persistPineDraft();S.scriptOutput='Saved: '+name;render();
   }
   async function executeCurrentPine(){
     try{
@@ -2554,15 +2539,6 @@ async function initApp(){
         trainTrades:r.train.trades,testReturn:r.test.returnPct,testDrawdown:r.test.maxDD,
         testTrades:r.test.trades,testSharpe:r.test.sharpe,testProfitFactor:r.test.profitFactor}))));},
     'export-sample':()=>{const b=S.data.get('DEMO-SPY');exportFile('SIMULATED-DEMO-SPY.csv',csvDownload(b.map(x=>({Date:x.time,Symbol:'DEMO-SPY',Open:x.open,High:x.high,Low:x.low,Close:x.close,Volume:x.volume}))));},
-    'workspace-create':()=>void connectWorkspace(),
-    'workspace-join':()=>showWorkspaceCode(true),
-    'workspace-code':()=>showWorkspaceCode(),
-    'workspace-copy':async ()=>{
-      try{await navigator.clipboard.writeText(workspace.code());$('#workspace-dialog-status').textContent='Code copied.';}
-      catch{$('#workspace-pair-form input')?.select();}
-    },
-    'workspace-update':async ()=>{if(await workspace.flush('startup'))location.reload();},
-    'workspace-disconnect':async ()=>{await workspace.disconnect();syncText='';syncUpdate=false;render();},
     'clear-imports':()=>removeImports(),
     'choose-symbol':el=>{restoreSymbolState(el.dataset.symbol);S.tab='charts';render();}
   };
@@ -2587,11 +2563,6 @@ async function initApp(){
   },true);
   document.addEventListener('submit',ev=>{
     const form=ev.target;
-    if(form.id==='workspace-pair-form'){
-      ev.preventDefault();
-      if(!workspace.code())void connectWorkspace(new FormData(form).get('code'));
-      return;
-    }
     if(!form.closest('#chart-indicator-dialog'))return;
     ev.preventDefault();
     const key=form.dataset.indicatorKey;
@@ -2746,15 +2717,21 @@ async function initApp(){
   }
   if(S.tab==='charts'&&saved.chart?.tf&&S.chart.tf!==saved.chart.tf){S.chart.tf=saved.chart.tf;render();}
   workspaceReady=true;
-  if(workspace.code())void workspace.flush();
-  setInterval(()=>{if(document.visibilityState==='visible')void workspace.flush();},20_000);
-  window.addEventListener('online',()=>void workspace.flush());
-  document.addEventListener('visibilitychange',async ()=>{
-    if(document.visibilityState!=='visible'||!workspace.code())return;
-    await workspace.flush();
-    if(syncUpdate&&!$('dialog[open]')&&!market.controller&&!document.activeElement?.matches('input, textarea, select')){
+  if(syncEnabled){
+    for(const event of ['pointerdown','wheel','keydown','input']){
+      document.addEventListener(event,()=>{lastWorkspaceInput=performance.now();},{passive:true});
+    }
+    async function refreshSharedWorkspace(){
+      if(document.visibilityState!=='visible')return;
+      await workspace.flush();
+      if(!syncUpdate||performance.now()-lastWorkspaceInput<4000||$('dialog[open]')||
+        market.controller||S.analysisLoading||S.portfolioLoading||
+        document.activeElement?.matches('input, textarea, select'))return;
       if(await workspace.flush('startup'))location.reload();
     }
-  });
+    setInterval(()=>void refreshSharedWorkspace(),8000);
+    window.addEventListener('online',()=>void refreshSharedWorkspace());
+    document.addEventListener('visibilitychange',()=>void refreshSharedWorkspace());
+  }
 }
 initApp().catch(err=>{document.getElementById('app').textContent='App startup failed: '+err.message;console.error(err);});
