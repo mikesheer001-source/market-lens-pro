@@ -1325,7 +1325,7 @@ async function initApp(){
   }
   function variantComparisonView(){
     const compatible=canCompareVariant(variantSetup());
-    return '<section class="panel" id="variant-comparison"><div class="panel-header"><h2>Compare backtest variants</h2><div class="flex">'+
+    return '<section class="panel" id="variant-comparison"><div class="panel-header"><h2>Compare variants</h2><div class="flex">'+
       button(S.variantBaseline?'Replace baseline':'Pin baseline','pin-variant-baseline','small')+
       '<button type="button" class="btn small primary" data-action="compare-variant"'+(compatible?'':' disabled')+
       '>Compare current settings</button></div></div><div class="panel-body" id="variant-result">'+variantResultView()+'</div></section>';
