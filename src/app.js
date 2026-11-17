@@ -13,7 +13,7 @@ import {compareStrategies,sortLeaderboard,leaderboardBest,updateSymbolMemory,pru
 import {runPortfolio,runPortfolioSweep,portfolioUniverse} from './portfolio.js';
 import {windowBacktestBars,windowPortfolioData,validateBacktestRange,actualPortfolioRange,displayBacktestRange} from './date-window.js';
 import {runBestFitPortfolio} from './best-fit-portfolio.js';
-import {holdoutSummary} from './validation.js';
+import {assessHoldout,holdoutSummary} from './validation.js';
 import {compareStrategiesInRange,leaderboardRangeStatus,rangeLabel} from './leaderboard-range.js';
 import {rollingPositiveText,rollingWindowDates,rollingLeaderboardSummary,ROLLING_WINDOW_COUNT} from './rolling-validation.js';
 import {VALIDATION_RULE,validationReasons,validationStatus,filterValidatedLeaderboard,
@@ -96,7 +96,9 @@ async function initApp(){
     chartRecentSymbols:Array.isArray(saved.chartRecentSymbols)?saved.chartRecentSymbols.filter(s=>typeof s==='string').slice(0,6):[],
     chartRecentFrames:Array.isArray(saved.chartRecentFrames)?saved.chartRecentFrames.slice(0,3):[],
     hiddenScreenColumns:Array.isArray(saved.hiddenScreenColumns)?saved.hiddenScreenColumns.filter(i=>Number.isInteger(i)&&i>=2&&i<=13):[],
-    backtestSections:{},
+    backtestSections:{},scanReview:null,
+    variantBaseline:saved.variantBaseline?.options&&typeof saved.variantBaseline.symbol==='string'?saved.variantBaseline:null,
+    variantComparison:null,
     scriptCode:typeof draft.code==='string'?draft.code:PINE_EXAMPLES[0].code,
     scriptName:typeof draft.name==='string'?draft.name:'EMA crossover',
     scriptId:draft.id||null,
@@ -118,7 +120,7 @@ async function initApp(){
     tab:S.tab,lastSymbol:S.symbol,lastBacktestSymbol:S.lastBacktestSymbol,
     lastLiveSymbol:S.lastLiveSymbol,lastDemoSymbol:S.lastDemoSymbol,watch:[...S.watch],watchlists:S.watchlists,watchlistId:S.watchlistId,alerts:S.alerts,savedScans:S.savedScans,rules:S.rules,chart:S.chart,bt:S.bt,portfolioMode:S.portfolioMode,bestFitMode:S.bestFitMode,bestFitValidatedOnly:S.bestFitValidatedOnly,btRange:S.btRange,portfolioScope:S.portfolioScope,portfolioWatchlistId:S.portfolioWatchlistId,signalSelection:S.signalSelection,signalsOnly:S.signalsOnly,
     leaderboardValidatedOnly:S.leaderboardValidatedOnly,fitValidatedOnly:S.fitValidatedOnly,apiBaseUrl:S.apiBaseUrl,universeFilter:S.universeFilter,
-    chartRecentSymbols:S.chartRecentSymbols,chartRecentFrames:S.chartRecentFrames,hiddenScreenColumns:S.hiddenScreenColumns}));}catch{}};
+    chartRecentSymbols:S.chartRecentSymbols,chartRecentFrames:S.chartRecentFrames,hiddenScreenColumns:S.hiddenScreenColumns,variantBaseline:S.variantBaseline}));}catch{}};
   function rememberPortfolio(){
     S.portfolioTimestamp=new Date().toISOString();
     try{localStorage.setItem('market-lens-pro-portfolio-v1',JSON.stringify({
@@ -528,6 +530,77 @@ async function initApp(){
     const snapshotNote=loaded?'<div class="info-strip warning" role="status">Showing saved scan snapshot: '+esc(loaded.name)+' from '+esc(loaded.savedAt)+' ('+esc(loaded.source)+'). These are archived values, not live quotes. Select Scan/Refresh to replace the snapshot.</div>':'';
     return snapshotNote;
   }
+  const screenMetrics={price:'Close',rsi:'RSI',emaDist:'vs. EMA200',ret20:'20-bar return',
+    drawdown:'Drawdown',atrPct:'ATR',volume:'Volume'};
+  const screenFrames={D:'Daily',W:'Weekly',M:'Monthly'};
+  function screenRuleValues(result){
+    if(!result.checks)return '<p>This saved scan has no recorded rule readings.</p>'+
+      (result.fails?.length?'<p>'+esc(result.fails.join(' · '))+'</p>':'');
+    if(!result.checks.length)return '<p>No active screen rules.</p>';
+    return '<ul class="scan-rule-values">'+result.checks.map(({tf,metric,op,threshold,value,pass})=>{
+      const unit=['emaDist','ret20','drawdown','atrPct'].includes(metric)?'%':'';
+      const precise=Math.abs(value-threshold)<.01&&value!==threshold;
+      const num=n=>Number.isFinite(n)?(precise?String(n):n.toLocaleString('en-US',{maximumFractionDigits:2}))+unit:'—';
+      return '<li><span>'+esc((screenFrames[tf]||tf)+' '+(screenMetrics[metric]||metric))+'</span><strong>'+
+        (Number.isFinite(value)?esc(num(value)+' '+op+' '+num(threshold)):'Unavailable')+'</strong><span class="'+
+        (pass?'positive':'negative')+'">'+(pass?'Pass':'Fail')+'</span></li>';
+    }).join('')+'</ul>';
+  }
+  function reviewableMatches(rows){
+    return rows.filter(row=>row.evalResult.pass&&S.data.has(row.symbol)&&modeSymbol(row.symbol));
+  }
+  function openScannedChart(symbol){
+    const rows=reviewableMatches(screenerRows());
+    const target=symbol||rows[0]?.symbol;
+    if(!target)return;
+    const dialog=$('#screener-dialog');
+    if(dialog?.open)dialog.close();
+    S.scanReview={rows,mode:S.mode,snapshot:S.savedScanView?.savedAt,scrollY:window.scrollY,
+      scrollLeft:$('.screener-results')?.parentElement.scrollLeft||0};
+    restoreSymbolState(target);S.tab='charts';render();
+    window.scrollTo(0,0);
+  }
+  function returnToScreener(){
+    const review=S.scanReview?.mode===S.mode?S.scanReview:null;
+    S.scanReview=null;S.chartFullscreen=false;S.tab='screener';render();
+    if(review){
+      $('.screener-results').parentElement.scrollLeft=review.scrollLeft;
+      window.scrollTo(0,review.scrollY);
+    }
+  }
+  function scanReviewControls(){
+    const review=S.scanReview;
+    if(review?.mode!==S.mode)return '';
+    const index=review.rows.findIndex(row=>row.symbol===S.symbol);
+    const nav=(label,direction,disabled)=>'<button type="button" class="btn small" data-action="review-step" data-step="'+
+      direction+'"'+(disabled?' disabled':'')+'>'+label+'</button>';
+    return '<div class="match-review" aria-label="Screener review">'+
+      button('Screener','return-screener','small')+(index<0?'':nav('Previous',-1,index===0)+
+      '<span role="status">'+(index+1)+' / '+review.rows.length+'</span>'+
+      nav('Next match',1,index===review.rows.length-1)+button('Rules','review-rules','small'))+'</div>';
+  }
+  function stepScanReview(direction){
+    const review=S.scanReview;
+    if(review?.mode!==S.mode)return;
+    const index=review.rows.findIndex(row=>row.symbol===S.symbol);
+    const target=review.rows[index+direction];
+    if(index<0||!target||!S.data.has(target.symbol)||!modeSymbol(target.symbol))return;
+    const tf=S.chart.tf;
+    restoreSymbolState(target.symbol);S.chart.tf=tf;render();
+    const buttons=[...document.querySelectorAll('[data-action="review-step"]')];
+    (buttons.find(btn=>Number(btn.dataset.step)===direction&&!btn.disabled)||
+      buttons.find(btn=>!btn.disabled))?.focus({preventScroll:true});
+  }
+  function showReviewRules(){
+    const review=S.scanReview,row=review?.rows.find(item=>item.symbol===S.symbol);
+    const dialog=$('#scan-rules-dialog');
+    if(!row||!dialog)return;
+    dialog.innerHTML=dialogHeader(row.symbol+' scan rules','scan-rules-title')+
+      '<div class="screener-detail"><p>'+esc(review.snapshot?'Saved scan · '+review.snapshot:
+        'Screener readings'+(row.latestBar?' · bars through '+dateLabel(row.latestBar):''))+
+      '</p>'+screenRuleValues(row.evalResult)+'</div>';
+    dialog.showModal();
+  }
   const screenColumns=['Close','RSI D','RSI W','RSI 5D','% vs D EMA200','20D return','Drawdown','Bars','Result','Latest bar','% vs W EMA200','Strategy signal'];
   function openScreenerDialog(symbol){
     const dialog=$('#screener-dialog');
@@ -548,14 +621,14 @@ async function initApp(){
       dialog.innerHTML=dialogHeader(symbol,'screener-dialog-title')+
         '<div class="screener-detail"><p>'+esc(row.source||'Unknown source')+'</p>'+staleNote(symbol)+
         '<dl>'+screenColumns.map((label,i)=>'<div><dt>'+label+'</dt><dd>'+esc(values[i])+'</dd></div>').join('')+'</dl>'+
-        (row.evalResult.fails.length?'<p>'+esc(row.evalResult.fails.join(' · '))+'</p>':'')+
-        '<button type="button" class="btn primary small" data-action="choose-symbol" data-symbol="'+esc(symbol)+'">Open chart</button></div>';
+        screenRuleValues(row.evalResult)+
+        '<button type="button" class="btn primary small" data-action="screener-chart" data-symbol="'+esc(symbol)+'">Open chart</button></div>';
     }
     dialog.showModal();
   }
   function openScreenerRow(row){
     if(matchMedia('(max-width: 800px)').matches)openScreenerDialog(row.dataset.symbol);
-    else{restoreSymbolState(row.dataset.symbol);S.tab='charts';render();}
+    else openScannedChart(row.dataset.symbol);
   }
   function screenerView(){
     const symbols=[...S.data.keys()].filter(isVisibleSymbol),all=symbols.map(symbol=>screenSymbol(S.data.get(symbol),S.rules)),rows=screenerRows();
@@ -589,7 +662,8 @@ async function initApp(){
     const factBar=(S.mode==='demo'||S.sources.get('VXX')==='ALPACA')?S.data.get(factSymbol)?.at(-1):null;
     const factLabel=S.mode==='live'?'ALPACA VXX DAILY CLOSE':'SIMULATED DAILY CLOSE';
     const fact=factBar?'<div class="market-fact" role="status"><span class="market-fact-label">'+factLabel+'</span><strong>'+esc(factSymbol)+' &nbsp; $'+format(factBar.close)+'</strong><small>Bar date: '+esc(String(factBar.time))+(S.mode==='live'?' · '+esc(String(S.liveFeed).toUpperCase())+' feed · Alpaca daily close, not a last-trade quote':' · simulated, not a market quote')+'</small></div>':S.mode==='live'?'<div class="market-fact warning" role="status">Alpaca VXX daily close unavailable — VXX was not returned by the connected feed.</div>':'';
-    return head('Screener','Filter '+symbols.length+' '+(S.mode==='live'?'Alpaca instruments':'demo or imported instruments')+' with explicit technical conditions.',button('Open Chart Lab','view-charts','primary'))+fact+activeAlertBanner()+activeSnapshotBanner()+
+    return head('Screener','Filter '+symbols.length+' '+(S.mode==='live'?'Alpaca instruments':'demo or imported instruments')+' with explicit technical conditions.',button('Open Chart Lab','view-charts','small')+
+        (reviewableMatches(rows).length?button('Review matches','screener-chart','primary'):''))+fact+activeAlertBanner()+activeSnapshotBanner()+
       '<div class="metrics">'+metric(S.savedScanView?'Saved rows':'Symbols loaded',S.savedScanView?rows.length:all.length,S.savedScanView?'Historical snapshot':S.mode==='live'?'Alpaca universe':'Demo and imported data')+metric('Matching filters',matched,'All visible symbols')+metric('Visible results',rows.length,'Search and match filter')+metric('Active conditions',S.rules.length,'AND logic; all must pass') +'</div>'+scanStatus+freshnessBadge+
       '<div class="panel"><div class="panel-header"><h2>Screen rules</h2><div class="flex"><label class="control">Preset '+select([['custom','Custom rules'],['trend','Trend pullback'],['original','Original strict W/D/2H'],['oversold','RSI oversold'],['momentum','Momentum'],['volatility','VXX / Volatility'],['all','Show all']],presetKey,'data-option="preset"')+'</label>'+button('+ Add rule','add-rule')+'</div></div><div class="panel-body"><div class="filters">'+(rules||'<span class="muted">No filters — showing all instruments.</span>')+'</div><div class="section-note" style="margin-top:12px">“Original strict” reproduces the weekly EMA200 and weekly/daily/two-hour RSI filter logic. RSI 5D is calculated from daily closes; daily bars cannot reconstruct true two-hour data. The VXX / Volatility preset narrows the universe to VXX, UVXY, SVXY, VIXY, VIXM, VXZ, SVIX, UVIX, SVOL and ZVOL, using daily RSI, 252-session drawdown and % versus daily EMA200. Demo mode uses the clearly labeled synthetic DEMO-VXX proxy.</div></div></div>'+
       '<div class="panel"><div class="panel-header"><h2>Market results</h2><div class="flex">'+button(S.mode==='live'?'Refresh live scan':'Scan demo universe','scan-universe','small primary')+button('Export screener CSV','export-screener','small')+button('Columns','screener-columns','small')+
@@ -774,7 +848,7 @@ async function initApp(){
       '<strong>'+esc(S.symbol)+' daily bars lag the observed universe reference '+esc(S.freshness.expected)+'</strong>'+
       staleNote(S.symbol)+'</div>':'';
     const panel='<div class="panel '+(S.chartFullscreen?'chart-is-fullscreen':'')+
-      '" id="chart-lab-panel" data-fullscreen="'+S.chartFullscreen+'">'+chartControls()+
+      '" id="chart-lab-panel" data-fullscreen="'+S.chartFullscreen+'">'+chartControls()+scanReviewControls()+
       '<div class="chart-readout" id="readout">'+chartReadout(b.at(-1))+'</div>'+
       '<div class="chart-stage" id="chart-stage"><div class="chart-area" id="price-chart"></div>'+
       chartIndicatorLegend(b)+'</div><div class="chart-ranges" aria-label="Chart range" role="group">'+
@@ -783,7 +857,8 @@ async function initApp(){
       (intradayTf(S.chart.tf)?button('Refresh 15m bars','refresh-intraday','small chart-refresh'):'')+
       '<span class="visually-hidden" id="chart-axis-hint" role="status"></span></div>'+
       '<dialog id="chart-indicator-dialog" class="chart-dialog" aria-labelledby="chart-dialog-title"></dialog>'+
-      '<dialog id="chart-symbol-dialog" class="chart-dialog" aria-labelledby="chart-symbol-title"></dialog></div>';
+      '<dialog id="chart-symbol-dialog" class="chart-dialog" aria-labelledby="chart-symbol-title"></dialog>'+
+      '<dialog id="scan-rules-dialog" class="chart-dialog" aria-labelledby="scan-rules-title"></dialog></div>';
     const footer=S.chartFullscreen?'':'<p class="chart-data">'+esc(S.symbol)+' · '+
       (source==='SIMULATED'?'Simulated':source==='ALPACA'?'Alpaca '+esc(String(S.liveFeed).toUpperCase()):'Imported')+
       ' · '+b.length+' '+esc(S.chart.tf)+' bars</p>';
@@ -1192,6 +1267,88 @@ async function initApp(){
     return '<details class="panel backtest-details" data-backtest-section="'+key+'"'+
       ((S.backtestSections[key]??open)?' open':'')+'><summary><h2>'+title+'</h2></summary>'+body+'</details>';
   }
+  const variantSharedFields=['capital','allocation','feeBps','slipBps','borrowAnnualPct'];
+  const variantLabels={strategy:'Strategy',side:'Trade direction',fast:'Fast EMA',slow:'Slow / trend EMA',
+    rsiPeriod:'RSI length',buyLevel:'Buy RSI threshold',sellLevel:'Exit RSI threshold',
+    period:'Lookback / band length',multiplier:'Bollinger deviation',stopPct:'Stop loss (%)',targetPct:'Take profit (%)'};
+  function backtestScript(){
+    return S.activeStrategy||{code:S.scriptCode,settings:S.scriptSettings,name:S.scriptName};
+  }
+  function variantSetup(){
+    return {symbol:S.symbol,tf:S.chart.tf,source:comparisonSource(),options:{...S.bt},
+      script:S.bt.strategy==='pine-custom'?backtestScript():null};
+  }
+  function canCompareVariant(setup){
+    const base=S.variantBaseline;
+    return !!base&&base.symbol===setup.symbol&&base.tf===setup.tf&&base.source===setup.source;
+  }
+  function variantKey(setup){return JSON.stringify([setup,S.btRange]);}
+  function variantData(){
+    return intradayTf(S.chart.tf)&&S.sources.get(S.symbol)==='ALPACA'?
+      S.intraday.get(intradayKey(S.symbol)):S.data.get(S.symbol);
+  }
+  function variantResultView(){
+    const setup=variantSetup(),base=S.variantBaseline,report=S.variantComparison;
+    if(!base)return '<p>Pin your current strategy settings, then change a parameter and compare.</p>';
+    const caption='<p><strong>Baseline</strong> · '+esc(base.symbol+' · '+base.tf+' · '+base.source+' · '+
+      (base.script?.name||base.options.strategy))+'</p>';
+    if(!canCompareVariant(setup))return caption+'<p>To compare, return to the baseline symbol, timeframe and source.</p>';
+    const shared=base.options;
+    const costs='<p>Both runs use the selected dates and baseline costs · '+format(shared.feeBps)+' bps commission and '+
+      format(shared.slipBps)+' bps slippage per side · '+format(shared.borrowAnnualPct)+'% annual short borrow · $'+
+      format(shared.capital)+' starting capital · '+format(shared.allocation)+'% allocation.</p>';
+    if(!report||report.key!==variantKey(setup)||report.data!==variantData())return caption+costs;
+    const diffs=Object.entries(variantLabels).filter(([key])=>base.options[key]!==setup.options[key])
+      .map(([key,label])=>label+' '+base.options[key]+' → '+setup.options[key]);
+    if(JSON.stringify(base.script)!==JSON.stringify(setup.script)&&base.script&&setup.script)
+      diffs.push('Pine script or inputs changed');
+    const table=[
+      ['Return','returnPct',2,'%',' pp'],
+      ['Max drawdown','maxDD',2,'%',' pp'],
+      ['Trade count','trades',0,'',''],
+      ['OOS Sharpe','oosSharpe',3,'','']
+    ].map(([label,key,digits,unit,deltaUnit])=>{
+      const first=report.baseline[key],second=report.variant[key];
+      const value=n=>Number.isFinite(n)?format(n,digits)+unit:'—';
+      const delta=Number.isFinite(first)&&Number.isFinite(second)?second-first:null;
+      return '<tr><th scope="row">'+label+'</th><td>'+value(first)+'</td><td>'+value(second)+'</td><td>'+
+        (delta===null?'—':(delta>0?'+':'')+format(delta,digits)+deltaUnit)+'</td></tr>';
+    }).join('');
+    return caption+costs+'<p>'+esc(displayBacktestRange(report.range))+'</p>'+
+      '<p>'+esc(diffs.length?diffs.join(' · '):'Same strategy settings')+'</p>'+
+      '<div class="table-wrap"><table class="data-table"><thead><tr><th>Metric</th><th>Baseline</th>'+
+      '<th>Variant</th><th>Δ</th></tr></thead><tbody>'+table+'</tbody></table></div>'+
+      '<p>OOS Sharpe uses the final 30% holdout · '+esc(report.test.testStart||'—')+' to '+
+      esc(report.test.testEnd||'—')+' ('+report.test.testBars+' bars).'+
+      (report.test.enoughTestBars?'':' At least 30 holdout bars are required.')+'</p>'+
+      (report.notice?'<p>'+esc(report.notice)+'</p>':'');
+  }
+  function variantComparisonView(){
+    const compatible=canCompareVariant(variantSetup());
+    return '<section class="panel" id="variant-comparison"><div class="panel-header"><h2>Compare backtest variants</h2><div class="flex">'+
+      button(S.variantBaseline?'Replace baseline':'Pin baseline','pin-variant-baseline','small')+
+      '<button type="button" class="btn small primary" data-action="compare-variant"'+(compatible?'':' disabled')+
+      '>Compare current settings</button></div></div><div class="panel-body" id="variant-result">'+variantResultView()+'</div></section>';
+  }
+  async function compareVariant(){
+    const setup=variantSetup(),baseline=S.variantBaseline,key=variantKey(setup);
+    if(!canCompareVariant(setup)||!await ensureAnalysisBars('Compare variants'))return;
+    if(S.tab!=='backtest'||S.portfolioMode||baseline!==S.variantBaseline||key!==variantKey(variantSetup()))return;
+    S.variantComparison=null;
+    try{
+      const window=selectedBacktestWindow();
+      const overrides=Object.fromEntries(variantSharedFields.map(name=>[name,baseline.options[name]]));
+      const evaluate=(options,script)=>{
+        const cfg=backtestConfig(window.bars,{...options,...overrides},script);
+        const result=backtest(window.bars,cfg),holdout=assessHoldout(window.bars,cfg,backtest);
+        return {metrics:{...result.metrics,oosSharpe:holdout.validation.enoughTestBars?holdout.testMetrics?.sharpe:null},
+          test:holdout.validation,notice:result.notice};
+      };
+      const a=evaluate(baseline.options,baseline.script),b=evaluate(setup.options,setup.script);
+      S.variantComparison={key,data:variantData(),range:window.range,baseline:a.metrics,variant:b.metrics,test:a.test,notice:a.notice};
+    }catch(err){notice(err.message);}
+    $('#variant-result').innerHTML=variantResultView();
+  }
   function backtestView(){
     if(S.portfolioMode)return portfolioBacktestView();
     const dataStatus=S.analysisLoading?
@@ -1217,7 +1374,7 @@ async function initApp(){
         ' · last bar date '+esc(S.result.range?.actualEnd||'unknown')+'</div>':'');
     return head('Backtest','Signals use completed bars and next-open fills. One position at a time, long or short.',symbolSelect()+tfSelect())+
       portfolioModeControl()+provenance+(S.result?validation+performance+equity+settings:settings+performance+equity)+
-      backtestSection('trades','Trade log',tradeTable(S.result))+
+      variantComparisonView()+backtestSection('trades','Trade log',tradeTable(S.result))+
       leaderboardView()+universeFitView();
   }
   function optimizeView(){
@@ -1485,24 +1642,27 @@ async function initApp(){
   function exportFile(name,contents,mime='text/csv'){
     const obj=new Blob([contents],{type:mime}),url=URL.createObjectURL(obj),link=document.createElement('a');link.href=url;link.download=name;document.body.append(link);link.click();link.remove();setTimeout(()=>URL.revokeObjectURL(url),1000);
   }
+  function selectedBacktestWindow(){
+    const window=windowBacktestBars(bars(),S.btRange);
+    if(window.bars.length<40)throw Error('Selected backtest date range has only '+
+      window.bars.length+' bars; at least 40 are required. Choose a wider range.');
+    return window;
+  }
+  function backtestConfig(bars,options,script){
+    const cfg={...options,timeframe:S.chart.tf};
+    if(cfg.strategy==='pine-custom'){
+      const program=compilePine(script.code);
+      if(program.mode!=='strategy')throw new PineError(1,'Select a strategy() script to backtest');
+      cfg.customSignals=executePine(program,bars,script.settings).signals;
+    }
+    return cfg;
+  }
   const runBt=()=>{
     let window;
+    try{window=selectedBacktestWindow();}
+    catch(error){S.backtestError=String(error.message||error);notice(S.backtestError);return false;}
     try{
-      window=windowBacktestBars(bars(),S.btRange);
-      if(window.bars.length<40)throw Error('Selected backtest date range has only '+
-        window.bars.length+' bars; at least 40 are required. Choose a wider range.');
-    }catch(error){S.backtestError=String(error.message||error);notice(S.backtestError);return false;}
-    const b=window.bars;
-    try{
-      const cfg={...S.bt,timeframe:S.chart.tf};
-      if(cfg.strategy==='pine-custom'){
-        const active=S.activeStrategy||{code:S.scriptCode,settings:{...S.scriptSettings}};
-        const program=compilePine(active.code);
-        if(program.mode!=='strategy')throw new PineError(1,'Select a strategy() script to backtest');
-        const calculated=executePine(program,b,active.settings);
-        cfg.customSignals=calculated.signals;
-      }
-      S.result=backtest(b,cfg);
+      S.result=backtest(window.bars,backtestConfig(window.bars,S.bt,backtestScript()));
       S.result.range=window.range;
       S.result.source=S.sources.get(S.symbol)==='ALPACA'?
         'ALPACA '+String(S.liveFeed).toUpperCase()+' '+S.chart.tf:
@@ -1983,6 +2143,10 @@ async function initApp(){
     'indicator-settings':el=>openIndicatorDialog(el.dataset.indicatorKey),
     'close-dialog':el=>el.closest('dialog')?.close(),
     'screener-columns':()=>openScreenerDialog(),
+    'screener-chart':el=>openScannedChart(el.dataset.symbol),
+    'return-screener':returnToScreener,
+    'review-step':el=>stepScanReview(Number(el.dataset.step)),
+    'review-rules':showReviewRules,
     'chart-symbol-picker':()=>openChartSymbolPicker(),
     'chart-choose-symbol':el=>{
       restoreSymbolState(el.dataset.symbol);
@@ -2001,6 +2165,11 @@ async function initApp(){
     'draw-line':()=>{S.drawLine=!S.drawLine;preserveChartViewport();render();},
     'clear-lines':()=>{S.chart.lines[S.symbol]=[];preserveChartViewport();render();},
     'chart-png':()=>{if(!chart)return;try{const canvas=chart.takeScreenshot();canvas.toBlob(blob=>{if(!blob)return;const url=URL.createObjectURL(blob),a=document.createElement('a');a.href=url;a.download='market-lens-'+S.symbol+'.png';a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);});}catch{notice('Chart image export is unsupported in this browser.');}},
+    'pin-variant-baseline':()=>{
+      S.variantBaseline=structuredClone(variantSetup());S.variantComparison=null;render();
+      $('[data-action="compare-variant"]').focus({preventScroll:true});
+    },
+    'compare-variant':compareVariant,
     'run-backtest':async ()=>{
       if(S.portfolioMode){if(S.bestFitMode)void runBestFitCurrent();else runPortfolioCurrent();return;}
       S.lastBacktestSymbol=S.symbol;saveSettings();
@@ -2081,6 +2250,7 @@ async function initApp(){
   document.addEventListener('click',ev=>{
     const btn=ev.target.closest('[data-tab],[data-action]');if(btn){
       if(btn.dataset.tab){
+        if(btn.dataset.tab==='screener'&&S.tab!=='screener'&&S.scanReview){returnToScreener();return;}
         S.tab=btn.dataset.tab;
         if(S.tab==='briefing'&&S.mode==='live'&&S.scan.status==='complete')
           try{captureBriefing();S.briefingError='';}
@@ -2211,7 +2381,12 @@ async function initApp(){
       if(S.portfolioMode&&S.bestFitMode&&bestFitAttempted)void runBestFitCurrent();
       else if(fitEverStarted)void runUniverseFitCurrent({reuseData:true});else render();return;
     }
-    if(el.dataset.bt){const key=el.dataset.bt;S.bt[key]=el.type==='number'?Number(el.value):el.value;S.result=null;S.sweep=null;saveSettings();return;}
+    if(el.dataset.bt){
+      const key=el.dataset.bt;
+      S.bt[key]=el.type==='number'?Number(el.value):el.value;S.result=null;S.sweep=null;saveSettings();
+      const detail=$('#variant-result');if(detail)detail.innerHTML=variantResultView();
+      return;
+    }
   });
   document.addEventListener('dragover',ev=>{if(ev.target.closest('#dropzone')){ev.preventDefault();ev.target.closest('#dropzone').classList.add('dragging');}});
   document.addEventListener('drop',async ev=>{const drop=ev.target.closest('#dropzone');if(drop){ev.preventDefault();drop.classList.remove('dragging');await importFiles([...ev.dataTransfer.files].filter(f=>f.name.toLowerCase().endsWith('.csv')));}});

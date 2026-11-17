@@ -51,7 +51,8 @@ export function makeScanSnapshot(rows,options={}){
     sort:options.sort||'symbol',ascending:options.ascending!==false,
     // Copy computed indicator stats: a saved scan never pretends to be fresh market data.
     rows:rows.slice(0,200).map(({symbol,d,w,evalResult,source,latestBar:sourceLatestBar,signal:sourceSignal})=>({
-      symbol,d:{...d},w:{...w},evalResult:{pass:!!evalResult.pass,fails:[...(evalResult.fails||[])]},source,
+      symbol,d:{...d},w:{...w},evalResult:{pass:!!evalResult.pass,fails:[...(evalResult.fails||[])],
+        checks:evalResult.checks?.map(check=>({...check}))},source,
       latestBar:sourceLatestBar??null,signal:sourceSignal??null
     }))
   };

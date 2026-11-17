@@ -126,14 +126,15 @@ function valueFor(stats,metric) {
 
 function screenSymbol(allBars,rules) {
   const cache={};const get=tf=>cache[tf]??=statsFor(aggregate(allBars,tf));
-  const fails=[];
+  const fails=[],checks=[];
   for(const rule of rules){
     if(rule.enabled===false)continue;
     const value=valueFor(get(rule.tf||'D'),rule.metric),threshold=Number(rule.value);
     const ok=value!==null&&Number.isFinite(value)&&Number.isFinite(threshold)&&({'>':value>threshold,'>=':value>=threshold,'<':value<threshold,'<=':value<=threshold,'=':value===threshold}[rule.op]??false);
+    checks.push({tf:rule.tf||'D',metric:rule.metric,op:rule.op,threshold,value,pass:ok});
     if(!ok)fails.push(value==null?'Insufficient '+(rule.tf||'D')+' data for '+rule.metric:rule.metric+' '+rule.op+' '+rule.value+' not met');
   }
-  return {pass:fails.length===0,fails,stats:get('D')};
+  return {pass:fails.length===0,fails,checks,stats:get('D')};
 }
 
 function signalSets(bars,o={}){

@@ -505,3 +505,14 @@ tr[data-vol-symbol] td:nth-child(3){min-width:138px}
   .mobile-nav .nav-btn{font-size:10px}
   .chart-toolbar-actions>button,.chart-toolbar select{padding-inline:4px}
 }
+
+/* Screener review and paired backtests */
+.match-review{display:flex;align-items:center;gap:4px;flex-wrap:wrap;padding:3px 8px;border-bottom:1px solid var(--border)}
+.match-review .btn.small{min-height:34px;padding:4px 8px}
+.match-review [role=status]{padding:0 4px;color:var(--muted);font-size:12px;font-variant-numeric:tabular-nums}
+.chart-is-fullscreen .match-review{flex:none}
+.scan-rule-values{padding:0;margin:8px 0 12px;list-style:none}
+.scan-rule-values li{display:grid;grid-template-columns:minmax(80px,1fr) minmax(0,auto) auto;align-items:baseline;gap:6px;padding:6px 0;border-bottom:1px solid var(--border);font-size:12px}
+.scan-rule-values strong{font-variant-numeric:tabular-nums;overflow-wrap:anywhere}
+#variant-result p{margin:0 0 9px;color:var(--muted);font-size:13px}
+#variant-result .table-wrap{margin-bottom:9px}
