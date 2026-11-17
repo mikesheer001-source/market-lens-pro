@@ -1664,7 +1664,7 @@ async function initApp(){
     document.body.classList.toggle('chart-fullscreen-active',S.chartFullscreen&&S.tab==='charts');
     document.body.classList.toggle('chart-page-active',S.tab==='charts');
     const views={screener:screenerView,charts:chartsView,backtest:backtestView,optimize:optimizeView,scripts:scriptView,data:dataView};
-    $('#main').innerHTML='<div id="workspace-update-banner" class="info-strip" '+(syncUpdate?'':'hidden')+'>'+
+    $('#main').innerHTML='<div id="workspace-update-banner" class="notice" '+(syncUpdate?'':'hidden')+'>'+
       button('Apply changes from another device','workspace-update','small')+'</div>'+views[S.tab]();
     if(S.tab==='charts'){
       if(S.data.has(S.symbol)){
