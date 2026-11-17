@@ -4,13 +4,14 @@ const prefix = 'ML1-';
 const encode = bytes => btoa(String.fromCharCode(...bytes)).replaceAll('+','-').replaceAll('/','_').replace(/=+$/, '');
 const same = (a,b) => JSON.stringify(a) === JSON.stringify(b);
 const object = value => value && typeof value === 'object' && !Array.isArray(value);
+const recordKey = item => item?.id ?? (Array.isArray(item?.bars) ? item.symbol : undefined);
 
 export function mergeWorkspace(base, local, remote) {
   if (same(base, local)) return remote;
   if (same(base, remote) || same(local, remote)) return local;
   if (Array.isArray(local) && Array.isArray(remote) &&
-      [...local, ...remote, ...(Array.isArray(base) ? base : [])].every(item => typeof item?.id === 'string')) {
-    const records = list => Object.fromEntries((Array.isArray(list) ? list : []).map(item => [item.id, item]));
+      [...local, ...remote, ...(Array.isArray(base) ? base : [])].every(item => typeof recordKey(item) === 'string')) {
+    const records = list => Object.fromEntries((Array.isArray(list) ? list : []).map(item => [recordKey(item), item]));
     return Object.values(mergeWorkspace(records(base), records(local), records(remote)));
   }
   if (object(local) && object(remote) && (base === undefined || object(base))) {
@@ -90,7 +91,10 @@ export function workspaceSync({endpoint, names, read, write, notify}) {
         const remote = version ? await cipher.open(name, await response.blob()) : undefined;
         let value = remote;
         if (pending.has(name) && mode !== 'join') {
-          value = version ? mergeWorkspace(baselines.get(name), local, remote) : local;
+          if (version && name === 'market' && local && remote) {
+            value = local.session > remote.session || local.session === remote.session &&
+              (local.id !== remote.id || local.next >= remote.next) ? local : remote;
+          } else value = version ? mergeWorkspace(baselines.get(name), local, remote) : local;
           if (!same(value, remote)) {
             const saved = await request(name,{method:'PUT', headers:{'If-Match':String(version)}, body:await cipher.seal(name,value)});
             if (saved.status === 409) continue;

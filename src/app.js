@@ -107,7 +107,8 @@ async function initApp(){
     watchlistId:workspaceLists.watchlistId,watchlistDraft:'',alertDraft:{symbol:'DEMO-SPY',metric:'price',op:'>',threshold:100},
     alerts:Array.isArray(saved.alerts)?saved.alerts.slice(0,ALERT_LIMIT):[],alertHits:[],
     savedScans:Array.isArray(saved.savedScans)?saved.savedScans.slice(0,SCAN_LIMIT):[],
-    scanDraft:'',savedScanId:null,savedScanView:null,
+    scanDraft:'',savedScanId:saved.savedScanId||null,
+    savedScanView:saved.viewingSavedScan&&Array.isArray(saved.savedScans)?saved.savedScans.find(scan=>scan.id===saved.savedScanId)||null:null,
     signalSelection:typeof saved.signalSelection==='string'?saved.signalSelection:'none',
     signalsOnly:!!saved.signalsOnly,signalRows:new Map(),signalErrors:[],
     signalHistory:priorSignalHistory,signalAsOf:null,freshness:null,staleDiagnostics:{},
@@ -153,7 +154,7 @@ async function initApp(){
     lastLiveSymbol:S.lastLiveSymbol,lastDemoSymbol:S.lastDemoSymbol,watch:[...S.watch],watchlists:S.watchlists,watchlistId:S.watchlistId,alerts:S.alerts,savedScans:S.savedScans,rules:S.rules,chart:S.chart,bt:S.bt,portfolioMode:S.portfolioMode,bestFitMode:S.bestFitMode,bestFitValidatedOnly:S.bestFitValidatedOnly,btRange:S.btRange,portfolioScope:S.portfolioScope,portfolioWatchlistId:S.portfolioWatchlistId,signalSelection:S.signalSelection,signalsOnly:S.signalsOnly,
     leaderboardValidatedOnly:S.leaderboardValidatedOnly,fitValidatedOnly:S.fitValidatedOnly,apiBaseUrl:S.apiBaseUrl,universeFilter:S.universeFilter,
     chartRecentSymbols:S.chartRecentSymbols,chartRecentFrames:S.chartRecentFrames,hiddenScreenColumns:S.hiddenScreenColumns,variantBaseline:S.variantBaseline,backtestPineDraft:S.backtestPineDraft,
-    activeIndicators:S.activeIndicators,chartViews:S.chartViews,backtestSections:S.backtestSections,query:S.query,sort:S.sort,ascending:S.ascending,showOnlyMatches:S.showOnlyMatches,showWatch:S.showWatch,marketShown:market.shown}));}catch{}};
+    activeIndicators:S.activeIndicators,chartViews:S.chartViews,backtestSections:S.backtestSections,query:S.query,sort:S.sort,ascending:S.ascending,showOnlyMatches:S.showOnlyMatches,showWatch:S.showWatch,marketShown:market.shown,savedScanId:S.savedScanId,viewingSavedScan:!!S.savedScanView}));}catch{}};
   function rememberPortfolio(){
     S.portfolioTimestamp=new Date().toISOString();
     try{saveLocal('portfolio',JSON.stringify({
@@ -170,7 +171,7 @@ async function initApp(){
   }
   function restoreSymbolState(symbol){
     S.symbol=symbol;S.symbolQuery='';
-    if(S.mode==='live'&&LIVE_UNIVERSE.includes(symbol))S.lastLiveSymbol=symbol;
+    if(S.mode==='live'&&S.sources.get(symbol)==='ALPACA')S.lastLiveSymbol=symbol;
     else if(S.mode==='demo'&&symbol.startsWith('DEMO-'))S.lastDemoSymbol=symbol;
     const savedEntry=symbolMemoryItem(S.symbolMemory,symbol);
     const run=savedEntry?.backtest||null;
@@ -671,7 +672,7 @@ async function initApp(){
     }).join('')+'</ul>';
   }
   function reviewableMatches(rows){
-    return rows.filter(row=>row.evalResult.pass&&(marketShown()||S.data.has(row.symbol)&&modeSymbol(row.symbol)));
+    return rows.filter(row=>row.evalResult.pass&&(marketShown()||row.source==='ALPACA'&&!!S.savedScanView||S.data.has(row.symbol)&&modeSymbol(row.symbol)));
   }
   let chartSelection=0;
   async function openScannedChart(symbol){
@@ -680,7 +681,7 @@ async function initApp(){
     if(!target)return;
     const dialog=$('#screener-dialog');
     if(dialog?.open)dialog.close();
-    const full=marketShown();
+    const full=marketShown()||S.savedScanView?.rows.some(row=>row.symbol===target&&row.source==='ALPACA');
     if(full&&!await loadMarketChart(target))return;
     S.scanReview={rows,mode:S.mode,market:full,snapshot:S.savedScanView?.savedAt,scrollY:window.scrollY,
       scrollLeft:$('.screener-results')?.parentElement.scrollLeft||0};
@@ -733,7 +734,7 @@ async function initApp(){
     const index=review.rows.findIndex(row=>row.symbol===S.symbol);
     const target=review.rows[index+direction];
     if(index<0||!target)return;
-    if(review.market){if(!await loadMarketChart(target.symbol))return;}
+    if(review.market&&target.source==='ALPACA'){if(!await loadMarketChart(target.symbol))return;}
     else if(!S.data.has(target.symbol)||!modeSymbol(target.symbol))return;
     const tf=S.chart.tf;
     restoreSymbolState(target.symbol);S.chart.tf=tf;render();
@@ -2014,6 +2015,10 @@ async function initApp(){
     S.mode='live';S.liveFeed=payload.feed||'iex';
     const visible=loaded.filter(isVisibleSymbol);
     const remembered=options.restoreSymbol||S.lastBacktestSymbol||S.lastLiveSymbol||S.symbol;
+    if(options.restoreTab&&remembered&&!loaded.includes(remembered)&&
+      (market.rows.has(remembered)||saved.lastLiveSymbol===remembered)&&await loadMarketChart(remembered)){
+      loaded.push(remembered);
+    }
     const target=loaded.includes(remembered)?remembered:
       loaded.includes(S.lastLiveSymbol)?S.lastLiveSymbol:loaded.includes(S.symbol)?S.symbol:visible[0]||loaded[0];
     S.preferredMode='live';
@@ -2733,12 +2738,13 @@ async function initApp(){
   if(startupPrefs.mode==='live'){
     // Restore Live by rehydrating the real market scan, never relabel Demo prices.
     const destination=startupPrefs.tab;
-    await switchToLive({restoreTab:destination,restoreSymbol:startupPrefs.selectedSymbol});
+    await switchToLive({restoreTab:destination,restoreSymbol:destination==='charts'?(startupPrefs.lastSymbol||startupPrefs.selectedSymbol):startupPrefs.selectedSymbol});
   }else{
-    if(startupPrefs.selectedSymbol&&S.data.has(startupPrefs.selectedSymbol))
-      restoreSymbolState(startupPrefs.selectedSymbol);
+    const selected=startupPrefs.tab==='charts'?(startupPrefs.lastSymbol||startupPrefs.selectedSymbol):startupPrefs.selectedSymbol;
+    if(selected&&S.data.has(selected))restoreSymbolState(selected);
     render();
   }
+  if(S.tab==='charts'&&saved.chart?.tf&&S.chart.tf!==saved.chart.tf){S.chart.tf=saved.chart.tf;render();}
   workspaceReady=true;
   if(workspace.code())void workspace.flush();
   setInterval(()=>{if(document.visibilityState==='visible')void workspace.flush();},20_000);
