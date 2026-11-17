@@ -495,6 +495,9 @@ tr[data-vol-symbol] td:nth-child(3){min-width:138px}
   .screener-results :is(th,td):first-child .muted{display:none}
   .screener-results .star{min-width:30px;margin-inline-end:2px}
 }
+@media(max-width:600px){
+  .chart-toolbar-symbol,.chart-toolbar-actions{flex:1 1 100%}
+}
 @media(min-width:801px){
   .chart-toolbar-symbol{flex:0 1 auto}
 }

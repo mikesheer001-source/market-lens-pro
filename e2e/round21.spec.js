@@ -41,6 +41,7 @@ test('Round 21: selected 132-bar range reports ZERO assessable rolling rows, unl
     mean:tr.children[5].textContent.trim(),median:tr.children[6].textContent.trim()
   })));
   const numeric=values.filter(v=>v.mean!=='—'&&v.median!=='—').length;
+  await page.locator('[data-backtest-section="validation"] summary').click();
   const summaryText=await page.locator('#rolling-wf-result').innerText();
   expect(summaryText).toContain('of '+numeric+' assessable strategies');
   expect(full).toBe(12);
