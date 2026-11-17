@@ -29,6 +29,23 @@ export function isValidatedStrategy(row){
   return validationReasons(row).length>0;
 }
 
+// One interpretation of the validation criteria for every table and CSV.
+// Portfolio and universe-fit rows project the winning strategy's OOS evidence;
+// old saved breakdowns may instead carry the already-computed reason list.
+export function validationStatus(row){
+  const strategy=row?.strategy??row?.validatingStrategy?.strategy??
+    ((row?.strategyName||row?.validatingStrategy?.name)?'saved-strategy':undefined);
+  if(row?.kind==='example-indicator'||(row?.strategy===null&&!row?.validatingStrategy))
+    return {validated:false,reasons:[],label:'Indicator · N/A'};
+  let reasons=validationReasons({...row,strategy});
+  if(!reasons.length && !row?.rolling && Array.isArray(row?.validationReasons) && strategy){
+    const known=['single 70/30','rolling 3/5'];
+    reasons=known.filter(reason=>row.validationReasons.includes(reason));
+  }
+  return {validated:reasons.length>0,reasons,
+    label:reasons.length?'Validated ('+reasons.join(' OR ')+')':'Not validated'};
+}
+
 export function filterValidatedLeaderboard(rows,enabled=false){
   const all=Array.isArray(rows)?rows:[];
   return enabled?all.filter(isValidatedStrategy):all.slice();

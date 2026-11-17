@@ -16,7 +16,7 @@ import {runBestFitPortfolio} from './best-fit-portfolio.js';
 import {holdoutSummary} from './validation.js';
 import {compareStrategiesInRange,leaderboardRangeStatus,rangeLabel} from './leaderboard-range.js';
 import {rollingPositiveText,rollingWindowDates,rollingLeaderboardSummary,ROLLING_WINDOW_COUNT} from './rolling-validation.js';
-import {VALIDATION_RULE,validationReasons,rollingValidated,filterValidatedLeaderboard,
+import {VALIDATION_RULE,validationReasons,validationStatus,filterValidatedLeaderboard,
   bestRollingValidatedStrategy,briefingStrategyLeaders} from './validated-strategies.js';
 import {VOL_TICKERS,volatilityRow,contangoPriceProxies} from './volatility.js';
 import {restoreWatchlists,watchlistChange,validateAlert,checkAlerts,makeScanSnapshot,analysisSnapshot,restoreAnalysis,WATCHLIST_LIMIT,SCAN_LIMIT,ALERT_LIMIT} from './workspace.js';
@@ -736,12 +736,15 @@ async function initApp(){
     '<label class="control">End date <input aria-label="Backtest end date" type="date" data-bt-range="endDate" value="'+esc(S.btRange.endDate)+'"/></label>'+
     button('Full range','clear-bt-dates','small')+
     '<span class="section-note">Inclusive dates. Both blank = all available bars. No data outside this window is traded.</span></div>';
-  // Round 16: Never confer a Validated label on a short or unmeasurable holdout.
+  // Single 70/30 OR 3/5 rolling is the same rule used for filtering,
+  // qualified-symbol counts and exports. Do not inspect only validation.validated.
   function holdoutLabel(row){
-    if(row?.validation?.validated)return '<span class="oos-validated" title="Positive out-of-sample Sharpe on at least 30 held-out bars">Validated</span>';
-    if(rollingValidated(row))return '<span class="oos-validated" title="At least 3 of 5 rolling OOS windows have positive Sharpe, each with 30+ held-out bars">Validated (rolling 3/5)</span>';
-    if(row?.validation?.note)return '<small class="oos-note">'+esc(row.validation.note)+'</small>';
-    return '<span class="muted">Not validated</span>';
+    const status=validationStatus(row);
+    if(status.validated)return '<span class="oos-validated" title="'+esc(VALIDATION_RULE)+'">'+
+      esc(status.label)+'</span>';
+    if(status.label==='Indicator · N/A')return '<span class="muted">Indicator · N/A</span>';
+    return '<span class="muted">Not validated</span>'+
+      (row?.validation?.note?'<small class="oos-note">'+esc(row.validation.note)+'</small>':'');
   }
   function holdoutSharpe(row){
     return row?.validation?.enoughTestBars?format(row.testMetrics?.sharpe,2):'—';
@@ -770,7 +773,9 @@ async function initApp(){
     const isBest=S.bestFitMode,validated=isBest&&S.bestFitValidatedOnly;
     const selections=portfolioSelection(),result=activePortfolioResult();
     const noValidated=validated&&result?.noValidated;
-    const qualified=result?.ranked??null,selectedCount=result?.selectedCount??selections.length;
+    const qualified=result?(validated?
+      result.breakdown.filter(row=>validationStatus(row).validated).length:result.ranked):null;
+    const selectedCount=result?.selectedCount??selections.length;
     const qualifier=validated?' · '+(qualified===null?'—':qualified)+' of '+
       selectedCount+' selected qualified':'';
     const sourceName=S.mode==='live'?'Alpaca '+String(S.liveFeed).toUpperCase()+' 1Day bars':
@@ -849,7 +854,8 @@ async function initApp(){
         ' · '+result.symbols.length+' symbols · '+result.curve.length+' daily equity points · run '+
         esc(S.portfolioTimestamp||'')+
         '<div class="result-range">'+esc(displayBacktestRange(result.range))+'</div>'+
-        (isBest?' · '+result.ranked+' of '+result.selectedCount+' selected qualified':'')+
+        (isBest?' · '+(validated?qualified:result.ranked)+' of '+
+          result.selectedCount+' selected qualified':'')+
         (result.omitted?.length?' · excluded '+result.omitted.length+
           ' symbols (insufficient bars or no '+(validated?'validated':'rankable')+' strategy)':'')+
         '</div>':'')+
@@ -1019,7 +1025,8 @@ async function initApp(){
     const validated=S.fitValidatedOnly,report=validated?S.fitValidatedReport:S.fitReport;
     const mode=validated?'Validated OOS ranking':'In-sample ranking';
     const count=S.fitValidatedReport?
-      S.fitValidatedReport.validated+' of '+LIVE_UNIVERSE.length+
+      S.fitValidatedReport.rows.filter(row=>validationStatus(row).validated).length+
+        ' of '+LIVE_UNIVERSE.length+
         ' symbols have a validated strategy':
       'Validated-strategy count pending · 0 of '+LIVE_UNIVERSE.length+' evaluated';
     const controls='<label class="inline-check"><input type="checkbox" id="fit-validated-only" '+
@@ -1053,7 +1060,7 @@ async function initApp(){
         '<td>'+row.positiveWindows+'/'+row.totalWindows+
           (row.assessableWindows<row.totalWindows?' ('+row.assessableWindows+
             '/'+row.totalWindows+' assessable)':'')+'</td>'+
-        '<td>'+esc(row.validationReasons.join(' OR '))+'</td>'+
+        '<td>'+holdoutLabel(row)+'</td>'+
         '<td>'+esc(row.source)+'</td>'+
         '<td>'+esc(row.barDate||'—')+'</td></tr>').join('');
       return '<section class="panel" id="universe-fit">'+header+

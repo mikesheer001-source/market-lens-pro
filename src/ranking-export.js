@@ -1,7 +1,7 @@
 // Round 25: pure, deterministic CSV exports backed by the same ordered rows
 // used by the corresponding on-screen rankings. Values are raw, not localized.
 import {sortLeaderboard,PRESET_STRATEGIES} from './leaderboard.js';
-import {filterValidatedLeaderboard,isValidatedStrategy,validationReasons} from './validated-strategies.js';
+import {filterValidatedLeaderboard,validationStatus} from './validated-strategies.js';
 import {sortUniverseFit} from './fit.js';
 
 export function leaderboardDisplayRows(report,{validatedOnly=false,sort='sharpe',descending=true}={}){
@@ -41,10 +41,7 @@ export function rankingFilename(kind,validatedOnly=false,range={}){
   const b=range.endDate||range.actualEnd||'last-available';
   return [name,mode,String(a), 'to',String(b)].join('-').replace(/[^a-z0-9.-]/gi,'-')+'.csv';
 }
-const validationLabel=row=>{
-  if(!row?.strategy)return 'Indicator - N/A';
-  return isValidatedStrategy(row)?'Validated':'Not validated';
-};
+const validationLabel=row=>validationStatus(row).label;
 const sharpe30=row=>row?.validation?.enoughTestBars?plain(row.testMetrics?.sharpe):'';
 const pos=row=>row?.rolling?.positiveCount==null?'':plain(row.rolling.positiveCount);
 export const LEADERBOARD_CSV_COLUMNS=Object.freeze([
@@ -86,8 +83,7 @@ export function fitRankingCsv(report,ui={}){
     plain(validated?row.rollingMeanSharpe:null),
     plain(validated?row.rollingMedianSharpe:null),
     validated?plain(row.positiveWindows):'',
-    validated?row.validationReasons?.join(' OR ')||'Not validated':
-      row.validation?.validated?'single 70/30':'Not validated',
+    validationLabel(row),
     plain(row.trainMetrics?.returnPct),plain(row.trainMetrics?.sharpe),
     plain(row.testMetrics?.returnPct),
     row.validation?.enoughTestBars?plain(row.testMetrics?.sharpe):'',
@@ -124,8 +120,7 @@ export function portfolioRankingCsv(report,{validatedOnly=false}={}){
     plain(r.testMetrics?.returnPct),
     r.validation?.enoughTestBars?plain(r.testMetrics?.sharpe):'',
     plain(r.rollingMeanSharpe),plain(r.rollingMedianSharpe),
-    plain(r.rollingPositiveCount),r.validationReasons?.length?
-      r.validationReasons.join(' OR '):r.validation?.validated?'Validated':'Not validated'
+    plain(r.rollingPositiveCount),validationLabel(r)
   ]),{summary});
   return {filename:rankingFilename('best-fit-portfolio',validatedOnly,report?.range),
     csv,rows};

@@ -249,3 +249,18 @@ drawdowns are signed as on the leaderboard/portfolio screen, and weights
 are decimal fractions (0.25 = 25%). Unavailable values are empty, never
 fabricated as zero. Empty validated views produce column headers with no data rows.
 Only calculated results matching the active mode and date range can be exported.
+
+
+### Round 26 — Validation labels match the qualification rule
+
+All Strategy Leaderboard, Fit across universe, and Best-fit Portfolio Validation cells
+and their downloaded CSVs use the same qualification: **positive single 70/30 OOS
+Sharpe with at least 30 test bars OR positive Sharpe in at least 3 of 5
+assessable rolling OOS windows**. Qualifiers show **Validated (single 70/30)**,
+**Validated (rolling 3/5)**, or both reasons joined by OR. A winning strategy
+qualified only through rolling windows is never labeled “Not validated” merely
+because its single-split Sharpe was negative. Portfolio result breakdowns preserve
+the selected strategy's rolling evidence, and qualifying headline counts are
+derived from the per-row statuses. Legacy stored validated breakdowns with saved
+validation-reason lists continue to display correctly. The strategy filtering,
+selection criteria, portfolio capital and equity simulation remain unchanged.

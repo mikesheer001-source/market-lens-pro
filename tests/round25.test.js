@@ -70,7 +70,7 @@ test('Round 25: leaderboard validated-only has only visible validated rows, curr
  assert.equal(cols[5],'1');
  assert.equal(cols[6],'0.9');
  assert.equal(cols[7],'4');
- assert.equal(cols[8],'Validated');
+ assert.equal(cols[8],'Validated (single 70/30 OR rolling 3/5)');
  const none=leaderboardRankingCsv({...leaderboard,rows:[failed]},ui);
  assert.equal(lines(none.csv).length,1,'empty filter downloads only header, no extra data');
 });
@@ -99,7 +99,7 @@ test('Round 25: Fit validated CSV includes winner, OOS rolling and its OWN train
  assert.equal(records[1].split(',')[2],'1.25');
  assert.equal(records[1].split(',')[3],'1.1');
  assert.equal(records[1].split(',')[4],'4');
- assert.equal(records[1].split(',')[5],'rolling 3/5');
+ assert.equal(records[1].split(',')[5],'Validated (rolling 3/5)');
  assert.equal(records[1].split(',')[7],'8','selected strategy training Sharpe');
  assert.equal(out.filename,'fit-across-universe-validated-only-2026-10-01-to-2026-11-16.csv');
  const empty=fitRankingCsv({rows:[],dateRange:range},ui);

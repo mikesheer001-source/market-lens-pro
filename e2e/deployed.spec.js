@@ -303,3 +303,43 @@ test('published Round 25 rankings download CSV with correct mode and row counts'
     6+await page.locator('#portfolio-breakdown tbody tr').count());
   expect(errors).toEqual([]);
 });
+
+
+test('published Round 26 validation labels match qualified headline and CSV',async({page})=>{
+  test.setTimeout(180000);
+  const {readFile}=await import('node:fs/promises');
+  const errors=[];page.on('pageerror',err=>errors.push(err.message));
+  await page.goto('./');
+  await page.locator('.sidebar [data-tab="backtest"]').click();
+  await page.locator('[data-action="compare-strategies"]').first().click();
+  await page.locator('#leaderboard-validated-only').check();
+  const leaderboard=page.locator('.leaderboard-table tbody tr');
+  const n=await leaderboard.count();
+  await expect(page.locator('#leaderboard-validation-count')).toContainText(
+    'Showing '+n+' of 12 total leaderboard rows');
+  const labels=await leaderboard.locator('td:nth-child(9)').allTextContents();
+  expect(labels.every(x=>x.includes('Validated (')&&!x.includes('Not validated'))).toBe(true);
+  let pending=page.waitForEvent('download');
+  await page.locator('[data-action="export-leaderboard"]').click();
+  let download=await pending,content=await readFile(await download.path(),'utf8');
+  expect(content.trimEnd().split(/\r?\n/).slice(1).map(x=>x.split(',')[8])).toEqual(
+    labels.map(x=>x.trim()));
+  await page.locator('.sidebar [data-tab="screener"]').click();
+  await page.locator('[data-option="preset"]').selectOption('all');
+  await page.locator('.sidebar [data-tab="backtest"]').click();
+  await page.locator('[data-option="portfolio-mode"]').selectOption('best-fit');
+  await page.locator('#best-fit-validated-only').check();
+  await page.locator('[data-action="run-best-fit"]').click();
+  await expect(page.locator('#portfolio-source')).toBeVisible({timeout:120000});
+  const bestRows=page.locator('#portfolio-breakdown tbody tr'),count=await bestRows.count();
+  await expect(page.locator('#best-fit-validation-count')).toContainText(
+    count+' of 4 selected symbols qualify');
+  const bestLabels=await bestRows.locator('td:nth-child(12)').allTextContents();
+  expect(bestLabels.every(x=>x.includes('Validated (')&&!x.includes('Not validated'))).toBe(true);
+  pending=page.waitForEvent('download');
+  await page.locator('[data-action="export-portfolio"]').click();
+  download=await pending;content=await readFile(await download.path(),'utf8');
+  expect(content.trimEnd().split(/\r?\n/).slice(6).map(x=>x.split(',').at(-1)))
+    .toEqual(bestLabels.map(x=>x.trim()));
+  expect(errors).toEqual([]);
+});

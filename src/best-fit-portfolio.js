@@ -5,7 +5,7 @@ import {portfolioUniverse,runPortfolio} from './portfolio.js';
 import {compareStrategies} from './leaderboard.js';
 import {compareStrategiesInRange} from './leaderboard-range.js';
 import {chooseValidatedUniverseStrategy,NO_VALIDATED_FIT} from './fit-validated.js';
-import {validationReasons} from './validated-strategies.js';
+import {validationReasons,validationStatus} from './validated-strategies.js';
 import {windowPortfolioData,validateBacktestRange,actualPortfolioRange} from './date-window.js';
 import {barDate} from './freshness.js';
 export function bestSharpeStrategy(rows){
@@ -103,6 +103,12 @@ export function runBestFitPortfolio({data,symbols,options,backtest,
       return choice;
     }
   });
+  if(validatedOnly && portfolio.breakdown.some(row=>!validationStatus({
+    ...row,rolling:picks.get(row.symbol)?.rolling||null,
+    validation:picks.get(row.symbol)?.validation||null,
+    testMetrics:picks.get(row.symbol)?.testMetrics||null
+  }).validated))
+    throw Error('Validated best-fit qualification and per-symbol evidence disagree.');
   return {...portfolio,mode:'best-fit',fitMode:validatedOnly?'validated':'training',
     noValidated:false,range:actualPortfolioRange(portfolio.curve,dateRange),
     requestedCount:aligned.requested.length,selectedCount:aligned.requested.length,
@@ -117,7 +123,10 @@ export function runBestFitPortfolio({data,symbols,options,backtest,
         rollingPositiveCount:selected?.rolling?.positiveCount??null,
         rollingAssessableCount:selected?.rolling?.assessableCount??null,
         rollingWindowCount:selected?.rolling?.totalWindows??null,
-        validationReasons:validatedOnly?validationReasons(selected):[]};
+        // Retain the exact five-window evidence used when choosing the winner.
+        // The Validation cell must never consult only the single-split flag.
+        rolling:selected?.rolling||null,
+        validationReasons:selected?validationReasons(selected):[]};
     }),
     unranked,
     omitted:[...new Set([...aligned.omitted,...unranked.map(x=>x.symbol)])],

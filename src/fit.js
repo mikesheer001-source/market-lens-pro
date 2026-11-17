@@ -1,6 +1,7 @@
 // Research-only strategy fit: same execution engine and cost assumptions per symbol.
 import {barDate} from './freshness.js';
 import {assessHoldout} from './validation.js';
+import {validationStatus} from './validated-strategies.js';
 import {windowBacktestBars,validateBacktestRange} from './date-window.js';
 export const FIT_COLUMNS=Object.freeze(['symbol','returnPct','cagrPct','sharpe','maxDD','winPct','trades',
   'trainReturnPct','trainSharpe','testReturnPct','testSharpe','validation','source','barDate']);
@@ -10,7 +11,7 @@ export function fitMetric(row,key){
   if(key==='trainSharpe'||key==='sharpe')return row.trainMetrics?row.trainMetrics.sharpe??null:row.metrics?.sharpe??null;
   if(key==='testReturnPct')return row.testMetrics?.returnPct??null;
   if(key==='testSharpe')return row.validation?.enoughTestBars?row.testMetrics?.sharpe??null:null;
-  if(key==='validation')return row.validation?.validated?1:0;
+  if(key==='validation')return validationStatus(row).validated?1:0;
   return metricKeys.has(key)?row.metrics?.[key]??null:row[key];
 }
 export function sortUniverseFit(rows,key='sharpe',descending=key!=='symbol'&&key!=='maxDD'){
@@ -47,7 +48,7 @@ export function fitAcrossUniverse({symbols,data,options,backtest,compilePine,exe
     const history=windowBacktestBars(original||[],selectedRange,{allowEmpty:true}).bars;
     const last=barDate(history.at(-1));
     const actualNewest=Array.isArray(original)?barDate(original.at(-1)):null;
-    const row={symbol,source:sourceFor(symbol)||'NO ALPACA DATA',barDate:last,
+    const row={symbol,strategy:settings.strategy,source:sourceFor(symbol)||'NO ALPACA DATA',barDate:last,
       stale:!!(expectedBarDate&&(!actualNewest||actualNewest<expectedBarDate)),
       metrics:null,error:null};
     if(!Array.isArray(history)||history.length<40)
