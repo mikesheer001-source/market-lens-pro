@@ -28,21 +28,6 @@ test('equal-weight portfolio accepts named watchlist, combines equity, sweeps an
   expect(errors).toEqual([]);
 });
 
-test('volatility dashboard shows ten sourced ticker slots and discloses price-only proxy uncertainty',async ({page})=>{
-  const errors=[];page.on('pageerror',e=>errors.push(e.message));
-  await page.goto('./');
-  await page.locator('.sidebar [data-tab="volatility"]').click();
-  await expect(page.getByRole('heading',{name:'Volatility',exact:true})).toBeVisible();
-  await expect(page.locator('tr[data-vol-symbol]')).toHaveCount(10);
-  await expect(page.locator('tr[data-vol-symbol="VXX"]')).toBeVisible();
-  await expect(page.locator('tr[data-vol-symbol="SVOL"]')).toBeVisible();
-  await expect(page.locator('#contango-regime')).toContainText('Unavailable');
-  await expect(page.getByText('NOT VIX FUTURES CONTANGO')).toBeVisible();
-  await expect(page.locator('#volatility-source')).toContainText('Demo mode');
-  await expect(page.locator('tr[data-vol-symbol="VXX"]')).toContainText('NOT LOADED');
-  expect(errors).toEqual([]);
-});
-
 test('no daily Demo OHLCV is faked into 2H or 15m candles',async ({page})=>{
   const errors=[];page.on('pageerror',e=>errors.push(e.message));
   await page.goto('./');

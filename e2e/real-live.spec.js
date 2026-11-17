@@ -93,7 +93,7 @@ test('real Alpaca Worker scans entire 133-symbol universe and publishes VXX dail
 });
 
 
-test('actual Alpaca IEX 15m bars produce real 2H candles, volatility analytics and portfolio results',async ({page,request})=>{
+test('actual Alpaca IEX 15m bars produce real 2H candles and portfolio results',async ({page,request})=>{
   test.skip(process.env.REAL_ALPACA_TEST!=='1','Runs only after Pages and Worker deployment; never intercept market OHLCV');
   test.setTimeout(180_000);
   const response=await request.get(WORKER+'/api/stocks/intraday?symbol=VXX&feed=iex',{timeout:60_000});
@@ -118,12 +118,6 @@ test('actual Alpaca IEX 15m bars produce real 2H candles, volatility analytics a
   await page.locator('[data-option="tf"]').selectOption('2H');
   await expect(page.locator('#price-chart canvas').first()).toBeVisible();
   await expect(page.locator('.info-strip').first()).toContainText('NYSE 09:30–16:00 ET session buckets');
-  await page.locator('.sidebar [data-tab="volatility"]').click();
-  await expect(page.locator('tr[data-vol-symbol]')).toHaveCount(10);
-  await expect(page.locator('tr[data-vol-symbol="VXX"]')).toContainText('ALPACA IEX 1Day');
-  await expect(page.locator('tr[data-vol-symbol="VXX"] td').nth(5)).not.toHaveText('—');
-  await expect(page.locator('tr[data-vol-symbol="SVOL"]')).not.toContainText('NOT LOADED');
-  await expect(page.locator('#contango-regime')).not.toHaveText('Unavailable');
   await page.locator('.sidebar [data-tab="screener"]').click();
   for(const ticker of ['VXX','SVOL'])await page.locator('tr[data-symbol="'+ticker+'"] button.star').click();
   await page.locator('.sidebar [data-tab="backtest"]').click();
@@ -207,8 +201,6 @@ test('real Alpaca scan exposes latest-bar freshness and dated computed strategy 
     await page.locator('.sidebar [data-tab="charts"]').click();
     await chooseSymbol(page,'VXZ');
     await expect(page.locator('#chart-stale-warning')).toContainText(warning);
-    await page.locator('.sidebar [data-tab="volatility"]').click();
-    await expect(page.locator('tr[data-vol-symbol="VXZ"]')).toContainText(warning);
     await page.locator('.sidebar [data-tab="screener"]').click();
   }
   await expect(page.locator('tr[data-symbol="VXX"] .fresh-date')).toHaveText(rawVxx);
@@ -302,36 +294,4 @@ test('Round 12: direct Alpaca asset status and most recent bars for legacy MMC, 
       barCount:detail.barCount,barError:detail.barError,checkedAt:detail.checkedAt
     }));
   }
-});
-
-
-test('Round 13 published Briefing uses real Alpaca daily data, saves history and copies date-stamped text',async ({page})=>{
-  test.skip(process.env.REAL_ALPACA_TEST!=='1','Real published-site Daily Briefing smoke after GitHub Pages deployment');
-  test.setTimeout(180000);
-  const errors=[];page.on('pageerror',error=>errors.push(error.message));
-  await page.goto('./');
-  await page.locator('.sidebar [data-tab="briefing"]').click();
-  await page.locator('[data-option="briefing-strategy"]').selectOption('preset:ema-cross');
-  await page.locator('[data-action="generate-briefing"]').click();
-  await expect(page.locator('#briefing-metadata')).toContainText('ALPACA IEX 1Day',{timeout:150000});
-  await expect(page.locator('#briefing-scan')).toContainText('Source: ALPACA IEX 1Day');
-  await expect(page.locator('#briefing-signals')).toContainText('EMA crossover');
-  await expect(page.locator('#briefing-top-validated')).toContainText('Top validated strategy (rolling OOS):');
-  await expect(page.locator('#briefing-top-full-period')).toContainText('Full-period best (full-period Sharpe):');
-  await expect(page.locator('#briefing-strategy-leaders')).toContainText('Alpaca IEX OHLCV');
-  await expect(page.locator('#briefing-regime')).toContainText('NOT VIX FUTURES CONTANGO');
-  await expect(page.locator('#briefing-vxx')).toContainText('VXX 20D return');
-  await expect(page.locator('#briefing-history .briefing-history-row')).toHaveCount(1);
-  await page.context().grantPermissions(['clipboard-read','clipboard-write']);
-  await page.locator('[data-action="copy-briefing"]').click();
-  const text=await page.evaluate(()=>navigator.clipboard.readText());
-  expect(text).toContain('MARKET LENS PRO — DAILY BRIEFING');
-  expect(text).toContain('VXX: $');
-  expect(text).toContain('Top validated strategy (rolling OOS):');
-  expect(text).toContain('Full-period best (full-period Sharpe):');
-  expect(text).toContain('NOT VIX FUTURES CONTANGO');
-  await page.reload();
-  await expect(page.locator('.sidebar [data-tab="briefing"]')).toHaveClass(/active/);
-  await expect(page.locator('#briefing-history .briefing-history-row')).toHaveCount(1,{timeout:150000});
-  expect(errors).toEqual([]);
 });

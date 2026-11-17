@@ -7,8 +7,6 @@ import {expectedNyseBarDate,scanFreshness,staleReasonForSymbol} from './freshnes
 import {FIT_COLUMNS,sortUniverseFit,bestUniverseFit,fitAcrossUniverse} from './fit.js';
 import {leaderboardDisplayRows,fitDisplayRows,leaderboardRankingCsv,fitRankingCsv,portfolioRankingCsv} from './ranking-export.js';
 import {fitValidatedAcrossUniverse,NO_VALIDATED_FIT} from './fit-validated.js';
-import {compileDailyBriefing,briefingToText,pruneBriefingHistory,saveBriefingHistory} from './briefing.js';
-import {renderBriefingView} from './briefing-view.js';
 import {compareStrategies,sortLeaderboard,leaderboardBest,updateSymbolMemory,pruneSymbolMemory,symbolMemoryItem,compactLeaderboard,LEADERBOARD_METRICS} from './leaderboard.js';
 import {runPortfolio,runPortfolioSweep,portfolioUniverse} from './portfolio.js';
 import {windowBacktestBars,windowPortfolioData,validateBacktestRange,actualPortfolioRange,displayBacktestRange} from './date-window.js';
@@ -17,8 +15,7 @@ import {assessHoldout,holdoutSummary} from './validation.js';
 import {compareStrategiesInRange,leaderboardRangeStatus,rangeLabel} from './leaderboard-range.js';
 import {rollingPositiveText,rollingWindowDates,rollingLeaderboardSummary,ROLLING_WINDOW_COUNT} from './rolling-validation.js';
 import {VALIDATION_RULE,validationReasons,validationStatus,filterValidatedLeaderboard,
-  bestRollingValidatedStrategy,briefingStrategyLeaders} from './validated-strategies.js';
-import {VOL_TICKERS,volatilityRow,contangoPriceProxies} from './volatility.js';
+  bestRollingValidatedStrategy} from './validated-strategies.js';
 import {restoreWatchlists,watchlistChange,validateAlert,checkAlerts,makeScanSnapshot,analysisSnapshot,restoreAnalysis,WATCHLIST_LIMIT,SCAN_LIMIT,ALERT_LIMIT} from './workspace.js';
 import { LIVE_UNIVERSE, DEMO_UNIVERSE, VOLATILITY_UNIVERSE, LIVE_EQUITY_COUNT, LIVE_ETF_COUNT, LIVE_VOLATILITY_COUNT, ALPACA_BATCH_SIZE, ALPACA_SCAN_LOOKBACK_DAYS } from './universe.js';
 import {DEFAULT_ALPACA_WORKER,inspectLiveHistory,shouldTryDefaultWorker,liveScanUrl,canonicalWorkerBase}
@@ -37,8 +34,8 @@ async function initApp(){
   const pct=n=>n==null||!Number.isFinite(n)?'—':(n>0?'+':'')+format(n)+'%';
   const priceColor=n=>n==null?'muted':n>=0?'positive':'negative';
   const dateLabel=t=>typeof t==='number'?new Date(t*1000).toISOString().slice(0,16).replace('T',' '):String(t);
-  const tabNames={screener:'Screener',briefing:'Briefing',charts:'Chart Lab',backtest:'Backtest',optimize:'Optimize',volatility:'Volatility',scripts:'Script Lab',data:'Data Center'};
-  const tabIcons={screener:'📊',briefing:'▤',charts:'📈',backtest:'🧪',optimize:'⚙️',volatility:'〽',scripts:'🧩',data:'🗂️'};
+  const tabNames={screener:'Screener',charts:'Chart Lab',backtest:'Backtest',optimize:'Optimize',scripts:'Script Lab',data:'Data Center'};
+  const tabIcons={screener:'📊',charts:'📈',backtest:'🧪',optimize:'⚙️',scripts:'🧩',data:'🗂️'};
   const preset={
     trend:[{metric:'emaDist',tf:'D',op:'>',value:0},{metric:'rsi',tf:'D',op:'<',value:60}],
     original:[{metric:'emaDist',tf:'W',op:'>',value:0},{metric:'rsi',tf:'W',op:'<',value:50},{metric:'rsi',tf:'D',op:'<',value:50},{metric:'rsi',tf:'2H',op:'<',value:50}],
@@ -64,10 +61,6 @@ async function initApp(){
   try{previousAnalysis=restoreAnalysis(JSON.parse(localStorage.getItem('market-lens-pro-analysis-v1')||'null'));}catch{}
   let previousPortfolio=null;
   try{previousPortfolio=JSON.parse(localStorage.getItem('market-lens-pro-portfolio-v1')||'null');}catch{}
-  const briefingStorageKey='market-lens-pro-briefing-history-v1';
-  let savedBriefings=[];
-  try{savedBriefings=pruneBriefingHistory(JSON.parse(localStorage.getItem(briefingStorageKey)||'[]'));}
-  catch{savedBriefings=[];}
   const S={tab:startupPrefs.tab,mode:'demo',preferredMode:startupPrefs.mode,
     lastDemoSymbol:startupPrefs.lastDemoSymbol,lastLiveSymbol:startupPrefs.lastLiveSymbol,
     lastBacktestSymbol:startupPrefs.lastBacktestSymbol,lastSymbol:startupPrefs.lastSymbol,
@@ -79,7 +72,6 @@ async function initApp(){
     signalSelection:typeof saved.signalSelection==='string'?saved.signalSelection:'none',
     signalsOnly:!!saved.signalsOnly,signalRows:new Map(),signalErrors:[],
     signalHistory:priorSignalHistory,signalAsOf:null,freshness:null,staleDiagnostics:{},
-    lastSignalFlips:[],lastSignalFlipBaseline:false,lastSignalFlipStrategy:null,
     rules:saved.rules||preset.trend.map(x=>({...x})),sort:'symbol',ascending:true,showOnlyMatches:false,showWatch:false,chart:(()=>{const restored={...defaultSettings,...saved.chart};if(!saved.chart?.style||saved.chart.style==='line')restored.style='candles';return restored;})(),bt:{...defaultBacktest,...saved.bt},result:previousAnalysis?.result||null,sweep:previousAnalysis?.sweep||null,lastAnalysis:previousAnalysis,resultSymbol:previousAnalysis?.symbol||null,resultTf:previousAnalysis?.tf||null,
     portfolioMode:!!saved.portfolioMode,bestFitMode:!!saved.bestFitMode,bestFitValidatedOnly:!!saved.bestFitValidatedOnly,
     btRange:{startDate:String(saved.btRange?.startDate||''),endDate:String(saved.btRange?.endDate||'')},
@@ -91,7 +83,7 @@ async function initApp(){
     analysisLoading:'',analysisError:'',
     symbolMemory:previousSymbolMemory,leaderboard:null,leaderboardSort:'sharpe',leaderboardDescending:true,
     leaderboardValidatedOnly:!!saved.leaderboardValidatedOnly,leaderboardError:'',fitReport:null,fitValidatedReport:null,fitValidatedOnly:!!saved.fitValidatedOnly,fitSort:'sharpe',fitDescending:true,fitStatus:'',fitError:'',
-    briefing:null,briefingHistory:savedBriefings,briefingLoading:false,briefingError:'',drawLine:false,
+    drawLine:false,
     chartFullscreen:false,pendingChartRange:null,fullscreenScrollY:0,
     chartRecentSymbols:Array.isArray(saved.chartRecentSymbols)?saved.chartRecentSymbols.filter(s=>typeof s==='string').slice(0,6):[],
     chartRecentFrames:Array.isArray(saved.chartRecentFrames)?saved.chartRecentFrames.slice(0,3):[],
@@ -171,66 +163,6 @@ async function initApp(){
     });
   }
 
-  // Briefing ranks a single explicit Live symbol on the actual selected
-  // Backtester dates, using daily OHLCV (not potentially missing intraday).
-  // The computation never changes leaderboard sorting, symbols or its overlay.
-  let briefingLeadersCache=null;
-  function currentBriefingLeaders(){
-    const symbol=S.symbol,b=S.data.get(symbol)||[];
-    if(S.sources.get(symbol)!=='ALPACA'||b.length<4)
-      return {leaders:null,error:'No eligible Live daily bars for '+symbol+'.'};
-    const source='Alpaca '+String(S.liveFeed).toUpperCase()+' OHLCV';
-    const key=JSON.stringify([symbol,b.length,b[0]?.time,b.at(-1)?.time,
-      b.at(-1)?.close,S.btRange,S.bt,S.scriptLibrary,source]);
-    if(briefingLeadersCache?.key===key)return briefingLeadersCache.result;
-    let result;
-    try{
-      const report=compareStrategiesInRange({symbol,bars:b,range:S.btRange,
-        timeframe:'D',source,options:{...S.bt,timeframe:'D'},
-        builtInExamples:PINE_EXAMPLES,backtest,compilePine,executePine,
-        savedScripts:S.scriptLibrary});
-      result={leaders:briefingStrategyLeaders(report),error:null};
-    }catch(error){
-      result={leaders:null,error:'Daily strategy validation unavailable: '+
-        String(error.message||error)};
-    }
-    briefingLeadersCache={key,result};
-    return result;
-  }
-  function captureBriefing(){
-    if(S.mode!=='live'||S.scan.status!=='complete'||S.scan.source!=='ALPACA')return null;
-    const selection=screenerStrategies().find(x=>x.id===S.signalSelection)||null;
-    const leadersResult=currentBriefingLeaders();
-    const symbols=LIVE_UNIVERSE.filter(sym=>S.universeFilter!=='volatility'||VOLATILITY_UNIVERSE.includes(sym));
-    const briefing=compileDailyBriefing({
-      generatedAt:new Date().toISOString(),scan:S.scan,data:S.data,sources:S.sources,
-      rules:S.rules,symbols,feed:S.liveFeed,signalSelection:selection?.id||'none',
-      strategyName:selection?.name||null,signals:S.signalRows,
-      flips:S.lastSignalFlipStrategy===selection?.id?S.lastSignalFlips:[],
-      hasFlipBaseline:!!selection&&S.lastSignalFlipStrategy===selection.id&&S.lastSignalFlipBaseline,
-      alerts:S.alerts,freshness:S.freshness,diagnostics:S.staleDiagnostics,
-      strategyLeaders:leadersResult.leaders,strategyLeadersError:leadersResult.error
-    });
-    S.briefing=briefing;S.briefingHistory=saveBriefingHistory(S.briefingHistory,briefing);
-    try{localStorage.setItem(briefingStorageKey,JSON.stringify(S.briefingHistory));}
-    catch{notice('Briefing generated but browser storage could not save seven-day history.');}
-    return briefing;
-  }
-  async function generateBriefing(){
-    if(S.briefingLoading)return;
-    S.briefingLoading=true;S.briefingError='';S.tab='briefing';render();
-    try{await fetchLiveUniverse({restoreTab:'briefing',restoreSymbol:S.lastLiveSymbol});}
-    catch(error){S.briefingError=String(error.message||error);
-      S.scan={status:'fallback',source:'ALPACA',error:S.briefingError};}
-    finally{S.briefingLoading=false;S.tab='briefing';render();}
-  }
-  function briefingView(){
-    return renderBriefingView({
-      snapshot:S.briefing,history:S.briefingHistory,loading:S.briefingLoading,error:S.briefingError,
-      strategies:screenerStrategies(),selection:S.signalSelection,
-      head,button,select,metric,esc,format,pct
-    });
-  }
   function persistSignalHistory(){
     try{
       const keys=Object.keys(S.signalHistory);
@@ -240,11 +172,10 @@ async function initApp(){
   }
   function evaluateScreenerSignals(detectFlips=false){
     if(S.signalSelection==='none'){S.signalRows=new Map();S.signalErrors=[];
-      S.lastSignalFlips=[];S.lastSignalFlipBaseline=false;S.lastSignalFlipStrategy=null;return;}
+      return;}
     const selection=screenerStrategies().find(x=>x.id===S.signalSelection);
     if(!selection){
       S.signalSelection='none';S.signalRows=new Map();S.signalErrors=[];
-      S.lastSignalFlips=[];S.lastSignalFlipBaseline=false;S.lastSignalFlipStrategy=null;
       saveSettings();return;
     }
     const available=new Map([...S.data].filter(([symbol])=>modeSymbol(symbol)));
@@ -263,9 +194,6 @@ async function initApp(){
     const prior=S.signalHistory[key]||{};
     const checked=scanSignalFlips(prior,current,{strategyId:selection.id,strategyName:selection.name,
       checkedAt:S.signalAsOf});
-    S.lastSignalFlips=detectFlips&&Object.keys(prior).length?checked.flips:[];
-    S.lastSignalFlipBaseline=!!(detectFlips&&Object.keys(prior).length);
-    S.lastSignalFlipStrategy=S.signalSelection;
     S.signalHistory[key]=checked.states;persistSignalHistory();
     if(detectFlips&&Object.keys(prior).length){
       for(const flip of checked.flips){
@@ -520,7 +448,7 @@ async function initApp(){
     const nav=mobile=>{
       const keys=Object.keys(tabNames);
       if(!mobile)return '<nav aria-label="Primary navigation" class="nav">'+links(keys)+'</nav>';
-      const primary=['screener','charts','backtest','briefing'],extra=keys.filter(key=>!primary.includes(key));
+      const primary=['screener','charts','backtest'],extra=keys.filter(key=>!primary.includes(key));
       return '<nav aria-label="Mobile navigation" class="mobile-nav">'+links(primary)+
         '<details class="mobile-more"><summary class="nav-btn '+(extra.includes(S.tab)?'active':'')+
         '">More <span aria-hidden="true">⌄</span></summary><div class="mobile-more-links">'+links(extra)+'</div></details></nav>';
@@ -1483,34 +1411,6 @@ async function initApp(){
       '<div class="panel"><div class="panel-header"><h2>Run sweep</h2><div class="flex"><label class="control">Strategy '+select([['ema-cross','EMA cross'],['rsi-revert','RSI reversion'],['trend-rsi','Trend + RSI'],['bollinger','Bollinger'],['breakout','Breakout'],['pine-custom','Pine Script strategy']],S.bt.strategy,'data-bt="strategy"')+'</label>'+button('Run 5–9 variations','run-sweep','primary')+button('Export CSV','export-sweep','small')+'</div></div><div class="panel-body"><p class="section-note">Each variation is trained on the first 70% of the dataset and independently simulated on the last 30%, using earlier bars only for indicator warm-up. The table sorts by holdout return. Choosing the best holdout result itself introduces selection bias; confirm on unseen data.</p></div></div>'+
       '<div class="panel"><div class="panel-header"><h2>Parameter ranking</h2><span class="muted">'+rows.length+' variations</span></div><div class="table-wrap">'+(rows.length?'<table class="data-table"><thead><tr><th>Parameters</th><th>Train return</th><th>Train DD</th><th>Test return</th><th>Test DD</th><th>Test trades</th><th>Test PF</th><th></th></tr></thead><tbody>'+rows.map((r,i)=>'<tr class="'+(i===0?'sweep-best':'')+'"><td>'+esc(Object.entries(r.params).map(([k,v])=>k+'='+v).join(', '))+'</td><td class="'+priceColor(r.train.returnPct)+'">'+pct(r.train.returnPct)+'</td><td>-'+format(r.train.maxDD)+'%</td><td class="'+priceColor(r.test.returnPct)+'">'+pct(r.test.returnPct)+'</td><td>-'+format(r.test.maxDD)+'%</td><td>'+r.test.trades+'</td><td>'+format(r.test.profitFactor)+'</td><td><button class="btn small" data-action="apply-sweep" data-index="'+i+'">Apply & test</button></td></tr>').join('')+'</tbody></table>':'<div class="empty"><strong>No sweep yet</strong>Choose a strategy and run a parameter sweep.</div>')+'</div></div>';
   }
-  function volatilityView(){
-    const available=new Map([...S.data].filter(([sym])=>VOL_TICKERS.includes(sym)&&modeSymbol(sym)));
-    const vSource=sym=>S.sources.get(sym)==='ALPACA'?'ALPACA '+String(S.liveFeed).toUpperCase()+' 1Day':
-      S.sources.get(sym)==='IMPORTED'?'IMPORTED CSV daily':'UNAVAILABLE';
-    const proxy=contangoPriceProxies(available,{sources:S.mode==='live'?'ALPACA '+S.liveFeed:'IMPORTED CSV'});
-    const rows=VOL_TICKERS.map(sym=>volatilityRow(sym,available.get(sym),available.has(sym)?vSource(sym):'NOT LOADED'));
-    const sourceNote=S.mode==='live'?'Live mode: '+esc(String(S.liveFeed).toUpperCase())+' Alpaca Worker daily OHLCV, cached scan '+esc(S.scan.at||'not yet scanned'):
-      'Demo mode: no real volatility symbols in the synthetic universe. Import genuine OHLCV CSV for these tickers or switch to Alpaca Live.';
-    return head('Volatility','Market-data volatility products and explicitly price-based roll/contango proxies; no futures or options pricing.',
-      button(S.mode==='live'?'Refresh real Alpaca scan':'Load real Alpaca scan','refresh-volatility','primary'))+
-      '<div class="info-strip" id="volatility-source">'+sourceNote+'</div>'+
-      '<div class="panel"><div class="panel-header"><h2>Price-based regime heuristic</h2><span class="source-badge">NOT VIX FUTURES CONTANGO</span></div>'+
-      '<div class="panel-body"><div class="vol-regime" id="contango-regime">'+esc(proxy.regime)+'</div>'+
-      '<div class="metrics">'+
-        metric('VXZ − VXX',''+pct(proxy.relativeReturn20),'20-day return spread · percentage points')+
-        metric('SVXY/VXX ratio trend',pct(proxy.svxyVxxRatioTrend20),'20-session relative-price ratio change')+
-        metric('Proxy date',esc(proxy.asOf||'Unavailable'),'Last aligned daily session')+
-        '</div><p class="section-note"><strong>Rule:</strong> '+esc(proxy.rule)+'</p>'+
-        '<p class="section-note"><strong>Meaning:</strong> '+esc(proxy.method)+
-        ' Source: '+esc(proxy.sources||'No ticker data loaded')+'. No VIX futures maturities, options implied volatility or actual roll yield are available in this feed.</p></div></div>'+
-      '<div class="panel"><div class="panel-header"><h2>Volatility product metrics</h2><span class="muted">'+available.size+' of '+VOL_TICKERS.length+' products with daily bars</span></div>'+
-      '<div class="table-wrap"><table class="data-table"><thead><tr><th>Symbol</th><th>OHLCV source</th><th>Bar date</th><th>Close</th><th>20D return</th><th>RV 20D</th><th>RV 60D</th><th>252D high DD</th><th>Bars</th></tr></thead><tbody>'+
-      rows.map(r=>'<tr data-vol-symbol="'+esc(r.symbol)+'"><td>'+esc(r.symbol)+'</td><td>'+esc(r.source)+'</td><td>'+esc(r.asOf||'—')+staleNote(r.symbol)+'</td>'+
-        '<td>'+format(r.close)+'</td><td class="'+priceColor(r.return20)+'">'+pct(r.return20)+'</td><td>'+pct(r.rv20)+'</td><td>'+pct(r.rv60)+'</td>'+
-        '<td class="'+priceColor(r.drawdown252)+'">'+pct(r.drawdown252)+'</td><td>'+format(r.bars,0)+'</td></tr>').join('')+'</tbody></table></div></div>'+
-      '<div class="info-strip">Method: 20D return = Close(t)/Close(t−20)−1. RV 20D/60D = sample standard deviation of 20/60 daily logarithmic returns × sqrt(252), annualized. High DD = Close / maximum daily HIGH across the last 252 sessions − 1. Values shown only with sufficient history.</div>';
-  }
-
   function pineInputFields(inputs,values,attribute='data-pine-input'){
     return inputs.length?'<div class="pine-settings">'+inputs.map(spec=>{
       const value=Object.hasOwn(values,spec.name)?values[spec.name]:spec.default;
@@ -1569,7 +1469,7 @@ async function initApp(){
     destroyCharts();shell();
     document.body.classList.toggle('chart-fullscreen-active',S.chartFullscreen&&S.tab==='charts');
     document.body.classList.toggle('chart-page-active',S.tab==='charts');
-    const views={screener:screenerView,briefing:briefingView,charts:chartsView,backtest:backtestView,optimize:optimizeView,volatility:volatilityView,scripts:scriptView,data:dataView};
+    const views={screener:screenerView,charts:chartsView,backtest:backtestView,optimize:optimizeView,scripts:scriptView,data:dataView};
     $('#main').innerHTML=views[S.tab]();
     if(S.tab==='charts'){
       if(S.data.has(S.symbol)){
@@ -1904,7 +1804,6 @@ async function initApp(){
         recovered}};
     evaluateScreenerSignals(true);
     evaluateLocalAlerts();S.tab=options.restoreTab||'screener';
-    if(S.tab==='briefing')captureBriefing();
     render();
     notice((recovered?'Saved Worker returned old history; restored the official Worker. ':'')+
       'Live scan complete: '+matched+' '+(matched===1?'match':'matches')+' across '+
@@ -2236,20 +2135,12 @@ async function initApp(){
   }
 
   const action={
-    'generate-briefing':()=>void generateBriefing(),
-    'copy-briefing':async ()=>{
-      if(!S.briefing){notice('Generate a live briefing before copying.');return;}
-      try{await navigator.clipboard.writeText(briefingToText(S.briefing));
-        notice('Daily briefing copied as plain text.');}
-      catch(error){notice('Clipboard access failed: '+String(error.message||error));}
-    },
     'export-screener':()=>exportScreenerCsv(),
     'run-portfolio':()=>runPortfolioCurrent(),
     'run-best-fit':()=>void runBestFitCurrent(),
     'clear-bt-dates':()=>{S.btRange={startDate:'',endDate:''};S.backtestError='';S.portfolioError='';saveSettings();
       if(S.portfolioMode&&S.bestFitMode&&bestFitAttempted)void runBestFitCurrent();
       else if(fitEverStarted)void runUniverseFitCurrent({reuseData:true});else render();},
-    'refresh-volatility':async ()=>{await switchToLive();if(S.mode==='live'){S.tab='volatility';render();}},
     'export-portfolio':()=>{
       const report=activePortfolioResult();
       if(!report){notice('Run the selected portfolio and date range before downloading.');return;}
@@ -2429,9 +2320,6 @@ async function initApp(){
       if(btn.dataset.tab){
         if(btn.dataset.tab==='screener'&&S.tab!=='screener'&&S.scanReview){returnToScreener();return;}
         S.tab=btn.dataset.tab;
-        if(S.tab==='briefing'&&S.mode==='live'&&S.scan.status==='complete')
-          try{captureBriefing();S.briefingError='';}
-          catch(error){S.briefingError=String(error.message||error);}
         render();return;
       }
       const handler=action[btn.dataset.action];
@@ -2530,14 +2418,6 @@ async function initApp(){
     }
     if(el.dataset.option){
       const opt=el.dataset.option,val=el.value;
-      if(opt==='briefing-strategy'){
-        S.signalSelection=val;S.signalsOnly=false;
-        evaluateScreenerSignals(false);saveSettings();
-        if(S.mode==='live'&&S.scan.status==='complete')
-          try{captureBriefing();S.briefingError='';}
-          catch(error){S.briefingError=String(error.message||error);}
-        render();return;
-      }
       if(opt==='signal-strategy'){S.signalSelection=val;S.signalsOnly=false;
         evaluateScreenerSignals(false);saveSettings();render();return;}
       if(opt==='signals-only'){S.signalsOnly=el.checked;saveSettings();render();return;}

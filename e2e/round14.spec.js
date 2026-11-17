@@ -5,7 +5,7 @@ import {LIVE_UNIVERSE} from '../src/universe.js';
 
 // Fixture mimics the real Alpaca-confirmed Nov 16 case, including the old
 // Worker clock cutoff that incorrectly claimed all 133 symbols were current.
-test('Round 14: 132 fresh Nov 16 bars and VXZ Nov 13 appear on all four screens',async ({page})=>{
+test('Round 14: 132 fresh Nov 16 bars and VXZ Nov 13 appear in Screener, Data Center and Chart Lab',async ({page})=>{
   test.setTimeout(90000);
   const errors=[];page.on('pageerror',error=>errors.push(error.message));
   const weekdays=[];
@@ -37,8 +37,5 @@ test('Round 14: 132 fresh Nov 16 bars and VXZ Nov 13 appear on all four screens'
   await chooseSymbol(page,'VXZ');
   await expect(page.locator('#chart-stale-warning')).toContainText(reason);
   await expect(page.locator('#chart-stale-warning')).toContainText('2026-11-16');
-  await page.locator('.sidebar [data-tab="volatility"]').click();
-  await expect(page.locator('tr[data-vol-symbol="VXZ"]')).toContainText(reason);
-  await expect(page.locator('tr[data-vol-symbol="VXX"]')).not.toContainText('Alpaca returns no bars after');
   expect(errors).toEqual([]);
 });

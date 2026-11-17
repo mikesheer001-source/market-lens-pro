@@ -475,7 +475,7 @@ tr[data-vol-symbol] td:nth-child(3){min-width:138px}
   body{overflow-x:clip}
   body.chart-fullscreen-active{overflow:hidden}
   .mobile-nav{
-    --mobile-nav-height:49px;display:grid;grid-template-columns:repeat(5,minmax(0,1fr));
+    --mobile-nav-height:49px;display:grid;grid-template-columns:repeat(4,minmax(0,1fr));
     height:var(--mobile-nav-height);padding:2px 5px;gap:2px;overflow:visible;z-index:20
   }
   .mobile-nav .nav-btn{width:100%;padding:4px 2px;min-height:44px;white-space:nowrap;font-size:11px;align-items:center}
