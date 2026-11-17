@@ -516,3 +516,7 @@ tr[data-vol-symbol] td:nth-child(3){min-width:138px}
 .scan-rule-values strong{font-variant-numeric:tabular-nums;overflow-wrap:anywhere}
 #variant-result p{margin:0 0 9px;color:var(--muted);font-size:13px}
 #variant-result .table-wrap{margin-bottom:9px}
+
+#older-history-control{display:inline-flex;align-items:center;gap:6px;flex-wrap:wrap}
+#older-history-control:empty{display:none}
+#older-history-control [role=status]{color:var(--muted);font-size:11px}

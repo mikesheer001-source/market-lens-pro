@@ -361,6 +361,84 @@ async function initApp(){
     return aggregate(raw,tf);
   };
   const bars=()=>barsFor(S.symbol,S.chart.tf);
+  const historyStart=Date.UTC(2016,0,1);
+  const olderHistory=new Map();
+  function liveChartHistory(){
+    if(S.mode!=='live'||S.sources.get(S.symbol)!=='ALPACA')return null;
+    const intraday=intradayTf(S.chart.tf);
+    const raw=intraday?S.intraday.get(intradayKey(S.symbol))?.bars:S.data.get(S.symbol);
+    if(!raw?.length)return null;
+    const base=S.apiBaseUrl.replace(/\/$/,'');
+    const key=JSON.stringify([base,S.liveFeed,S.symbol,intraday]);
+    return {base,key,raw,intraday,symbol:S.symbol,feed:S.liveFeed};
+  }
+  function chartBars(){
+    const series=liveChartHistory();
+    const older=series&&olderHistory.get(series.key)?.bars;
+    return older?.length?aggregate(normalizeBars([...older,...series.raw]),S.chart.tf):bars();
+  }
+  function olderHistoryControl(){
+    const series=liveChartHistory();
+    if(!series)return '';
+    const state=olderHistory.get(series.key);
+    if(state?.status==='done')return '<span role="status">Earliest available history loaded</span>';
+    const loading=state?.status==='loading';
+    const label=loading?'Loading older bars…':state?.status==='error'?'Retry older bars':'Older bars';
+    return '<button type="button" class="btn small" data-action="load-older-chart"'+
+      (loading?' disabled':'')+'>'+label+'</button>'+
+      (state?.message?'<span role="status">'+esc(state.message)+'</span>':'');
+  }
+  async function loadOlderChart(manual=false){
+    const series=liveChartHistory();
+    if(!series)return;
+    const {base,key,raw,intraday,symbol,feed}=series;
+    const prior=olderHistory.get(key)||{bars:[]};
+    if(prior.status==='loading'||prior.status==='done'||(prior.status==='error'&&!manual))return;
+    const refreshControl=()=>{
+      const el=$('#older-history-control');
+      if(el&&liveChartHistory()?.key===key)el.innerHTML=olderHistoryControl();
+    };
+    const end=Math.min(prior.before??Infinity,1000*stamp(raw[0].time))-1;
+    if(end<historyStart){
+      olderHistory.set(key,{...prior,status:'done',message:''});refreshControl();return;
+    }
+    const start=Math.max(historyStart,end-(intraday?120:730)*86_400_000);
+    olderHistory.set(key,{...prior,status:'loading',message:''});refreshControl();
+    try{
+      const params=new URLSearchParams({symbol,feed,timeframe:intraday?'15Min':'1Day',
+        start:new Date(start).toISOString(),end:new Date(end).toISOString(),limit:'10000'});
+      const pages=[];
+      for(let page=0;;page++){
+        const response=await fetch(base+'/api/stocks/bars?'+params,{headers:{Accept:'application/json'}});
+        const payload=await response.json().catch(()=>null);
+        if(!response.ok||!Array.isArray(payload?.bars))
+          throw Error(payload?.detail||payload?.error||'Could not load older bars.');
+        pages.push(...alpacaBars(payload.bars,params.get('timeframe')));
+        if(!payload.next_page_token)break;
+        if(page>=3)throw Error('Older bars exceeded the page limit.');
+        params.set('page_token',payload.next_page_token);
+      }
+      const active=S.tab==='charts'&&liveChartHistory()?.key===key;
+      const previous=active&&chart?chartBars():null;
+      const range=previous?.length?chart.timeScale().getVisibleLogicalRange():null;
+      const older=pages.filter(bar=>1000*stamp(bar.time)<=end);
+      olderHistory.set(key,{bars:normalizeBars([...older,...prior.bars]),before:start,
+        status:start===historyStart?'done':older.length?'ready':'error',
+        message:older.length?'':'No candles in this window. Try the preceding window.'});
+      if(active&&older.length){
+        if(range){
+          const anchor=Math.min(1,previous.length-1);
+          const index=chartBars().findIndex(bar=>stamp(bar.time)===stamp(previous[anchor].time));
+          const shift=index<0?0:index-anchor;
+          S.pendingChartRange={from:range.from+shift,to:range.to+shift};
+        }
+        render();
+      }else refreshControl();
+    }catch(error){
+      olderHistory.set(key,{...prior,status:'error',message:error.message});
+      refreshControl();
+    }
+  }
   async function loadLiveIntraday(symbol,force=false){
     if(S.mode!=='live'||S.sources.get(symbol)!=='ALPACA')return null;
     const key=intradayKey(symbol),feed=S.liveFeed;
@@ -840,7 +918,7 @@ async function initApp(){
       button('Backtest this symbol','view-backtest','small chart-mobile-backtest')+'</div></details></div></div>';
   }
   function chartsView(){
-    const b=bars(),source=S.sources.get(S.symbol);
+    const b=chartBars(),source=S.sources.get(S.symbol);
     const intro=S.chartFullscreen?'':'<div class="headrow chart-page-heading"><h1>Chart Lab</h1>'+
       button('Backtest this symbol','view-backtest','small')+'</div>';
     const stale=!S.chartFullscreen&&staleReason(S.symbol)?
@@ -855,6 +933,7 @@ async function initApp(){
       button('1M','range-1m','small')+button('3M','range-3m','small')+button('1Y','range-1y','small')+
       button('All','range-all','small')+button('Fit','range-fit','small')+
       (intradayTf(S.chart.tf)?button('Refresh 15m bars','refresh-intraday','small chart-refresh'):'')+
+      '<span id="older-history-control">'+olderHistoryControl()+'</span>'+
       '<span class="visually-hidden" id="chart-axis-hint" role="status"></span></div>'+
       '<dialog id="chart-indicator-dialog" class="chart-dialog" aria-labelledby="chart-dialog-title"></dialog>'+
       '<dialog id="chart-symbol-dialog" class="chart-dialog" aria-labelledby="chart-symbol-title"></dialog>'+
@@ -1491,7 +1570,7 @@ async function initApp(){
     return createChart(el,{autoSize:true,height,layout:{background:{type:'solid',color:colors.background},textColor:colors.text,fontFamily:'system-ui, sans-serif',fontSize:11,panes:{enableResize:true,separatorColor:'#46534d',separatorHoverColor:'#7a9385'}},grid:{vertLines:{color:colors.grid},horzLines:{color:colors.grid}},crosshair:{mode:0},trackingMode:{exitMode:TrackingModeExitMode.OnNextTap},rightPriceScale:{borderColor:'#304357',visible:true,autoScale:true,minimumWidth:priceScaleWidth},timeScale:{borderColor:'#304357',rightOffset:10,barSpacing:8},handleScale:chartScaleOptions(),handleScroll:{mouseWheel:true,pressedMouseMove:true,horzTouchDrag:true,vertTouchDrag:false}});
   }
   function mountPriceChart(){
-    const b=bars(),el=$('#price-chart');if(!b.length){const state=S.intradayStatus.get(intradayKey(S.symbol));
+    const b=chartBars(),el=$('#price-chart');if(!b.length){const state=S.intradayStatus.get(intradayKey(S.symbol));
       el.innerHTML='<div class="empty"><strong>'+ (state?.status==='loading'?'Loading real Alpaca intraday bars':state?.status==='error'?'Live intraday unavailable':'No genuine '+esc(S.chart.tf)+' bars available')+
         '</strong>'+esc(state?.error||'Select a daily timeframe or import timestamped intraday OHLCV. We do not simulate market data.')+'</div>';return;}
     chart=newChart(el);
@@ -1546,14 +1625,14 @@ async function initApp(){
     }
     const custom=[...S.activeIndicators];
     if(S.bt.strategy==='pine-custom'&&S.activeStrategy)custom.push({...S.activeStrategy,id:'strategy'});
-    const pineErrors=[];
+    const pineErrors=[],pineBars=b.slice(-6000);
     for(const item of custom){
       try{
-        const program=compilePine(item.code),evaluated=executePine(program,b,item.settings||{});
+        const program=compilePine(item.code),evaluated=executePine(program,pineBars,item.settings||{});
         const paneIndex=program.overlay?0:chart.panes().length;
         let firstScriptSeries=null;
         for(const p of evaluated.plots){
-          const data=p.values.flatMap((v,k)=>Number.isFinite(v)?[{time:b[k].time,value:v}]:[]);
+          const data=p.values.flatMap((v,k)=>Number.isFinite(v)?[{time:pineBars[k].time,value:v}]:[]);
           if(!data.length)continue;
           const series=chart.addSeries(LineSeries,{color:p.color,lineWidth:2,priceLineVisible:false,lastValueVisible:false,title:String(item.name||program.title)+' · '+p.title},paneIndex);
           series.setData(data);firstScriptSeries ||= series;
@@ -1561,7 +1640,7 @@ async function initApp(){
         const scriptMarkers=[];
         for(const shape of evaluated.shapes){
           shape.values.forEach((active,k)=>{
-            if(active)scriptMarkers.push({time:b[k].time,position:shape.position==='location.abovebar'?'aboveBar':'belowBar',shape:shape.position==='location.abovebar'?'arrowDown':'arrowUp',color:shape.color,text:shape.title.slice(0,20)});
+            if(active)scriptMarkers.push({time:pineBars[k].time,position:shape.position==='location.abovebar'?'aboveBar':'belowBar',shape:shape.position==='location.abovebar'?'arrowDown':'arrowUp',color:shape.color,text:shape.title.slice(0,20)});
           });
         }
         if(!program.overlay&&firstScriptSeries&&scriptMarkers.length)
@@ -1612,9 +1691,26 @@ async function initApp(){
       try{chart.timeScale().setVisibleLogicalRange(S.pendingChartRange);}catch{}
       S.pendingChartRange=null;
     }
+    if(liveChartHistory()){
+      const timeScale=chart.timeScale();
+      let gestureUntil=0;
+      const atLeftEdge=range=>{
+        if(!el.isConnected||!range||range.from>1||performance.now()>gestureUntil)return;
+        gestureUntil=0;
+        void loadOlderChart();
+      };
+      const arm=()=>{
+        gestureUntil=performance.now()+400;
+        requestAnimationFrame(()=>{if(el.isConnected)atLeftEdge(timeScale.getVisibleLogicalRange());});
+      };
+      timeScale.subscribeVisibleLogicalRangeChange(atLeftEdge);
+      el.addEventListener('wheel',arm,{passive:true});
+      el.addEventListener('mousemove',event=>{if(event.buttons===1)arm();},{passive:true});
+      el.addEventListener('touchmove',arm,{passive:true});
+    }
   }
   function showRange(n){
-    if(!chart)return;const total=bars().length;
+    if(!chart)return;const total=chartBars().length;
     try{if(!n||n>=total)chart.timeScale().fitContent();else chart.timeScale().setVisibleLogicalRange({from:Math.max(0,total-n),to:total+3});}catch{}
   }
   function mountEquity(){
@@ -2133,6 +2229,7 @@ async function initApp(){
     'range-3m':()=>showRange(S.chart.tf==='D'?66:14),
     'range-1y':()=>showRange(S.chart.tf==='D'?252:52),
     'range-all':()=>showRange(0),
+    'load-older-chart':()=>void loadOlderChart(true),
     'range-fit':()=>showRange(180),
     'reset-price-scale':()=>{
       if(resetPriceScale(chart))$('#chart-axis-hint').textContent='Price scale reset';
