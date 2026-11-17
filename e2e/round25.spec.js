@@ -39,7 +39,8 @@ test('Round 25 leaderboard CSV matches filtered and sorted visible rows and sele
  const second=await downloadCsv(page,'[data-action="export-leaderboard"]');
  expect(second.filename).toBe('leaderboard-validated-only-'+selectedStart+'-to-'+selectedEnd+'.csv');
  expect(csvLines(second.contents).length).toBe(filtered+1);
- if(filtered)expect(second.contents).toContain(',Validated,');
+ if(filtered)expect(csvLines(second.contents).slice(1).every(row=>
+   row.split(',')[8].startsWith('Validated ('))).toBe(true);
  expect(errors).toEqual([]);
 });
 test('Round 25 Fit CSV uses in-sample sort and validated-only ranking, never unshown symbols',async({page})=>{

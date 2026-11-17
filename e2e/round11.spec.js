@@ -8,7 +8,8 @@ test('Round 11 demo leaderboard includes all built-in Pine examples and readable
   await expect(page.locator('.leaderboard-table tbody tr')).toHaveCount(12);
   await expect(page.locator('.leaderboard-table')).toContainText('Regular bullish RSI divergence');
   await expect(page.locator('.leaderboard-table')).toContainText('Hidden bullish RSI divergence');
-  await expect(page.locator('.leaderboard-table .muted').filter({hasText:'Indicator · N/A'})).toHaveCount(2);
+  await expect(page.locator('.leaderboard-table td:first-child .muted').filter({hasText:'Indicator · N/A'})).toHaveCount(2);
+  await expect(page.locator('.leaderboard-table td:nth-child(9) .muted').filter({hasText:'Indicator · N/A'})).toHaveCount(2);
   await expect(page.locator('#leaderboard-source')).toContainText('7 built-in examples, 0 saved Pine');
   await expect(page.locator('#leaderboard-source')).toContainText(/bar date \d{4}-\d{2}-\d{2}/);
   await expect(page.locator('#leaderboard-source')).not.toContainText(/bar date \d{10}/);
