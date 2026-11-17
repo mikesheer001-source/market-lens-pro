@@ -1,3 +1,5 @@
+import { workspaceRequest } from "./workspace.js";
+export { Workspace } from "./workspace.js";
 import { marketScan } from "./market-scan.js";
 import { LIVE_UNIVERSE, ALPACA_BATCH_SIZE, ALPACA_SCAN_LOOKBACK_DAYS, ALPACA_SCAN_CACHE_SECONDS } from "../src/universe.js";
 import { expectedNyseBarDate, freshnessWithUniverse } from "../src/freshness.js";
@@ -40,8 +42,8 @@ function corsHeaders(origin, env) {
     .split(",").map(value => value.trim()).filter(Boolean);
   return {
     "Access-Control-Allow-Origin": origin || allowed[0] || "null",
-    "Access-Control-Allow-Methods": "GET, OPTIONS",
-    "Access-Control-Allow-Headers": "Accept, Content-Type",
+    "Access-Control-Allow-Methods": "GET, PUT, OPTIONS",
+    "Access-Control-Allow-Headers": "Accept, Content-Type, Authorization, If-Match",
     "Access-Control-Max-Age": "86400",
     "Vary": "Origin"
   };
@@ -65,7 +67,7 @@ function validDate(value) {
   return Number.isFinite(time);
 }
 
-function overRateLimit(ip) {
+function overRateLimit(ip, limit = 30) {
   const now = Date.now();
   const current = rateWindows.get(ip);
   if (!current || now - current.startedAt >= 60_000) {
@@ -78,7 +80,7 @@ function overRateLimit(ip) {
     return false;
   }
   current.count += 1;
-  return current.count > 30;
+  return current.count > limit;
 }
 
 export default {
@@ -95,8 +97,20 @@ export default {
     if (request.method === "OPTIONS") {
       return new Response(null, { status: 204, headers: corsHeaders(origin, env) });
     }
+    if (url.pathname === "/api/workspace" && ["GET", "PUT"].includes(request.method)) {
+      const ip = request.headers.get("CF-Connecting-IP") || "unknown";
+      if (overRateLimit("workspace:" + ip, 120)) {
+        return json({ error: "Workspace sync rate limit reached." }, 429, origin, env, { "Retry-After": "60" });
+      }
+      const response = await workspaceRequest(request, env);
+      const headers = new Headers(response.headers);
+      for (const [key, value] of Object.entries(corsHeaders(origin, env))) headers.set(key, value);
+      headers.set("Cache-Control", "no-store");
+      headers.set("Access-Control-Expose-Headers", "ETag");
+      return new Response(response.body, { status: response.status, headers });
+    }
     if (request.method !== "GET") {
-      return json({ error: "Method not allowed." }, 405, origin, env, { Allow: "GET, OPTIONS" });
+      return json({ error: "Method not allowed." }, 405, origin, env, { Allow: "GET, PUT, OPTIONS" });
     }
 
     if (url.pathname === "/api/health") {

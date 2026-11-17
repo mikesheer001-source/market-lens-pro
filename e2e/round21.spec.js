@@ -52,7 +52,7 @@ test('Round 21: stale imported IndexedDB ABBV history never overrides a real fiv
   await page.goto('./');
   await page.evaluate(async()=>{
     const db=await new Promise((ok,bad)=>{
-      const request=indexedDB.open('market-lens-pro-datasets',2);
+      const request=indexedDB.open('market-lens-pro-datasets');
       request.onupgradeneeded=()=>{
         if(!request.result.objectStoreNames.contains('symbols'))
           request.result.createObjectStore('symbols',{keyPath:'symbol'});

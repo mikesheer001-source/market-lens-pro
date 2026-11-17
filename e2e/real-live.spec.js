@@ -243,7 +243,7 @@ test('Round 11 live 2H comparison auto-fetches real Alpaca 15Min bars, caches in
   await expect(page.locator('#leaderboard-chart canvas').first()).toBeVisible();
   expect(intradayRequests.length).toBeGreaterThan(0);
   const record=await page.evaluate(()=>new Promise((resolve,reject)=>{
-    const open=indexedDB.open('market-lens-pro-datasets',2);
+    const open=indexedDB.open('market-lens-pro-datasets');
     open.onerror=()=>reject(open.error?.message);
     open.onsuccess=()=>{
       const db=open.result,tx=db.transaction('intraday','readonly'),req=tx.objectStore('intraday').get('VXX|iex');

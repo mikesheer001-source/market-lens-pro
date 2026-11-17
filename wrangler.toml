@@ -6,3 +6,11 @@ workers_dev = true
 [vars]
 ALPACA_DATA_FEED = "iex"
 ALLOWED_ORIGINS = "https://mikesheer001-source.github.io,http://localhost:5173,http://127.0.0.1:5173"
+
+[[durable_objects.bindings]]
+name = "WORKSPACES"
+class_name = "Workspace"
+
+[[migrations]]
+tag = "workspace-v1"
+new_sqlite_classes = ["Workspace"]

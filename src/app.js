@@ -1,3 +1,4 @@
+import {workspaceSync} from './workspace-sync.js';
 import {scanMarket} from './market-scan.js';
 import './styles.css';
 import {compilePine, executePine, sweepPine, PineError} from './pine.js';
@@ -47,6 +48,43 @@ async function initApp(){
   };
   const defaultSettings={tf:'D',style:'candles',log:false,ema20:true,ema50:false,ema200:true,sma20:false,bollinger:false,volume:true,rsi:true,macd:false,rsiPeriod:14,bollPeriod:20,ema20Len:20,ema50Len:50,ema200Len:200,sma20Len:20,volumeHeight:17,macdFast:12,macdSlow:26,macdSignal:9,lines:{}};
   const defaultBacktest={strategy:'ema-cross',side:'long',borrowAnnualPct:0,fast:20,slow:100,rsiPeriod:14,buyLevel:30,sellLevel:65,period:20,multiplier:2,capital:10000,allocation:100,feeBps:1,slipBps:2,stopPct:0,targetPct:0};
+  const workspaceKeys={
+    settings:'market-lens-pro-settings',library:'market-lens-pro-pine-library-v1',
+    draft:'market-lens-pro-pine-draft-v1',memory:'market-lens-pro-symbol-memory-v1',
+    signals:'market-lens-pro-signal-history-v1',analysis:'market-lens-pro-analysis-v1',portfolio:'market-lens-pro-portfolio-v1'
+  };
+  let syncText='',syncUpdate=false;
+  const workspace=workspaceSync({
+    endpoint:DEFAULT_ALPACA_WORKER+'/api/workspace',names:[...Object.keys(workspaceKeys),'imports','market'],
+    read:async name=>{
+      if(name==='imports')return databaseRead('symbols');
+      if(name==='market')return (await databaseRead('workspace','market'))?.value;
+      const raw=localStorage.getItem(workspaceKeys[name]);
+      return raw===null?undefined:JSON.parse(raw);
+    },
+    write:async (name,value)=>{
+      if(name==='imports'){await replaceDatasets(value);return;}
+      if(name==='market'){await storeMarket(value);return;}
+      localStorage.setItem(workspaceKeys[name],JSON.stringify(value));
+    },
+    notify:(message,updated)=>{
+      syncText=message;syncUpdate=updated;
+      const status=$('#workspace-sync-status');
+      if(status)status.textContent=message;
+      const update=$('.panel [data-action="workspace-update"]');
+      if(update)update.textContent=updated?'Apply synced changes':'Sync now';
+      const banner=$('#workspace-update-banner');
+      if(banner)banner.hidden=!updated;
+    }
+  });
+  const saveLocal=(name,value)=>{
+    const key=workspaceKeys[name];
+    if(localStorage.getItem(key)===value)return;
+    localStorage.setItem(key,value);
+    if(workspaceReady)workspace.changed(name);
+  };
+  let workspaceReady=false;
+  await workspace.flush('startup');
   let saved={};try{saved=JSON.parse(localStorage.getItem('market-lens-pro-settings')||'{}')||{};}catch{}
   const startupPrefs=normalizeStartupPreferences(saved);
   const scriptLibraryKey='market-lens-pro-pine-library-v1',scriptDraftKey='market-lens-pro-pine-draft-v1';
@@ -65,7 +103,7 @@ async function initApp(){
   const S={tab:startupPrefs.tab,mode:'demo',preferredMode:startupPrefs.mode,
     lastDemoSymbol:startupPrefs.lastDemoSymbol,lastLiveSymbol:startupPrefs.lastLiveSymbol,
     lastBacktestSymbol:startupPrefs.lastBacktestSymbol,lastSymbol:startupPrefs.lastSymbol,
-    apiBaseUrl:String(saved.apiBaseUrl||DEFAULT_ALPACA_WORKER),liveFeed:'iex',universeFilter:saved.universeFilter||'all',scan:{status:'idle'},data:new Map(Object.entries(sampleData())),sources:new Map(),symbol:'DEMO-SPY',query:'',symbolQuery:'',watch:workspaceLists.watch,watchlists:workspaceLists.watchlists,
+    apiBaseUrl:String(saved.apiBaseUrl||DEFAULT_ALPACA_WORKER),liveFeed:'iex',universeFilter:saved.universeFilter||'all',scan:{status:'idle'},data:new Map(Object.entries(sampleData())),sources:new Map(),symbol:'DEMO-SPY',query:saved.query||'',symbolQuery:'',watch:workspaceLists.watch,watchlists:workspaceLists.watchlists,
     watchlistId:workspaceLists.watchlistId,watchlistDraft:'',alertDraft:{symbol:'DEMO-SPY',metric:'price',op:'>',threshold:100},
     alerts:Array.isArray(saved.alerts)?saved.alerts.slice(0,ALERT_LIMIT):[],alertHits:[],
     savedScans:Array.isArray(saved.savedScans)?saved.savedScans.slice(0,SCAN_LIMIT):[],
@@ -73,7 +111,7 @@ async function initApp(){
     signalSelection:typeof saved.signalSelection==='string'?saved.signalSelection:'none',
     signalsOnly:!!saved.signalsOnly,signalRows:new Map(),signalErrors:[],
     signalHistory:priorSignalHistory,signalAsOf:null,freshness:null,staleDiagnostics:{},
-    rules:saved.rules||preset.trend.map(x=>({...x})),sort:'symbol',ascending:true,showOnlyMatches:false,showWatch:false,chart:(()=>{const restored={...defaultSettings,...saved.chart};if(!saved.chart?.style||saved.chart.style==='line')restored.style='candles';return restored;})(),bt:{...defaultBacktest,...saved.bt},result:previousAnalysis?.result||null,sweep:previousAnalysis?.sweep||null,lastAnalysis:previousAnalysis,resultSymbol:previousAnalysis?.symbol||null,resultTf:previousAnalysis?.tf||null,
+    rules:saved.rules||preset.trend.map(x=>({...x})),sort:saved.sort||'symbol',ascending:saved.ascending!==false,showOnlyMatches:!!saved.showOnlyMatches,showWatch:!!saved.showWatch,chart:{...defaultSettings,...saved.chart},bt:{...defaultBacktest,...saved.bt},result:previousAnalysis?.result||null,sweep:previousAnalysis?.sweep||null,lastAnalysis:previousAnalysis,resultSymbol:previousAnalysis?.symbol||null,resultTf:previousAnalysis?.tf||null,
     portfolioMode:!!saved.portfolioMode,bestFitMode:!!saved.bestFitMode,bestFitValidatedOnly:!!saved.bestFitValidatedOnly,
     btRange:{startDate:String(saved.btRange?.startDate||''),endDate:String(saved.btRange?.endDate||'')},
     backtestError:'',portfolioScope:saved.portfolioScope==='watchlist'?'watchlist':'matches',
@@ -89,14 +127,14 @@ async function initApp(){
     chartRecentSymbols:Array.isArray(saved.chartRecentSymbols)?saved.chartRecentSymbols.filter(s=>typeof s==='string').slice(0,6):[],
     chartRecentFrames:Array.isArray(saved.chartRecentFrames)?saved.chartRecentFrames.slice(0,3):[],
     hiddenScreenColumns:Array.isArray(saved.hiddenScreenColumns)?saved.hiddenScreenColumns.filter(i=>Number.isInteger(i)&&i>=2&&i<=13):[],
-    backtestSections:{},scanReview:null,
+    backtestSections:saved.backtestSections||{},chartViews:saved.chartViews||{},scanReview:null,
     variantBaseline:saved.variantBaseline?.options&&typeof saved.variantBaseline.symbol==='string'?saved.variantBaseline:null,
     variantComparison:null,
     scriptCode:typeof draft.code==='string'?draft.code:PINE_EXAMPLES[0].code,
     scriptName:typeof draft.name==='string'?draft.name:'EMA crossover',
     scriptId:draft.id||null,
     scriptSettings:draft.settings&&typeof draft.settings==='object'?draft.settings:{},
-    scriptParsed:null,scriptError:'',scriptOutput:null,scriptLibrary,activeIndicators:[],activeStrategy:null,
+    scriptParsed:null,scriptError:'',scriptOutput:null,scriptLibrary,activeIndicators:Array.isArray(saved.activeIndicators)?saved.activeIndicators.slice(0,4):[],activeStrategy:null,
     backtestPineDraft:typeof saved.backtestPineDraft?.code==='string'?saved.backtestPineDraft:null};
   for(const symbol of S.data.keys())S.sources.set(symbol,'SIMULATED');
   if(!symbolMemoryItem(S.symbolMemory,S.symbol)?.backtest&&previousAnalysis?.symbol===S.symbol&&previousAnalysis?.result){
@@ -110,20 +148,21 @@ async function initApp(){
   restoreSymbolState(S.symbol);
   parseCurrentPine();
   let chart=null,equityChart=null,leaderboardChart=null,tradeChart=null;
-  const saveSettings=()=>{try{localStorage.setItem('market-lens-pro-settings',JSON.stringify({mode:S.preferredMode==='live'?'live':S.mode,
+  const saveSettings=()=>{try{saveLocal('settings',JSON.stringify({mode:S.preferredMode==='live'?'live':S.mode,
     tab:S.tab,lastSymbol:S.symbol,lastBacktestSymbol:S.lastBacktestSymbol,
     lastLiveSymbol:S.lastLiveSymbol,lastDemoSymbol:S.lastDemoSymbol,watch:[...S.watch],watchlists:S.watchlists,watchlistId:S.watchlistId,alerts:S.alerts,savedScans:S.savedScans,rules:S.rules,chart:S.chart,bt:S.bt,portfolioMode:S.portfolioMode,bestFitMode:S.bestFitMode,bestFitValidatedOnly:S.bestFitValidatedOnly,btRange:S.btRange,portfolioScope:S.portfolioScope,portfolioWatchlistId:S.portfolioWatchlistId,signalSelection:S.signalSelection,signalsOnly:S.signalsOnly,
     leaderboardValidatedOnly:S.leaderboardValidatedOnly,fitValidatedOnly:S.fitValidatedOnly,apiBaseUrl:S.apiBaseUrl,universeFilter:S.universeFilter,
-    chartRecentSymbols:S.chartRecentSymbols,chartRecentFrames:S.chartRecentFrames,hiddenScreenColumns:S.hiddenScreenColumns,variantBaseline:S.variantBaseline,backtestPineDraft:S.backtestPineDraft}));}catch{}};
+    chartRecentSymbols:S.chartRecentSymbols,chartRecentFrames:S.chartRecentFrames,hiddenScreenColumns:S.hiddenScreenColumns,variantBaseline:S.variantBaseline,backtestPineDraft:S.backtestPineDraft,
+    activeIndicators:S.activeIndicators,chartViews:S.chartViews,backtestSections:S.backtestSections,query:S.query,sort:S.sort,ascending:S.ascending,showOnlyMatches:S.showOnlyMatches,showWatch:S.showWatch,marketShown:market.shown}));}catch{}};
   function rememberPortfolio(){
     S.portfolioTimestamp=new Date().toISOString();
-    try{localStorage.setItem('market-lens-pro-portfolio-v1',JSON.stringify({
+    try{saveLocal('portfolio',JSON.stringify({
       version:1,result:S.portfolioResult,sweep:S.portfolioSweep,savedAt:S.portfolioTimestamp
     }));}catch{notice('Portfolio calculated, but browser storage could not retain the full result.');}
   }
   function persistSymbolState(symbol,changes){
     S.symbolMemory=updateSymbolMemory(S.symbolMemory,symbol,changes);
-    try{localStorage.setItem('market-lens-pro-symbol-memory-v1',JSON.stringify(S.symbolMemory));}
+    try{saveLocal('memory',JSON.stringify(S.symbolMemory));}
     catch(err){notice('Per-symbol history is visible but could not be saved in browser storage. Older comparisons may need deleting.');}
   }
   function rememberLeaderboard(){
@@ -150,7 +189,7 @@ async function initApp(){
   }
   function rememberAnalysis(){
     S.lastAnalysis=analysisSnapshot({result:S.result,sweep:S.sweep,symbol:S.symbol,tf:S.chart.tf,strategy:S.bt.strategy,source:S.sources.get(S.symbol)});
-    try{localStorage.setItem('market-lens-pro-analysis-v1',JSON.stringify(S.lastAnalysis));}
+    try{saveLocal('analysis',JSON.stringify(S.lastAnalysis));}
     catch{notice('Backtest shown, but this browser cannot save the full result to localStorage.');}
     if(S.result&&S.resultSymbol===S.symbol)persistSymbolState(S.symbol,{backtest:{
       result:S.result,sweep:S.sweep,options:{...S.bt},timeframe:S.resultTf||S.chart.tf,
@@ -168,7 +207,7 @@ async function initApp(){
     try{
       const keys=Object.keys(S.signalHistory);
       if(keys.length>20)for(const oldKey of keys.slice(0,keys.length-20))delete S.signalHistory[oldKey];
-      localStorage.setItem('market-lens-pro-signal-history-v1',JSON.stringify(S.signalHistory));
+      saveLocal('signals',JSON.stringify(S.signalHistory));
     }catch{notice('Signal history could not be saved locally. Flip detection may reset after reload.');}
   }
   function evaluateScreenerSignals(detectFlips=false){
@@ -227,11 +266,11 @@ async function initApp(){
   }
   function modeSymbol(symbol){return S.mode==='live'?S.sources.get(symbol)==='ALPACA':S.sources.get(symbol)!=='ALPACA';}
   function persistPineDraft(){
-    try{localStorage.setItem(scriptDraftKey,JSON.stringify({code:S.scriptCode,name:S.scriptName,id:S.scriptId,settings:S.scriptSettings}));}
+    try{saveLocal('draft',JSON.stringify({code:S.scriptCode,name:S.scriptName,id:S.scriptId,settings:S.scriptSettings}));}
     catch{notice('Unable to save Script Lab draft in localStorage.');}
   }
   function persistPineLibrary(){
-    try{localStorage.setItem(scriptLibraryKey,JSON.stringify(S.scriptLibrary));}
+    try{saveLocal('library',JSON.stringify(S.scriptLibrary));}
     catch{notice('Unable to save scripts. Browser storage may be full.');}
   }
   function parseCurrentPine(){
@@ -240,13 +279,44 @@ async function initApp(){
   }
   function notice(message){document.querySelectorAll('.toast').forEach(x=>x.remove());const el=document.createElement('div');el.className='toast';el.textContent=message;document.body.append(el);setTimeout(()=>el.remove(),4500);}
   function openDb(){return new Promise((resolve,reject)=>{
-    const req=indexedDB.open('market-lens-pro-datasets',2);
+    const req=indexedDB.open('market-lens-pro-datasets',3);
     req.onupgradeneeded=()=>{
       if(!req.result.objectStoreNames.contains('symbols'))req.result.createObjectStore('symbols',{keyPath:'symbol'});
       if(!req.result.objectStoreNames.contains('intraday'))req.result.createObjectStore('intraday',{keyPath:'key'});
+      if(!req.result.objectStoreNames.contains('workspace'))req.result.createObjectStore('workspace',{keyPath:'key'});
     };
     req.onsuccess=()=>resolve(req.result);req.onerror=()=>reject(req.error);
   });}
+  async function databaseRead(store,key){
+    const db=await openDb();
+    try{
+      const entries=db.transaction(store,'readonly').objectStore(store);
+      const req=key===undefined?entries.getAll():entries.get(key);
+      return await new Promise((resolve,reject)=>{req.onsuccess=()=>resolve(req.result);req.onerror=()=>reject(req.error);});
+    }finally{db.close();}
+  }
+  async function writeDatabase(store, write){
+    const db=await openDb();
+    try{
+      const tx=db.transaction(store,'readwrite');
+      write(tx.objectStore(store));
+      await new Promise((resolve,reject)=>{tx.oncomplete=resolve;tx.onabort=()=>reject(tx.error);});
+    }finally{db.close();}
+  }
+  function replaceDatasets(rows){
+    return writeDatabase('symbols',store=>{store.clear();for(const row of rows)store.put(row);});
+  }
+  function storeMarket(value){
+    return writeDatabase('workspace',store=>store.put({key:'market',value}));
+  }
+  async function checkpointMarket(){
+    if(!market.id)return;
+    const {checked,requested,next,session,id,rows}=market;
+    try{
+      await storeMarket({checked,requested,next,session,id,rows:[...rows.values()]});
+      workspace.changed('market');
+    }catch{notice('Could not save the full-market scan on this device.');}
+  }
   async function readCachedIntraday(key){
     try{
       const db=await openDb(),tx=db.transaction('intraday','readonly');
@@ -277,8 +347,8 @@ async function initApp(){
       if(rows.length)render();
     }catch{notice('Local database unavailable. Imports still work until this tab closes.');}
   }
-  async function storeDataset(symbol,bars){try{const db=await openDb(),tx=db.transaction('symbols','readwrite');tx.objectStore('symbols').put({symbol,bars});await new Promise((res,rej)=>{tx.oncomplete=res;tx.onerror=()=>rej(tx.error);});db.close();}catch{notice('Import loaded, but this browser could not save it for future visits.');}}
-  async function removeImports(){try{const db=await openDb(),tx=db.transaction('symbols','readwrite');tx.objectStore('symbols').clear();await new Promise((res,rej)=>{tx.oncomplete=res;tx.onerror=()=>rej(tx.error);});db.close();}catch{}S.data=new Map(Object.entries(sampleData()));S.sources=new Map([...S.data.keys()].map(x=>[x,'SIMULATED']));S.symbol='DEMO-SPY';S.result=null;S.sweep=null;render();}
+  async function storeDataset(symbol,bars){try{const db=await openDb(),tx=db.transaction('symbols','readwrite');tx.objectStore('symbols').put({symbol,bars});await new Promise((res,rej)=>{tx.oncomplete=res;tx.onerror=()=>rej(tx.error);});db.close();workspace.changed('imports');}catch{notice('Import loaded, but this browser could not save it for future visits.');}}
+  async function removeImports(){try{const db=await openDb(),tx=db.transaction('symbols','readwrite');tx.objectStore('symbols').clear();await new Promise((res,rej)=>{tx.oncomplete=res;tx.onerror=()=>rej(tx.error);});db.close();workspace.changed('imports');}catch{}S.data=new Map(Object.entries(sampleData()));S.sources=new Map([...S.data.keys()].map(x=>[x,'SIMULATED']));S.symbol='DEMO-SPY';S.result=null;S.sweep=null;render();}
   const intradayTf=tf=>tf==='15m'||tf==='2H';
   const intradayKey=symbol=>symbol+'|'+String(S.liveFeed||'iex');
   const barsFor=(symbol,tf)=>{
@@ -454,7 +524,7 @@ async function initApp(){
         '<details class="mobile-more"><summary class="nav-btn '+(extra.includes(S.tab)?'active':'')+
         '">More <span aria-hidden="true">⌄</span></summary><div class="mobile-more-links">'+links(extra)+'</div></details></nav>';
     };
-    $('#app').innerHTML='<a href="#main" class="skip-link">Skip to workspace</a><div class="shell"><aside class="sidebar"><div class="brand"><div class="brand-mark" aria-hidden="true">ML</div><div><strong>MARKET LENS</strong><small>PRO WORKSTATION</small></div></div><div><div class="nav-label">Workspace</div>'+nav()+'</div><div class="sidebar-bottom">DATA NOTICE<br/>Your imported prices stay on this device. Simulated sample data is never live market data.<p>No account. No trades sent.</p></div></aside><div class="workspace"><header class="topbar"><div class="top-left"><strong>Market Lens Pro</strong><span class="workspace-label">/ Independent strategy laboratory</span></div><div class="top-actions"><span class="status"><span class="dot"></span>'+ (S.mode==='live'?'Alpaca data':'Local workspace') +'</span><span class="source-badge">'+status()+'</span><div class="mode-switch flex"><button class="btn small '+(S.mode==='demo'?'selected':'')+'" aria-pressed="'+(S.mode==='demo')+'" data-action="mode-demo">Use Demo</button><button class="btn small '+(S.mode==='live'?'selected':'')+'" aria-pressed="'+(S.mode==='live')+'" data-action="mode-live">Use Live</button></div><button class="btn" data-action="import">Import CSV</button></div></header>'+nav(true)+'<main id="main" class="main" tabindex="-1"></main></div></div><input id="csv-file" type="file" accept=".csv,text/csv" multiple hidden/>';
+    $('#app').innerHTML='<a href="#main" class="skip-link">Skip to workspace</a><div class="shell"><aside class="sidebar"><div class="brand"><div class="brand-mark" aria-hidden="true">ML</div><div><strong>MARKET LENS</strong><small>PRO WORKSTATION</small></div></div><div><div class="nav-label">Workspace</div>'+nav()+'</div><div class="sidebar-bottom">DATA NOTICE<br/>Workspaces can sync between paired devices. Sample prices are simulated.<p>No trades sent.</p></div></aside><div class="workspace"><header class="topbar"><div class="top-left"><strong>Market Lens Pro</strong><span class="workspace-label">/ Independent strategy laboratory</span></div><div class="top-actions"><span class="status"><span class="dot"></span>'+ (S.mode==='live'?'Alpaca data':'Local workspace') +'</span><span class="source-badge">'+status()+'</span><div class="mode-switch flex"><button class="btn small '+(S.mode==='demo'?'selected':'')+'" aria-pressed="'+(S.mode==='demo')+'" data-action="mode-demo">Use Demo</button><button class="btn small '+(S.mode==='live'?'selected':'')+'" aria-pressed="'+(S.mode==='live')+'" data-action="mode-live">Use Live</button></div><button class="btn" data-action="import">Import CSV</button></div></header>'+nav(true)+'<main id="main" class="main" tabindex="-1"></main></div></div><input id="csv-file" type="file" accept=".csv,text/csv" multiple hidden/>';
   }
   const head=(name,desc,tools='')=>'<div class="headrow"><div><div class="eyebrow">Market Lens / '+name+'</div><h1>'+name+'</h1><p class="subtle">'+desc+'</p></div><div class="flex">'+tools+'</div></div>';
   const button=(label,action,variant='')=>'<button type="button" class="btn '+variant+'" data-action="'+action+'">'+label+'</button>';
@@ -497,6 +567,7 @@ async function initApp(){
     render();
     try{
       await scanMarket(canonicalWorkerBase(S.apiBaseUrl),market,controller.signal,message=>{
+        if(!message&&market.next%15===0)void checkpointMarket();
         const status=$('#market-scan-status');
         if(!status)return;
         status.textContent=message||marketMessage();
@@ -508,6 +579,7 @@ async function initApp(){
       if(!controller.signal.aborted)market.error=error.message;
     }finally{
       market.controller=null;
+      await checkpointMarket();
       if(S.tab==='screener')render();
     }
   }
@@ -1517,7 +1589,7 @@ async function initApp(){
     const status=S.scriptError?'<div class="pine-error" role="alert">'+esc(S.scriptError)+'</div>':
       S.scriptOutput?'<div class="info-strip" role="status">'+esc(S.scriptOutput)+'</div>':
       parsed?'<div class="info-strip" role="status">'+esc(parsed.mode.toUpperCase())+' · '+esc(parsed.title)+' · '+(parsed.overlay?'Price overlay':'Own indicator pane')+'</div>':'';
-    return head('Script Lab','Write and run the supported Pine Script v5 subset locally. Scripts never leave this device.',symbolSelect()+tfSelect())+
+    return head('Script Lab','Write and run the supported Pine Script v5 subset in your browser.',symbolSelect()+tfSelect())+
       '<div class="panel"><div class="panel-header"><h2>Example scripts</h2><span class="muted">Load to edit</span></div><div class="panel-body"><div class="pine-examples">'+examples+'</div></div></div>'+
       '<div class="panel"><div class="panel-header"><h2>Source editor</h2><span class="source-badge">Pine v5 subset · local only</span></div><div class="panel-body">'+
         '<div class="pine-editor-actions"><label class="field">Script name<input id="pine-name" maxlength="100" value="'+esc(S.scriptName)+'" aria-label="Script name"/></label><label class="field">Saved scripts<select id="pine-library"><option value="">Choose saved script</option>'+library+'</select></label></div>'+
@@ -1531,9 +1603,41 @@ async function initApp(){
         '</p></div></div>';
   }
 
+  function workspacePanel(){
+    const linked=!!workspace.code();
+    return '<section class="panel"><div class="panel-header"><h2>Workspace sync</h2><span id="workspace-sync-status" role="status">'+
+      esc(syncText||(linked?'Paired on this device':'Saved on this device'))+'</span></div><div class="panel-body">'+
+      '<p class="section-note">'+(linked?'Pair another device with your private code. Anyone with the code can open and edit this workspace.':
+        'Create a private workspace here, or enter its code from another device. Joining loads that workspace on this device.')+'</p>'+
+      '<div class="flex">'+(linked?button('Show pairing code','workspace-code','small')+
+        button(syncUpdate?'Apply synced changes':'Sync now','workspace-update','small')+button('Disconnect this device','workspace-disconnect','small'):
+        button('Create synced workspace','workspace-create','primary')+button('Join a workspace','workspace-join','small'))+
+      '</div><dialog class="chart-dialog" id="workspace-dialog" aria-labelledby="workspace-title"></dialog></div></section>';
+  }
+  function showWorkspaceCode(join=false){
+    const dialog=$('#workspace-dialog');
+    dialog.innerHTML=dialogHeader(join?'Join a workspace':'Pair another device','workspace-title')+
+      '<div class="panel-body"><form id="workspace-pair-form"><label class="field">Private pairing code'+
+      '<input name="code" autocomplete="off" '+(join?'required':'readonly value="'+esc(workspace.code())+'"')+'></label>'+
+      (join?'<button class="btn primary" type="submit">Join workspace</button>':button('Copy code','workspace-copy','small'))+
+      '<p role="status" id="workspace-dialog-status"></p></form></div>';
+    dialog.showModal();
+  }
+  let connectingWorkspace=false;
+  async function connectWorkspace(code){
+    if(connectingWorkspace)return;
+    connectingWorkspace=true;
+    const status=$('#workspace-dialog-status')||$('#workspace-sync-status');
+    if(status)status.textContent=code?'Joining workspace…':'Creating encrypted workspace…';
+    try{
+      await workspace.connect(code);
+      if(code){location.reload();return;}
+      render();showWorkspaceCode();
+    }catch(error){if(status)status.textContent=error.message;}finally{connectingWorkspace=false;}
+  }
   function dataView(){
     const imported=[...S.data].filter(([k])=>S.sources.get(k)==='IMPORTED');
-    return head('Data Center','Import historical prices or configure the secure Alpaca market-wide scanner.',button('Import CSV files','import','primary'))+
+    return head('Data Center','Import historical prices or configure the Alpaca scanner.',button('Import CSV files','import','primary'))+workspacePanel()+
       freshnessPanel()+
       (S.scan.status==='complete'&&S.scan.source==='ALPACA'?
         '<div class="info-strip" id="scan-duration">Last live scan: <strong>'+
@@ -1549,7 +1653,7 @@ async function initApp(){
         (S.scan.history?.recovered?' · Outdated saved Worker automatically replaced with the official Worker':'')+
         '. Longer history may make uncached scans and browser processing slower.</div>':'')+
       '<div class="panel"><div class="panel-header"><h2>Live market scanner · Alpaca</h2><span class="source-badge">Keys stay server-side</span></div><div class="panel-body"><label class="field">Cloudflare Worker API URL<input type="url" data-setting="apiBaseUrl" placeholder="https://market-lens-pro-api.your-subdomain.workers.dev" value="'+esc(S.apiBaseUrl)+'"/></label><div class="flex" style="margin-top:13px">'+button('Test backend','test-live','small')+button('Scan live universe & switch to Live','mode-live','primary')+button('Switch to Demo','mode-demo','small')+'</div><div class="info-strip">The quick live scan covers '+LIVE_UNIVERSE.length+' curated symbols — not a full S&P 500 constituent list: '+LIVE_EQUITY_COUNT+' liquid US equities, '+LIVE_ETF_COUNT+' broad-market ETFs and '+LIVE_VOLATILITY_COUNT+' live volatility tickers. The volatility filter list has '+VOLATILITY_UNIVERSE.length+' entries, including the synthetic DEMO-VXX proxy; Demo mode scans '+DEMO_UNIVERSE.length+' synthetic symbols. Live volatility tickers include VXX, UVXY, SVXY, VIXY, VIXM, VXZ, SVIX, UVIX, SVOL and ZVOL. The Worker requests '+ALPACA_SCAN_LOOKBACK_DAYS+' calendar days (approximately five years) of daily bars in batches of '+ALPACA_BATCH_SIZE+' symbols ('+Math.ceil(LIVE_UNIVERSE.length/ALPACA_BATCH_SIZE)+' batches for the current universe), paginates if necessary, and caches completed scans for 15 minutes. The default feed is IEX; consolidated SIP data requires an eligible Alpaca subscription.</div><p class="section-note">Alpaca credentials remain in encrypted Cloudflare Worker secrets. The browser receives OHLCV only. If the live request fails, the app returns to Demo mode automatically. The market-wide scanner uses daily bars over REST. Chart Lab fetches genuine Alpaca 15Min bars for the selected Live symbol when 15m or 2H is chosen; it never fabricates intraday from daily. No streaming WebSocket.</p><p class="section-note">The setup guide is in <code>docs/ALPACA_SETUP.md</code>. No keys belong in this website, browser storage, or chat.</p></div></div>'+
-      '<div class="panel"><div class="panel-header"><h2>Import historical data</h2><span class="source-badge">Browser only · IndexedDB</span></div><div class="panel-body"><div class="upload" id="dropzone"><strong>Drop one or more CSV files here</strong><p class="subtle">Or tap to browse. Multiple symbols are supported in a single file.</p>'+button('Choose CSV files','import')+'</div><div class="info-strip">Required columns: <code>Date,Open,High,Low,Close</code>. Optional: <code>Symbol,Volume</code>. For daily files, enter ISO dates like 2026-01-05. Chart Lab in Live mode fetches real 15Min bars, aggregates them into 2H OHLCV, and labels the IEX source. Market-wide 2H screener rules still require timestamped intraday inputs. Imported CSV prices should be split-adjusted consistently. Close-only files are permitted but weaken fill accuracy.</div></div></div>'+
+      '<div class="panel"><div class="panel-header"><h2>Import historical data</h2><span class="source-badge">Saved workspace data</span></div><div class="panel-body"><div class="upload" id="dropzone"><strong>Drop one or more CSV files here</strong><p class="subtle">Or tap to browse. Multiple symbols are supported in a single file.</p>'+button('Choose CSV files','import')+'</div><div class="info-strip">Required columns: <code>Date,Open,High,Low,Close</code>. Optional: <code>Symbol,Volume</code>. For daily files, enter ISO dates like 2026-01-05. Chart Lab in Live mode fetches real 15Min bars, aggregates them into 2H OHLCV, and labels the IEX source. Market-wide 2H screener rules still require timestamped intraday inputs. Imported CSV prices should be split-adjusted consistently. Close-only files are permitted but weaken fill accuracy.</div></div></div>'+
       '<div class="panel"><div class="panel-header"><h2>Saved imported symbols</h2><div class="flex">'+button('Reset to demo data','clear-imports','small')+button('Export sample CSV','export-sample','small')+'</div></div><div class="panel-body"><div class="data-list">'+(imported.length?imported.map(([symbol,b])=>'<div class="data-item"><div><strong>'+esc(symbol)+'</strong><br/><small>'+b.length+' bars · '+dateLabel(b[0].time)+' to '+dateLabel(b.at(-1).time)+'</small></div><button class="btn small" data-action="choose-symbol" data-symbol="'+esc(symbol)+'">Open chart</button></div>').join(''):'<div class="empty"><strong>No imported data yet.</strong>Four clearly labeled synthetic symbols are included to demonstrate the interface.</div>')+'</div></div></div>'+
       '<div class="panel"><div class="panel-header"><h2>Market data policy</h2></div><div class="panel-body"><p class="section-note">GitHub Pages serves the public frontend only. Alpaca credentials are stored as Cloudflare Worker secrets and are never sent to this browser. Live data requests go through the Worker proxy.</p><p class="section-note">Imported and demo data remain available in Demo mode. Backtesting is research-only and does not submit orders.</p></div></div>';
   }
@@ -1559,7 +1663,8 @@ async function initApp(){
     document.body.classList.toggle('chart-fullscreen-active',S.chartFullscreen&&S.tab==='charts');
     document.body.classList.toggle('chart-page-active',S.tab==='charts');
     const views={screener:screenerView,charts:chartsView,backtest:backtestView,optimize:optimizeView,scripts:scriptView,data:dataView};
-    $('#main').innerHTML=views[S.tab]();
+    $('#main').innerHTML='<div id="workspace-update-banner" class="info-strip" '+(syncUpdate?'':'hidden')+'>'+
+      button('Apply changes from another device','workspace-update','small')+'</div>'+views[S.tab]();
     if(S.tab==='charts'){
       if(S.data.has(S.symbol)){
         S.chartRecentSymbols=[S.symbol,...S.chartRecentSymbols.filter(symbol=>symbol!==S.symbol)].slice(0,6);
@@ -1698,13 +1803,46 @@ async function initApp(){
         valuesByIndicator.get(key).textContent=indicatorValue(key,value,details);
       }
     });
+    const viewKey=S.symbol+'|'+S.chart.tf;
+    const savedView=S.chartViews[viewKey];
+    const timeScale=chart.timeScale();
+    const scale=base.priceScale();
     showRange(180);
+    if(savedView?.range&&!S.pendingChartRange){
+      try{timeScale.setVisibleRange(savedView.range);}catch{}
+    }
+    if(savedView?.price?.from<savedView?.price?.to){
+      scale.setAutoScale(false);
+      scale.setVisibleRange(savedView.price);
+    }
+    if(savedView?.panes?.length===panes.length){
+      panes.forEach((pane,index)=>pane.setStretchFactor(savedView.panes[index]));
+    }
     if(S.pendingChartRange){
       try{chart.timeScale().setVisibleLogicalRange(S.pendingChartRange);}catch{}
       S.pendingChartRange=null;
     }
+    let viewTimer;
+    const rememberChartView=()=>{
+      clearTimeout(viewTimer);
+      viewTimer=setTimeout(()=>{
+        if(!el.isConnected)return;
+        const range=timeScale.getVisibleRange();
+        if(!range)return;
+        const price=scale.options().autoScale?null:scale.getVisibleRange();
+        delete S.chartViews[viewKey];
+        S.chartViews[viewKey]={range,price,panes:panes.map(pane=>pane.getStretchFactor())};
+        const keys=Object.keys(S.chartViews);
+        if(keys.length>100)delete S.chartViews[keys[0]];
+        saveSettings();
+      },200);
+    };
+    timeScale.subscribeVisibleTimeRangeChange(rememberChartView);
+    el.addEventListener('pointerup',rememberChartView);
+    el.addEventListener('touchend',rememberChartView,{passive:true});
+    el.addEventListener('dblclick',rememberChartView);
+    $('[data-action="reset-price-scale"]')?.addEventListener('click',rememberChartView);
     if(liveChartHistory()){
-      const timeScale=chart.timeScale();
       let gestureUntil=0;
       const atLeftEdge=range=>{
         if(!el.isConnected||!range||range.from>1||performance.now()>gestureUntil)return;
@@ -2013,7 +2151,7 @@ async function initApp(){
     if(S.savedScans.length>=SCAN_LIMIT){notice('Maximum '+SCAN_LIMIT+' saved scans reached.');return;}
     const id='scan-'+Date.now();
     const snapshot=makeScanSnapshot(screenerRows(),{
-      id,name,source:S.savedScanView?.source|| (S.mode==='live'?'ALPACA':'DEMO'),rules:S.rules,
+      id,name,source:S.savedScanView?.source|| (marketShown()||S.mode==='live'?'ALPACA':'DEMO'),rules:S.rules,
       universeFilter:S.universeFilter,query:S.query,showOnlyMatches:S.showOnlyMatches,
       showWatch:S.showWatch,sort:S.sort,ascending:S.ascending
     });
@@ -2411,6 +2549,15 @@ async function initApp(){
         trainTrades:r.train.trades,testReturn:r.test.returnPct,testDrawdown:r.test.maxDD,
         testTrades:r.test.trades,testSharpe:r.test.sharpe,testProfitFactor:r.test.profitFactor}))));},
     'export-sample':()=>{const b=S.data.get('DEMO-SPY');exportFile('SIMULATED-DEMO-SPY.csv',csvDownload(b.map(x=>({Date:x.time,Symbol:'DEMO-SPY',Open:x.open,High:x.high,Low:x.low,Close:x.close,Volume:x.volume}))));},
+    'workspace-create':()=>void connectWorkspace(),
+    'workspace-join':()=>showWorkspaceCode(true),
+    'workspace-code':()=>showWorkspaceCode(),
+    'workspace-copy':async ()=>{
+      try{await navigator.clipboard.writeText(workspace.code());$('#workspace-dialog-status').textContent='Code copied.';}
+      catch{$('#workspace-pair-form input')?.select();}
+    },
+    'workspace-update':async ()=>{if(await workspace.flush('startup'))location.reload();},
+    'workspace-disconnect':async ()=>{await workspace.disconnect();syncText='';syncUpdate=false;render();},
     'clear-imports':()=>removeImports(),
     'choose-symbol':el=>{restoreSymbolState(el.dataset.symbol);S.tab='charts';render();}
   };
@@ -2431,10 +2578,15 @@ async function initApp(){
   });
   document.addEventListener('toggle',ev=>{
     const key=ev.target.dataset?.backtestSection;
-    if(key&&ev.target.isConnected)S.backtestSections[key]=ev.target.open;
+    if(key&&ev.target.isConnected&&S.backtestSections[key]!==ev.target.open){S.backtestSections[key]=ev.target.open;saveSettings();}
   },true);
   document.addEventListener('submit',ev=>{
     const form=ev.target;
+    if(form.id==='workspace-pair-form'){
+      ev.preventDefault();
+      if(!workspace.code())void connectWorkspace(new FormData(form).get('code'));
+      return;
+    }
     if(!form.closest('#chart-indicator-dialog'))return;
     ev.preventDefault();
     const key=form.dataset.indicatorKey;
@@ -2571,6 +2723,10 @@ async function initApp(){
   });
   document.addEventListener('dragover',ev=>{if(ev.target.closest('#dropzone')){ev.preventDefault();ev.target.closest('#dropzone').classList.add('dragging');}});
   document.addEventListener('drop',async ev=>{const drop=ev.target.closest('#dropzone');if(drop){ev.preventDefault();drop.classList.remove('dragging');await importFiles([...ev.dataTransfer.files].filter(f=>f.name.toLowerCase().endsWith('.csv')));}});
+  try{
+    const existing=(await databaseRead('workspace','market'))?.value;
+    if(existing?.id)Object.assign(market,{...existing,shown:!!saved.marketShown,rows:new Map(existing.rows.map(row=>[row.symbol,row]))});
+  }catch{}
   if(S.signalSelection!=='none')evaluateScreenerSignals(false);
   render();
   await loadStored();
@@ -2583,5 +2739,16 @@ async function initApp(){
       restoreSymbolState(startupPrefs.selectedSymbol);
     render();
   }
+  workspaceReady=true;
+  if(workspace.code())void workspace.flush();
+  setInterval(()=>{if(document.visibilityState==='visible')void workspace.flush();},20_000);
+  window.addEventListener('online',()=>void workspace.flush());
+  document.addEventListener('visibilitychange',async ()=>{
+    if(document.visibilityState!=='visible'||!workspace.code())return;
+    await workspace.flush();
+    if(syncUpdate&&!$('dialog[open]')&&!market.controller&&!document.activeElement?.matches('input, textarea, select')){
+      if(await workspace.flush('startup'))location.reload();
+    }
+  });
 }
 initApp().catch(err=>{document.getElementById('app').textContent='App startup failed: '+err.message;console.error(err);});
