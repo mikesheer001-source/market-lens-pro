@@ -164,12 +164,15 @@ function backtest(bars,opts={}){
   const valid=normalizeBars(bars||[]),start=Math.max(1,Math.floor(opts.startIndex||1)),end=Math.min(valid.length-1,opts.endIndex===undefined?valid.length-1:Math.floor(opts.endIndex));
   const initial=Math.max(1,Number(opts.capital||10000)),allocation=Math.max(.01,Math.min(100,Number(opts.allocation??100)))/100;
   const fee=Math.max(0,Number(opts.feeBps??1))/10000,slip=Math.max(0,Number(opts.slipBps??2))/10000,stop=Math.max(0,Number(opts.stopPct||0))/100,target=Math.max(0,Number(opts.targetPct||0))/100;
-  const side=opts.side==='short'?'short':'long',annualPeriods=opts.timeframe==='W'?52:opts.timeframe==='M'?12:252,borrowRate=side==='short'?Math.max(0,Number(opts.borrowAnnualPct||0))/100/annualPeriods:0;
+  const fixedSide=opts.side==='short'?'short':'long',scripted=opts.side==='script'&&!!opts.customSignals;
+  const annualPeriods=opts.timeframe==='W'?52:opts.timeframe==='M'?12:252;
+  const borrowRate=Math.max(0,Number(opts.borrowAnnualPct||0))/100/annualPeriods;
   if(valid.length<3||start>end)return {metrics:{trades:0,returnPct:0,maxDD:0,profitFactor:null,sharpe:null,winPct:null},curve:[],trades:[],notice:'Not enough price bars'};
   const signals=opts.customSignals||signalSets(valid,opts);let cash=initial,pos=null,peak=initial,maxDD=0,exposed=0;const curve=[],trades=[];
   let latestExitReason=null,signalState=null;
   function close(i,raw,reason){
     if(!pos)return;
+    const {side}=pos;
     const price=raw*(side==='short'?1+slip:1-slip);
     const exitFee=pos.qty*price*fee;
     const pnl=side==='long'?pos.qty*price-exitFee-pos.cost:pos.qty*(pos.price-price)-pos.entryFee-exitFee-pos.borrow;
@@ -179,17 +182,29 @@ function backtest(bars,opts={}){
     if(i===end&&reason!=='End of data')latestExitReason=reason;
     pos=null;
   }
+  const closeSignal=(side,index)=>{
+    const explicit=side==='long'?signals.closeLong?.[index]:signals.closeShort?.[index];
+    const opposite=scripted?signals.entrySide?.[index]=== (side==='long'?'short':'long'):
+      side==='long'?signals.sell[index]:signals.buy[index];
+    return explicit||opposite;
+  };
   for(let i=start;i<=end;i++){
     const b=valid[i];
-    const shouldExit=side==='long'?(signals.closeLong?.[i-1]||signals.sell[i-1]):(signals.closeShort?.[i-1]||signals.buy[i-1]);
-    const shouldEnter=side==='long'?signals.buy[i-1]:signals.sell[i-1];
-    if(pos&&shouldExit)close(i,b.open,'Signal');
-    if(!pos&&shouldEnter&&cash>0){
+    const signalIndex=i-1;
+    const requestedSide=scripted?signals.entrySide?.[signalIndex]:
+      (fixedSide==='long'?signals.buy[signalIndex]:signals.sell[signalIndex])?fixedSide:null;
+    if(pos&&closeSignal(pos.side,signalIndex))close(i,b.open,'Signal');
+    if(!pos&&requestedSide&&cash>0){
+      const side=requestedSide;
       const price=b.open*(side==='short'?1-slip:1+slip),budget=cash*allocation;
       const qty=Math.min(budget,cash)/(price*(1+fee));
-      if(qty>0){const entryFee=qty*price*fee,reserved=qty*price,cost=reserved+entryFee;cash-=cost;pos={qty,price,cost,index:i,reserved,entryFee,borrow:0};}
+      if(qty>0){const entryFee=qty*price*fee,reserved=qty*price,cost=reserved+entryFee;cash-=cost;pos={qty,price,cost,index:i,reserved,entryFee,borrow:0,side};}
     }
-    const scriptedStop=opts.customSignals?.stop?.[i-1],scriptedLimit=opts.customSignals?.limit?.[i-1];
+    const side=pos?.side||fixedSide;
+    const orderSide=signals.exitSide?.[signalIndex];
+    const matchingExit=!scripted||!orderSide||orderSide===side;
+    const scriptedStop=matchingExit?opts.customSignals?.stop?.[signalIndex]:null;
+    const scriptedLimit=matchingExit?opts.customSignals?.limit?.[signalIndex]:null;
     const stopLevel=Number.isFinite(scriptedStop)&&scriptedStop>0?scriptedStop:stop?(side==='short'?pos?.price*(1+stop):pos?.price*(1-stop)):null;
     const targetLevel=Number.isFinite(scriptedLimit)&&scriptedLimit>0?scriptedLimit:target?(side==='short'?pos?.price*(1-target):pos?.price*(1+target)):null;
     if(pos&&(stopLevel!=null||targetLevel!=null)){
@@ -197,17 +212,16 @@ function backtest(bars,opts={}){
       if(stopLevel!=null&&(side==='short'?b.high>=stopLevel:b.low<=stopLevel))close(i,side==='short'?Math.max(b.open,stopLevel):Math.min(b.open,stopLevel),'Stop');
       else if(targetLevel!=null&&(side==='short'?b.low<=targetLevel:b.high>=targetLevel))close(i,side==='short'?Math.min(b.open,targetLevel):Math.max(b.open,targetLevel),'Target');
     }
-    if(pos&&borrowRate){const interest=pos.qty*b.close*borrowRate;cash-=interest;pos.borrow+=interest;}
+    if(pos?.side==='short'&&borrowRate){const interest=pos.qty*b.close*borrowRate;cash-=interest;pos.borrow+=interest;}
     if(pos)exposed++;
     let equity=cash+(pos?(side==='short'?pos.reserved+pos.qty*(pos.price-b.close):pos.qty*b.close):0);
     if(i===end){
       // Capture the actual open position AFTER orders and stop/target fills.
       // A regular research backtest liquidates on the last observation for P/L;
       // that artificial liquidation is NOT an EXIT trading signal.
-      const latestExit=pos&&(side==='long'?(signals.closeLong?.[i]||signals.sell?.[i]):
-        (signals.closeShort?.[i]||signals.buy?.[i]));
+      const latestExit=pos&&closeSignal(pos.side,i);
       signalState={
-        status:latestExit||latestExitReason?'EXIT':pos?'LONG':'FLAT',
+        status:latestExit||latestExitReason?'EXIT':pos?(scripted&&side==='short'?'SHORT':'LONG'):'FLAT',
         positionOpen:!!pos,barDate:valid[i].time,
         exitReason:latestExitReason||(latestExit?'Next bar signal':null),
         strategySide:side

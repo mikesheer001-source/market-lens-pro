@@ -229,7 +229,7 @@ export function executePine(programOrSource,bars,overrides={}){
   const program=typeof programOrSource==='string'?compilePine(programOrSource):programOrSource;
   if(!Array.isArray(bars)||bars.length>6000)fail(1,'Run a script on no more than 6,000 bars');
   const series=new Map(),nodeOutput=new Map(),callState=new Map(),plots=new Map(),shapes=new Map();
-  const signals={buy:Array(bars.length).fill(false),sell:Array(bars.length).fill(false),closeLong:Array(bars.length).fill(false),closeShort:Array(bars.length).fill(false),stop:Array(bars.length).fill(null),limit:Array(bars.length).fill(null)};
+  const signals={entrySide:Array(bars.length).fill(null),exitSide:Array(bars.length).fill(null),buy:Array(bars.length).fill(false),sell:Array(bars.length).fill(false),closeLong:Array(bars.length).fill(false),closeShort:Array(bars.length).fill(false),stop:Array(bars.length).fill(null),limit:Array(bars.length).fill(null)};
   const entryDirections=new Map();
   let i=0,operations=0;
   const inputs=Object.fromEntries(program.inputs.map(spec=>{
@@ -366,12 +366,14 @@ export function executePine(programOrSource,bars,overrides={}){
           if(dir==='long')signals.buy[i]=true;
           else if(dir==='short')signals.sell[i]=true;
           else fail(node.line,'strategy.entry direction must be strategy.long or strategy.short');
+          signals.entrySide[i]=dir;
           entryDirections.set(orderId,dir);
         }else if(name==='strategy.close'){
           const direction=entryDirections.get(String(getArg(0,'id','Entry')))||'long';
           if(direction==='long')signals.closeLong[i]=true;else signals.closeShort[i]=true;
         }else {
           const stop=getArg(2,'stop',null),limit=getArg(3,'limit',null);
+          if(finite(stop)||finite(limit))signals.exitSide[i]=entryDirections.get(String(getArg(1,'from_entry','Entry')))||null;
           if(finite(stop)&&stop>0)signals.stop[i]=stop;
           if(finite(limit)&&limit>0)signals.limit[i]=limit;
           if(!finite(stop)&&!finite(limit)){

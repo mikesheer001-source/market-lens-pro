@@ -202,3 +202,22 @@ test('TRUE hidden bullish divergence triggers only after price higher low and RS
   assert.ok(backtested.trades.length>0,'hidden divergence genuinely places trades');
   assert.equal(backtested.trades[0].entry,bars[277].time,'entry fills at next bar open');
 });
+
+test('Pine order direction reverses at the next open and closes the correct side',()=>{
+  const candles=Array.from({length:6},(_,i)=>({
+    time:'2024-01-0'+(i+1),open:100+i,high:101+i,low:99+i,close:100+i,volume:100
+  }));
+  const code=[
+    '//@version=5',
+    'strategy("Direction test")',
+    'strategy.entry("Short", strategy.short, when=close == 100)',
+    'strategy.entry("Long", strategy.long, when=close == 101)',
+    'strategy.close("Long", when=close == 102)'
+  ].join('\n');
+  const result=backtest(candles,{side:'script',feeBps:0,slipBps:0,
+    customSignals:executePine(code,candles).signals});
+  assert.deepEqual(result.trades.map(t=>[t.side,t.entry,t.exit,t.buy,t.sell]),[
+    ['short','2024-01-02','2024-01-03',101,102],
+    ['long','2024-01-03','2024-01-04',102,103]
+  ]);
+});

@@ -103,7 +103,8 @@ async function initApp(){
     scriptName:typeof draft.name==='string'?draft.name:'EMA crossover',
     scriptId:draft.id||null,
     scriptSettings:draft.settings&&typeof draft.settings==='object'?draft.settings:{},
-    scriptParsed:null,scriptError:'',scriptOutput:null,scriptLibrary,activeIndicators:[],activeStrategy:null};
+    scriptParsed:null,scriptError:'',scriptOutput:null,scriptLibrary,activeIndicators:[],activeStrategy:null,
+    backtestPineDraft:typeof saved.backtestPineDraft?.code==='string'?saved.backtestPineDraft:null};
   for(const symbol of S.data.keys())S.sources.set(symbol,'SIMULATED');
   if(!symbolMemoryItem(S.symbolMemory,S.symbol)?.backtest&&previousAnalysis?.symbol===S.symbol&&previousAnalysis?.result){
     S.symbolMemory=updateSymbolMemory(S.symbolMemory,S.symbol,{backtest:{
@@ -115,12 +116,12 @@ async function initApp(){
   // Restore the default symbol's own run. Never mislabel a different symbol's global last analysis.
   restoreSymbolState(S.symbol);
   parseCurrentPine();
-  let chart=null,equityChart=null,leaderboardChart=null;
+  let chart=null,equityChart=null,leaderboardChart=null,tradeChart=null;
   const saveSettings=()=>{try{localStorage.setItem('market-lens-pro-settings',JSON.stringify({mode:S.preferredMode==='live'?'live':S.mode,
     tab:S.tab,lastSymbol:S.symbol,lastBacktestSymbol:S.lastBacktestSymbol,
     lastLiveSymbol:S.lastLiveSymbol,lastDemoSymbol:S.lastDemoSymbol,watch:[...S.watch],watchlists:S.watchlists,watchlistId:S.watchlistId,alerts:S.alerts,savedScans:S.savedScans,rules:S.rules,chart:S.chart,bt:S.bt,portfolioMode:S.portfolioMode,bestFitMode:S.bestFitMode,bestFitValidatedOnly:S.bestFitValidatedOnly,btRange:S.btRange,portfolioScope:S.portfolioScope,portfolioWatchlistId:S.portfolioWatchlistId,signalSelection:S.signalSelection,signalsOnly:S.signalsOnly,
     leaderboardValidatedOnly:S.leaderboardValidatedOnly,fitValidatedOnly:S.fitValidatedOnly,apiBaseUrl:S.apiBaseUrl,universeFilter:S.universeFilter,
-    chartRecentSymbols:S.chartRecentSymbols,chartRecentFrames:S.chartRecentFrames,hiddenScreenColumns:S.hiddenScreenColumns,variantBaseline:S.variantBaseline}));}catch{}};
+    chartRecentSymbols:S.chartRecentSymbols,chartRecentFrames:S.chartRecentFrames,hiddenScreenColumns:S.hiddenScreenColumns,variantBaseline:S.variantBaseline,backtestPineDraft:S.backtestPineDraft}));}catch{}};
   function rememberPortfolio(){
     S.portfolioTimestamp=new Date().toISOString();
     try{localStorage.setItem('market-lens-pro-portfolio-v1',JSON.stringify({
@@ -512,7 +513,7 @@ async function initApp(){
 
   const status=()=>S.mode==='live'?'ALPACA LIVE · '+String(S.liveFeed||'iex').toUpperCase():S.sources.get(S.symbol)==='SIMULATED'?'SIMULATED SAMPLE':S.sources.get(S.symbol)==='IMPORTED'?'IMPORTED OHLCV':'NO DATA';
   const isVisibleSymbol=symbol=>modeSymbol(symbol)&&(S.universeFilter!=='volatility'||VOLATILITY_UNIVERSE.includes(symbol));
-  function destroyCharts(){if(chart){chart.remove();chart=null;}if(equityChart){equityChart.remove();equityChart=null;}if(leaderboardChart){leaderboardChart.remove();leaderboardChart=null;}}
+  function destroyCharts(){if(chart){chart.remove();chart=null;}if(equityChart){equityChart.remove();equityChart=null;}if(leaderboardChart){leaderboardChart.remove();leaderboardChart=null;}if(tradeChart){tradeChart.remove();tradeChart=null;}}
   function shell(){
     const links=keys=>keys.map(key=>'<button class="nav-btn '+(S.tab===key?'active':'')+'" data-tab="'+key+
       '"'+(S.tab===key?' aria-current="page"':'')+'><span class="nav-icon" aria-hidden="true">'+tabIcons[key]+'</span>'+tabNames[key]+'</button>').join('');
@@ -947,12 +948,11 @@ async function initApp(){
   function btOptions(){
     if(S.bt.strategy==='pine-custom'){
       return '<div class="form-grid"><label class="field">Strategy '+select([['ema-cross','EMA crossover'],['rsi-revert','RSI mean reversion'],['trend-rsi','Trend + RSI pullback'],['bollinger','Bollinger mean reversion'],['breakout','Price breakout'],['pine-custom','Pine Script strategy']],S.bt.strategy,'data-bt="strategy"')+'</label>'+
-        '<label class="field">Trade direction '+select([['long','Long'],['short','Short']],S.bt.side,'data-bt="side"')+'</label>'+
         field('Starting capital ($)','capital','number',1,100000000,100)+field('Position allocation (%)','allocation','number',1,100,1)+
         field('Commission (bps/side)','feeBps','number',0,1000,.5)+field('Slippage (bps/side)','slipBps','number',0,1000,.5)+
         field('Short borrow cost (%/year)','borrowAnnualPct','number',0,100,.1)+
         field('Stop loss (%)','stopPct','number',0,100,.5)+field('Take profit (%)','targetPct','number',0,1000,.5)+
-        '</div><p class="section-note">Pine Script entry and exit signals are defined in Script Lab. Edit input.int / input.float / input.bool there; transaction costs and protective stops use these backtest settings.</p>';
+        '</div>';
     }
     return '<div class="form-grid"><label class="field">Strategy '+select([['ema-cross','EMA crossover'],['rsi-revert','RSI mean reversion'],['trend-rsi','Trend + RSI pullback'],['bollinger','Bollinger mean reversion'],['breakout','Price breakout'],['pine-custom','Pine Script strategy']],S.bt.strategy,'data-bt="strategy"')+'</label><label class="field">Trade direction '+select([['long','Long'],['short','Short']],S.bt.side,'data-bt="side"')+'</label>'+field('Fast EMA','fast','number',2,500,1)+field('Slow / trend EMA','slow','number',3,500,1)+field('RSI length','rsiPeriod','number',2,100,1)+field('Buy RSI threshold','buyLevel','number',1,99,1)+field('Exit RSI threshold','sellLevel','number',1,99,1)+field('Lookback / band length','period','number',2,200,1)+field('Bollinger deviation','multiplier','number',.1,5,.1)+field('Starting capital ($)','capital','number',1,100000000,100)+field('Position allocation (%)','allocation','number',1,100,1)+field('Commission (bps/side)','feeBps','number',0,1000,.5)+field('Slippage (bps/side)','slipBps','number',0,1000,.5)+field('Short borrow cost (%/year)','borrowAnnualPct','number',0,100,0.1)+field('Stop loss (%)','stopPct','number',0,100,0.5)+field('Take profit (%)','targetPct','number',0,1000,0.5)+'</div>';
   }
@@ -1351,7 +1351,24 @@ async function initApp(){
     rsiPeriod:'RSI length',buyLevel:'Buy RSI threshold',sellLevel:'Exit RSI threshold',
     period:'Lookback / band length',multiplier:'Bollinger deviation',stopPct:'Stop loss (%)',targetPct:'Take profit (%)'};
   function backtestScript(){
-    return S.activeStrategy||{code:S.scriptCode,settings:S.scriptSettings,name:S.scriptName};
+    return S.backtestPineDraft||S.activeStrategy||{code:S.scriptCode,settings:S.scriptSettings,name:S.scriptName};
+  }
+  function backtestPineEditor(){
+    if(S.bt.strategy!=='pine-custom')return '<div class="backtest-pine">'+button('Use Pine code','enable-backtest-pine','small')+'</div>';
+    const script=backtestScript();
+    const builtin=PINE_EXAMPLES.filter(example=>!example.id.endsWith('-indicator'));
+    const options=[['','Load an example or saved script'],
+      ...builtin.map(example=>['example:'+example.id,example.label]),
+      ...S.scriptLibrary.map(item=>['saved:'+item.id,item.name])];
+    let inputs=[];
+    try{inputs=compilePine(script.code).inputs;}catch{}
+    return '<div class="backtest-pine"><label class="field">Pine script library '+
+      select(options,'','data-bt-pine-source')+'</label>'+
+      '<label class="field" for="backtest-pine-source">Pine strategy code · v5</label>'+
+      '<textarea id="backtest-pine-source" data-bt-pine-code class="pine-editor" rows="12" spellcheck="false">'+esc(script.code)+'</textarea>'+
+      '<div class="flex">'+button('Check Pine syntax','check-backtest-pine','small')+button('Run Pine strategy','run-backtest','primary small')+'</div>'+
+      (inputs.length?pineInputFields(inputs,script.settings||{},'data-bt-pine-input'):'')+
+      '<p class="section-note">Use strategy() and order calls to trade on your indicator conditions. The script sets entries, exits and trade direction. The settings above model position size and trading costs.</p></div>';
   }
   function variantSetup(){
     return {symbol:S.symbol,tf:S.chart.tf,source:comparisonSource(),options:{...S.bt},
@@ -1438,8 +1455,11 @@ async function initApp(){
       esc(S.analysisError)+'</div>':'';
     const analysisNotice=S.result&&S.lastAnalysis?'<div class="info-strip">Saved analysis for <strong>'+esc(S.resultSymbol||S.symbol)+'</strong> · '+esc(S.resultTf||S.chart.tf)+' · '+esc(S.lastAnalysis.savedAt)+
       (S.resultSymbol!==S.symbol?' · Historical result from another symbol; select the original symbol and rerun for a matching chart.':'')+'</div>':'';
-    const settings=backtestSection('strategy','Strategy settings','<div class="panel-header"><div class="flex">'+button('Run backtest','run-backtest','primary')+button('Compare all strategies','compare-strategies')+button('Fit across universe','fit-universe')+button('Optimize parameters','view-optimize')+'</div></div><div class="panel-body">'+btOptions()+backtestDateControls()+'<p class="section-note">Stop-first rule when stop and target are both hit inside the same bar. Costs are modeled on each side. Short borrow fees are approximate; the engine does not model margin calls, locate availability, dividends, partial fills, taxes, or corporate actions.</p></div>',true);
+    const settings=backtestSection('strategy','Strategy settings','<div class="panel-header"><div class="flex">'+(S.bt.strategy==='pine-custom'?'':button('Run backtest','run-backtest','primary'))+button('Compare all strategies','compare-strategies')+button('Fit across universe','fit-universe')+button('Optimize parameters','view-optimize')+'</div></div><div class="panel-body">'+btOptions()+backtestPineEditor()+backtestDateControls()+'<p class="section-note">Stop-first rule when stop and target are both hit inside the same bar. Costs are modeled on each side. Short borrow fees are approximate; the engine does not model margin calls, locate availability, dividends, partial fills, taxes, or corporate actions.</p></div>',true);
     const performance='<div class="panel"><div class="panel-header"><h2>Performance</h2><div class="flex">'+button('Export trades CSV','export-trades','small')+button('View trade markers','view-charts','small')+'</div></div><div class="panel-body">'+resultCards(S.result)+'</div></div>';
+    const tradeView=S.result?.curve?.length?'<div class="panel"><div class="panel-header"><h2>Price and trade fills</h2>'+
+      '<span class="muted">'+esc(S.resultSymbol)+' · '+esc(S.resultTf)+'</span></div>'+
+      '<div id="backtest-price-chart" class="backtest-price-chart" aria-label="Candlestick chart with entry and exit markers"></div></div>':'';
     const equity='<div class="panel"><div class="panel-header"><h2>Equity curve vs. buy-and-hold</h2></div>'+(S.result?.curve?.length?'<div class="equity-legend"><span><i class="equity-swatch strategy"></i>Strategy</span><span><i class="equity-swatch benchmark"></i>Buy &amp; hold</span></div><div id="equity-chart" class="equity-plot"></div>':'<div class="empty">Run a backtest to generate an equity curve.</div>')+'</div>';
     const comparison=S.leaderboard?.symbol===S.symbol?S.leaderboard:null;
     const validation=comparison&&leaderboardRangeStatus(comparison,comparisonContext()).matches?
@@ -1452,7 +1472,7 @@ async function initApp(){
         ' · source: '+esc(S.result.source||S.sources.get(S.resultSymbol)||'UNKNOWN')+
         ' · last bar date '+esc(S.result.range?.actualEnd||'unknown')+'</div>':'');
     return head('Backtest','Signals use completed bars and next-open fills. One position at a time, long or short.',symbolSelect()+tfSelect())+
-      portfolioModeControl()+provenance+(S.result?validation+performance+equity+settings:settings+performance+equity)+
+      portfolioModeControl()+provenance+(S.result?validation+performance+tradeView+equity+settings:settings+performance+equity)+
       variantComparisonView()+backtestSection('trades','Trade log',tradeTable(S.result))+
       leaderboardView()+universeFitView();
   }
@@ -1491,17 +1511,20 @@ async function initApp(){
       '<div class="info-strip">Method: 20D return = Close(t)/Close(t−20)−1. RV 20D/60D = sample standard deviation of 20/60 daily logarithmic returns × sqrt(252), annualized. High DD = Close / maximum daily HIGH across the last 252 sessions − 1. Values shown only with sufficient history.</div>';
   }
 
+  function pineInputFields(inputs,values,attribute='data-pine-input'){
+    return inputs.length?'<div class="pine-settings">'+inputs.map(spec=>{
+      const value=Object.hasOwn(values,spec.name)?values[spec.name]:spec.default;
+      const input=spec.type==='bool'?'<input type="checkbox" '+attribute+'="'+esc(spec.name)+'" '+(value?'checked':'')+'/>':
+        '<input type="number" '+attribute+'="'+esc(spec.name)+'" value="'+esc(value)+'" step="'+esc(spec.step|| (spec.type==='int'?1:.1))+'"'+(spec.min!==undefined?' min="'+esc(spec.min)+'"':'')+(spec.max!==undefined?' max="'+esc(spec.max)+'"':'')+'/>';
+      return '<label class="field">'+esc(spec.title)+' <small>('+esc(spec.name)+')</small>'+input+'</label>';
+    }).join('')+'</div>':'<div class="section-note">This script has no editable input.int(), input.float(), or input.bool() controls.</div>';
+  }
   function scriptView(){
     const parsed=S.scriptParsed,inputs=parsed?.inputs||[];
     const examples=PINE_EXAMPLES.map(ex=>button(ex.label,'pine-example','small').replace('data-action="pine-example"','data-action="pine-example" data-example="'+esc(ex.id)+'"')).join('');
     const library=S.scriptLibrary.length?S.scriptLibrary.map(item=>
       '<option value="'+esc(item.id)+'"'+(S.scriptId===item.id?' selected':'')+'>'+esc(item.name)+'</option>').join(''):'';
-    const settings=inputs.length?'<div class="pine-settings">'+inputs.map(spec=>{
-      const value=Object.hasOwn(S.scriptSettings,spec.name)?S.scriptSettings[spec.name]:spec.default;
-      const input=spec.type==='bool'?'<input type="checkbox" data-pine-input="'+esc(spec.name)+'" '+(value?'checked':'')+'/>':
-        '<input type="number" data-pine-input="'+esc(spec.name)+'" value="'+esc(value)+'" step="'+esc(spec.step|| (spec.type==='int'?1:.1))+'"'+(spec.min!==undefined?' min="'+esc(spec.min)+'"':'')+(spec.max!==undefined?' max="'+esc(spec.max)+'"':'')+'/>';
-      return '<label class="field">'+esc(spec.title)+' <small>('+esc(spec.name)+')</small>'+input+'</label>';
-    }).join('')+'</div>':'<div class="section-note">This script has no editable input.int(), input.float(), or input.bool() controls.</div>';
+    const settings=pineInputFields(inputs,S.scriptSettings);
     const status=S.scriptError?'<div class="pine-error" role="alert">'+esc(S.scriptError)+'</div>':
       S.scriptOutput?'<div class="info-strip" role="status">'+esc(S.scriptOutput)+'</div>':
       parsed?'<div class="info-strip" role="status">'+esc(parsed.mode.toUpperCase())+' · '+esc(parsed.title)+' · '+(parsed.overlay?'Price overlay':'Own indicator pane')+'</div>':'';
@@ -1562,7 +1585,10 @@ async function initApp(){
       !S.intradayStatus.get(intradayKey(S.symbol)))
       void Promise.resolve().then(()=>loadLiveIntraday(S.symbol)).catch(()=>{});
     if(S.tab==='backtest'&&(S.portfolioMode?activePortfolioResult()?.curve?.length:S.result?.curve?.length))mountEquity();
-    if(S.tab==='backtest'&&!S.portfolioMode&&S.leaderboard?.symbol===S.symbol)mountLeaderboardChart();
+    if(S.tab==='backtest'&&!S.portfolioMode){
+      if(S.result?.curve?.length)mountBacktestPriceChart();
+      if(S.leaderboard?.symbol===S.symbol)mountLeaderboardChart();
+    }
     saveSettings();
   }
   const colors={background:'#101515',text:'#a8b7b0',grid:'#23302b',up:'#46d69b',down:'#f08480',yellow:'#e9bd68',blue:'#71b8b3',indicator:'#d69c65'};
@@ -1618,10 +1644,7 @@ async function initApp(){
     for(const p of S.chart.lines[S.symbol]||[])base.createPriceLine({price:p,color:'#e4b766',lineWidth:1,lineStyle:2,axisLabelVisible:true,title:'Level'});
     const pineMarkers=[];
     if(S.result&&S.resultSymbol===S.symbol&&S.resultTf===S.chart.tf){
-      pineMarkers.push(...S.result.trades.flatMap(t=>[
-        {time:t.entry,position:t.side==='short'?'aboveBar':'belowBar',color:t.side==='short'?colors.down:colors.up,shape:t.side==='short'?'arrowDown':'arrowUp',text:t.side==='short'?'SHORT':'BUY'},
-        {time:t.exit,position:t.side==='short'?'belowBar':'aboveBar',color:t.pnl>=0?colors.up:colors.down,shape:t.side==='short'?'arrowUp':'arrowDown',text:'EXIT'}
-      ]));
+      pineMarkers.push(...tradeFillMarkers(S.result.trades));
     }
     const custom=[...S.activeIndicators];
     if(S.bt.strategy==='pine-custom'&&S.activeStrategy)custom.push({...S.activeStrategy,id:'strategy'});
@@ -1713,6 +1736,45 @@ async function initApp(){
     if(!chart)return;const total=chartBars().length;
     try{if(!n||n>=total)chart.timeScale().fitContent();else chart.timeScale().setVisibleLogicalRange({from:Math.max(0,total-n),to:total+3});}catch{}
   }
+  function tradeFillMarkers(trades){
+    return trades.flatMap(t=>[
+      {time:t.entry,position:t.side==='short'?'aboveBar':'belowBar',color:t.side==='short'?colors.down:colors.up,shape:t.side==='short'?'arrowDown':'arrowUp',text:t.side==='short'?'SHORT':'BUY'},
+      {time:t.exit,position:t.side==='short'?'belowBar':'aboveBar',color:t.pnl>=0?colors.up:colors.down,shape:t.side==='short'?'arrowUp':'arrowDown',text:'EXIT'}
+    ]);
+  }
+  function mountBacktestPriceChart(){
+    const el=$('#backtest-price-chart'),result=S.result;
+    if(!el)return;
+    const history=barsFor(S.resultSymbol,S.resultTf);
+    const first=result.range?.actualStart||dateLabel(result.curve[0].time).slice(0,10);
+    const last=result.range?.actualEnd||dateLabel(result.curve.at(-1).time).slice(0,10);
+    const selected=windowBacktestBars(history,{startDate:first,endDate:last},{allowEmpty:true}).bars;
+    if(!selected.length){el.textContent='Price candles for this saved result are unavailable.';return;}
+    tradeChart=newChart(el,380);
+    const price=tradeChart.addSeries(CandlestickSeries,{upColor:colors.up,downColor:colors.down,
+      wickUpColor:colors.up,wickDownColor:colors.down,borderVisible:false});
+    price.setData(selected);
+    const times=new Set(selected.map(bar=>stamp(bar.time)));
+    const markers=tradeFillMarkers(result.trades).filter(marker=>times.has(stamp(marker.time)))
+      .sort((a,b)=>stamp(a.time)-stamp(b.time));
+    if(markers.length)createSeriesMarkers(price,markers);
+    el.dataset.tradeMarkers=String(markers.length);
+    if(S.bt.strategy==='pine-custom'&&S.activeStrategy){
+      try{
+        const {code,settings}=S.activeStrategy;
+        const plots=executePine(code,selected,settings);
+        const pane=plots.overlay?0:1;
+        for(const plot of plots.plots){
+          const data=plot.values.flatMap((value,i)=>Number.isFinite(value)?[{time:selected[i].time,value}]:[]);
+          if(!data.length)continue;
+          tradeChart.addSeries(LineSeries,{color:plot.color,title:plot.title,lineWidth:1,
+            priceLineVisible:false,lastValueVisible:false},pane).setData(data);
+        }
+        if(tradeChart.panes().length>1)tradeChart.panes()[0].setStretchFactor(3);
+      }catch(error){el.setAttribute('aria-description',error.message);}
+    }
+    tradeChart.timeScale().fitContent();
+  }
   function mountEquity(){
     const el=$('#equity-chart');if(!el)return;equityChart=newChart(el,275,92);
     const line=equityChart.addSeries(AreaSeries,{lineColor:colors.up,topColor:'#2aac765a',bottomColor:'#2aac7610',lineWidth:2,priceLineVisible:false,lastValueVisible:false,title:'Strategy'});
@@ -1749,6 +1811,7 @@ async function initApp(){
     if(cfg.strategy==='pine-custom'){
       const program=compilePine(script.code);
       if(program.mode!=='strategy')throw new PineError(1,'Select a strategy() script to backtest');
+      cfg.side='script';
       cfg.customSignals=executePine(program,bars,script.settings).signals;
     }
     return cfg;
@@ -1758,14 +1821,16 @@ async function initApp(){
     try{window=selectedBacktestWindow();}
     catch(error){S.backtestError=String(error.message||error);notice(S.backtestError);return false;}
     try{
-      S.result=backtest(window.bars,backtestConfig(window.bars,S.bt,backtestScript()));
+      const script=backtestScript();
+      S.result=backtest(window.bars,backtestConfig(window.bars,S.bt,script));
+      if(S.bt.strategy==='pine-custom')S.activeStrategy=structuredClone(script);
       S.result.range=window.range;
       S.result.source=S.sources.get(S.symbol)==='ALPACA'?
         'ALPACA '+String(S.liveFeed).toUpperCase()+' '+S.chart.tf:
         S.sources.get(S.symbol)==='SIMULATED'?'SIMULATED OHLCV':'IMPORTED CSV OHLCV';
       S.backtestError='';S.resultSymbol=S.symbol;S.resultTf=S.chart.tf;rememberAnalysis();return true;
     }catch(err){
-      S.scriptError=err.message;S.tab='scripts';render();notice(err.message);return false;
+      S.backtestError=err.message;notice(err.message);return false;
     }
   };
   async function testLiveBackend(){
@@ -1871,33 +1936,35 @@ async function initApp(){
     if(exists&&!asCopy)Object.assign(exists,record);else S.scriptLibrary.push(record);
     S.scriptId=id;persistPineLibrary();persistPineDraft();S.scriptOutput='Saved locally: '+name;render();
   }
-  function executeCurrentPine(){
+  async function executeCurrentPine(){
     try{
       const program=compilePine(S.scriptCode);
       S.scriptParsed=program;S.scriptError='';
-      const evaluated=executePine(program,bars(),S.scriptSettings);
       if(program.mode==='indicator'){
+        const evaluated=executePine(program,bars(),S.scriptSettings);
         const id=S.scriptId||'draft',record={id,name:S.scriptName,code:S.scriptCode,settings:{...S.scriptSettings}};
         S.activeIndicators=[...S.activeIndicators.filter(x=>x.id!==id),record].slice(-4);
         S.scriptOutput='Indicator applied to Chart Lab: '+program.title+' ('+evaluated.plots.length+' lines, '+evaluated.shapes.length+' shape series).';
         S.tab='charts';
       }else{
-        S.activeStrategy={code:S.scriptCode,settings:{...S.scriptSettings},name:program.title};
+        S.backtestPineDraft={code:S.scriptCode,settings:{...S.scriptSettings},name:program.title};
         S.bt.strategy='pine-custom';
-        S.result=backtest(bars(),{...S.bt,timeframe:S.chart.tf,customSignals:evaluated.signals});
-        S.resultSymbol=S.symbol;S.resultTf=S.chart.tf;S.sweep=null;rememberAnalysis();
-        S.scriptOutput='Strategy backtest completed: '+S.result.trades.length+' trades.';
+        S.portfolioMode=false;
         S.tab='backtest';
+        S.lastBacktestSymbol=S.symbol;
+        S.result=null;S.sweep=null;
+        if(!await ensureAnalysisBars('Backtest'))return;
+        if(S.tab==='backtest')runBt();
       }
       persistPineDraft();render();
     }catch(err){S.scriptError=err.message;S.scriptOutput=null;S.tab='scripts';render();}
   }
   function sweepCurrentPine(){
     try{
-      const program=compilePine(S.activeStrategy?.code||S.scriptCode);
+      const script=S.tab==='scripts'?{code:S.scriptCode,settings:S.scriptSettings}:backtestScript();
+      const program=compilePine(script.code);
       if(program.mode!=='strategy')throw new PineError(1,'A parameter sweep needs a strategy() script');
-      const settings=S.activeStrategy?.settings||S.scriptSettings;
-      const rows=sweepPine(program,bars(),backtest,{...S.bt,timeframe:S.chart.tf},settings);
+      const rows=sweepPine(program,bars(),backtest,{...S.bt,side:'script',timeframe:S.chart.tf},script.settings);
       S.sweep=rows;S.bt.strategy='pine-custom';rememberAnalysis();S.scriptError='';S.scriptOutput='Tested '+rows.length+' Pine input variations with 70/30 train and holdout periods.';
       S.tab='optimize';render();
     }catch(err){S.scriptError=err.message;S.tab='scripts';render();}
@@ -2137,7 +2204,7 @@ async function initApp(){
     const choice=lb?.rows.find(x=>x.id===id);
     if(!choice){notice('Run a strategy comparison for this symbol first.');return;}
     S.portfolioMode=false;S.bt={...S.bt,...lb.settings,strategy:choice.strategy};
-    S.chart.tf=lb.timeframe;S.activeStrategy=choice.script?{
+    S.chart.tf=lb.timeframe;S.backtestPineDraft=null;S.activeStrategy=choice.script?{
       code:choice.script.code,settings:{...choice.script.settings},name:choice.name
     }:null;
     if(choice.script){
@@ -2267,10 +2334,23 @@ async function initApp(){
       $('[data-action="compare-variant"]').focus({preventScroll:true});
     },
     'compare-variant':compareVariant,
+    'enable-backtest-pine':()=>{
+      S.bt.strategy='pine-custom';S.result=null;S.sweep=null;S.backtestError='';render();
+      $('#backtest-pine-source')?.focus();
+    },
+    'check-backtest-pine':()=>{
+      try{
+        if(compilePine(backtestScript().code).mode!=='strategy')throw new PineError(1,'Use strategy() with entry and exit orders to simulate trades');
+        S.backtestError='';notice('Pine strategy syntax OK');
+      }catch(error){S.backtestError=error.message;}
+      render();
+    },
     'run-backtest':async ()=>{
       if(S.portfolioMode){if(S.bestFitMode)void runBestFitCurrent();else runPortfolioCurrent();return;}
-      S.lastBacktestSymbol=S.symbol;saveSettings();
+      const symbol=S.symbol,tf=S.chart.tf;
+      S.lastBacktestSymbol=symbol;saveSettings();
       if(!await ensureAnalysisBars('Backtest'))return;
+      if(S.tab!=='backtest'||S.portfolioMode||symbol!==S.symbol||tf!==S.chart.tf)return;
       runBt();
       // Always show an inline, plain-language date-window error on failure.
       render();
@@ -2391,6 +2471,12 @@ async function initApp(){
   document.addEventListener('input',ev=>{
     const el=ev.target;
     if(el.id==='pine-editor'){S.scriptCode=el.value;S.scriptOutput=null;persistPineDraft();return;}
+    if(el.hasAttribute('data-bt-pine-code')){
+      S.backtestPineDraft={...backtestScript(),code:el.value,name:''};
+      saveSettings();
+      const detail=$('#variant-result');if(detail)detail.innerHTML=variantResultView();
+      return;
+    }
     if(el.id==='pine-name'){S.scriptName=el.value;persistPineDraft();return;}
     if(el.dataset.setting){S[el.dataset.setting]=el.value;saveSettings();return;}
     if(el.dataset.input==='watchlist-name'){S.watchlistDraft=el.value;return;}
@@ -2415,6 +2501,23 @@ async function initApp(){
     if(el.id==='csv-file'){if(el.files?.length)await importFiles(el.files);el.value='';return;}
     if(el.id==='pine-library'){const found=S.scriptLibrary.find(x=>x.id===el.value);if(found){loadPineSource(found.code,found.name,found.id);S.scriptSettings={...(found.settings||{})};persistPineDraft();render();}return;}
     if(el.dataset.pineInput){S.scriptSettings[el.dataset.pineInput]=el.type==='checkbox'?el.checked:Number(el.value);persistPineDraft();return;}
+    if(el.hasAttribute('data-bt-pine-source')){
+      const [source,id]=el.value.split(':');
+      const script=(source==='example'?PINE_EXAMPLES:S.scriptLibrary).find(item=>item.id===id);
+      if(script){
+        S.backtestPineDraft={code:script.code,name:script.name||script.label,settings:{...script.settings}};
+        S.backtestError='';render();
+      }
+      return;
+    }
+    if(el.dataset.btPineInput){
+      const script=backtestScript();
+      S.backtestPineDraft={...script,settings:{...script.settings,[el.dataset.btPineInput]:
+        el.type==='checkbox'?el.checked:Number(el.value)}};
+      saveSettings();
+      const detail=$('#variant-result');if(detail)detail.innerHTML=variantResultView();
+      return;
+    }
     if(el.dataset.alertField){
       const key=el.dataset.alertField;S.alertDraft[key]=key==='threshold'?Number(el.value):el.value;return;
     }
@@ -2481,6 +2584,7 @@ async function initApp(){
     if(el.dataset.bt){
       const key=el.dataset.bt;
       S.bt[key]=el.type==='number'?Number(el.value):el.value;S.result=null;S.sweep=null;saveSettings();
+      if(key==='strategy'&&S.tab==='backtest'){S.backtestError='';render();return;}
       const detail=$('#variant-result');if(detail)detail.innerHTML=variantResultView();
       return;
     }

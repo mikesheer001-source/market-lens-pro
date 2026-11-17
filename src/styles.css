@@ -520,3 +520,10 @@ tr[data-vol-symbol] td:nth-child(3){min-width:138px}
 #older-history-control{display:inline-flex;align-items:center;gap:6px;flex-wrap:wrap}
 #older-history-control:empty{display:none}
 #older-history-control [role=status]{color:var(--muted);font-size:11px}
+
+.backtest-pine{display:grid;gap:8px;margin:12px 0}
+.backtest-pine>.btn{justify-self:start}
+.backtest-pine textarea{min-height:180px;width:100%;tab-size:2}
+.backtest-pine .section-note{margin:0}
+.backtest-price-chart{height:380px;overflow:hidden}
+@media(max-width:800px){.backtest-price-chart{height:300px}}
