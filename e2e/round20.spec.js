@@ -4,7 +4,7 @@ test('Round 20: desktop fullscreen covers viewport, keeps symbol, returns to pri
   const errors=[];page.on('pageerror',e=>errors.push(e.message));
   await page.goto('./');
   await page.locator('.sidebar [data-tab="charts"]').click();
-  const symbol=await page.locator('[data-option="symbol"]').inputValue();
+  const symbol=await page.locator('[data-action="chart-symbol-picker"]').getAttribute('data-symbol');
   await expect(page.getByRole('heading',{name:'Chart Lab'})).toBeVisible();
   await expect(page.locator('#price-chart canvas').first()).toBeVisible();
   await expect(page.locator('#chart-lab-panel')).toHaveAttribute('data-fullscreen','false');
@@ -27,14 +27,14 @@ test('Round 20: desktop fullscreen covers viewport, keeps symbol, returns to pri
   expect(Math.abs(box.height-viewport.height)).toBeLessThanOrEqual(2);
   expect(box.x).toBeGreaterThanOrEqual(-1);
   expect(box.y).toBeGreaterThanOrEqual(-1);
-  await expect(page.locator('[data-option="symbol"]')).toHaveValue(symbol);
+  await expect(page.locator('[data-action="chart-symbol-picker"]')).toHaveAttribute('data-symbol',symbol);
   await page.locator('[data-action="reset-price-scale"]').click();
   await expect(page.locator('#chart-axis-hint')).toContainText('Price scale reset');
   await page.keyboard.press('Escape');
   await expect(panel).toHaveAttribute('data-fullscreen','false');
   await expect(page.locator('body')).not.toHaveClass(/chart-fullscreen-active/);
   await expect(page.getByRole('heading',{name:'Chart Lab'})).toBeVisible();
-  await expect(page.locator('[data-option="symbol"]')).toHaveValue(symbol);
+  await expect(page.locator('[data-action="chart-symbol-picker"]')).toHaveAttribute('data-symbol',symbol);
   await expect(page.getByRole('button',{name:'Fullscreen'})).toBeVisible();
   const returnedScroll=await page.evaluate(()=>window.scrollY);
   expect(Math.abs(returnedScroll-previousScroll)).toBeLessThanOrEqual(2);
@@ -138,7 +138,7 @@ test('Round 20: mobile fullscreen fills small viewport while indicator gear and 
   await page.goto('./');
   await page.locator('.mobile-nav [data-tab="charts"]').click();
   await expect(page.locator('#price-chart canvas').first()).toBeVisible();
-  const symbol=await page.locator('[data-option="symbol"]').inputValue();
+  const symbol=await page.locator('[data-action="chart-symbol-picker"]').getAttribute('data-symbol');
   await page.locator('[data-action="chart-fullscreen"]').click();
   const panel=page.locator('#chart-lab-panel');
   await expect(panel).toHaveAttribute('data-fullscreen','true');
@@ -156,7 +156,7 @@ test('Round 20: mobile fullscreen fills small viewport while indicator gear and 
   await expect(page.getByRole('button',{name:'Exit fullscreen'})).toBeVisible();
   await page.locator('[data-action="chart-exit-fullscreen"]').click();
   await expect(panel).toHaveAttribute('data-fullscreen','false');
-  await expect(page.locator('[data-option="symbol"]')).toHaveValue(symbol);
+  await expect(page.locator('[data-action="chart-symbol-picker"]')).toHaveAttribute('data-symbol',symbol);
   await expect(page.locator('.mobile-nav [data-tab="charts"]')).toBeVisible();
   expect(errors).toEqual([]);
 });

@@ -1,4 +1,5 @@
 import {test,expect} from '@playwright/test';
+import {chooseSymbol} from './chart-symbol.js';
 import {sampleData} from '../src/engine.js';
 import {LIVE_UNIVERSE} from '../src/universe.js';
 
@@ -33,7 +34,7 @@ test('Round 14: 132 fresh Nov 16 bars and VXZ Nov 13 appear on all four screens'
   await expect(page.locator('#data-freshness')).toContainText('132/133 current');
   await expect(page.locator('#data-freshness [data-data-stale-symbol="VXZ"]')).toContainText(reason);
   await page.locator('.sidebar [data-tab="charts"]').click();
-  await page.locator('[data-option="symbol"]').selectOption('VXZ');
+  await chooseSymbol(page,'VXZ');
   await expect(page.locator('#chart-stale-warning')).toContainText(reason);
   await expect(page.locator('#chart-stale-warning')).toContainText('2026-11-16');
   await page.locator('.sidebar [data-tab="volatility"]').click();

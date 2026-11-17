@@ -26,9 +26,11 @@ for(const width of [1440,1024,768,390]){
    await page.locator('[data-action="run-backtest"]').click();
    await expect(page.locator('#equity-chart canvas').first()).toBeVisible();
    await check();
+   if(width<=800)await page.getByText('More',{exact:true}).click();
    await page.locator(nav+' [data-tab="data"]').click();
    await expect(page.locator('[data-setting="apiBaseUrl"]')).toBeVisible();
    await check();
+   if(width<=800)await page.getByText('More',{exact:true}).click();
    await page.locator(nav+' [data-tab="scripts"]').click();
    await expect(page.getByRole('heading',{name:'Script Lab'})).toBeVisible();
    await expect(page.locator('#pine-editor')).toBeVisible();

@@ -1,4 +1,5 @@
 import {test,expect} from '@playwright/test';
+import {chooseSymbol} from './chart-symbol.js';
 
 test('all five presets compare on one symbol, sort by all columns and load best trade history',async ({page})=>{
   const errors=[];page.on('pageerror',e=>errors.push(e.message));
@@ -64,25 +65,25 @@ test('returning to each symbol restores that symbol’s strategy, leaderboard an
   await expect(page.locator('#equity-chart canvas').first()).toBeVisible();
   await page.locator('[data-action="compare-strategies"]').first().click();
   await expect(page.locator('#leaderboard-source')).toContainText('DEMO-SPY');
-  await page.locator('[data-option="symbol"]').selectOption('DEMO-VXX');
+  await chooseSymbol(page,'DEMO-VXX');
   await expect(page.locator('.leaderboard-table tbody tr')).toHaveCount(0);
   await page.locator('[data-bt="strategy"]').selectOption('breakout');
   await page.locator('[data-action="run-backtest"]').click();
   await page.locator('[data-action="compare-strategies"]').first().click();
   await expect(page.locator('#leaderboard-source')).toContainText('DEMO-VXX');
-  await page.locator('[data-option="symbol"]').selectOption('DEMO-SPY');
+  await chooseSymbol(page,'DEMO-SPY');
   await expect(page.locator('[data-bt="strategy"]')).toHaveValue('ema-cross');
   await expect(page.locator('#leaderboard-source')).toContainText('DEMO-SPY');
   await expect(page.locator('#equity-chart canvas').first()).toBeVisible();
-  await page.locator('[data-option="symbol"]').selectOption('DEMO-VXX');
+  await chooseSymbol(page,'DEMO-VXX');
   await expect(page.locator('[data-bt="strategy"]')).toHaveValue('breakout');
   await expect(page.locator('#leaderboard-source')).toContainText('DEMO-VXX');
   await page.reload();
   await page.locator('.sidebar [data-tab="backtest"]').click();
-  await page.locator('[data-option="symbol"]').selectOption('DEMO-VXX');
+  await chooseSymbol(page,'DEMO-VXX');
   await expect(page.locator('[data-bt="strategy"]')).toHaveValue('breakout');
   await expect(page.locator('#leaderboard-chart canvas').first()).toBeVisible();
-  await page.locator('[data-option="symbol"]').selectOption('DEMO-SPY');
+  await chooseSymbol(page,'DEMO-SPY');
   await expect(page.locator('[data-bt="strategy"]')).toHaveValue('ema-cross');
   await expect(page.locator('#leaderboard-chart canvas').first()).toBeVisible();
   expect(errors).toEqual([]);

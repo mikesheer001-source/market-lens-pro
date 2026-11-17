@@ -1,4 +1,5 @@
 import {test,expect} from '@playwright/test';
+import {chooseSymbol} from './chart-symbol.js';
 
 test('Round 11 demo leaderboard includes all built-in Pine examples and readable date, with indicator examples N/A',async ({page})=>{
   const errors=[];page.on('pageerror',e=>errors.push(e.message));
@@ -23,7 +24,7 @@ test('Round 11 remembers Demo Backtester ticker/tab and last analysis after relo
   const errors=[];page.on('pageerror',e=>errors.push(e.message));
   await page.goto('./');
   await page.locator('.sidebar [data-tab="backtest"]').click();
-  await page.locator('[data-option="symbol"]').selectOption('DEMO-VXX');
+  await chooseSymbol(page,'DEMO-VXX');
   await page.locator('[data-action="run-backtest"]').click();
   await expect(page.locator('#equity-chart canvas').first()).toBeVisible();
   await page.reload();

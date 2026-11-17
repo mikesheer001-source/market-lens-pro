@@ -1,4 +1,5 @@
 import {test,expect} from '@playwright/test';
+import {chooseSymbol} from './chart-symbol.js';
 import {LIVE_UNIVERSE,ALPACA_SCAN_LOOKBACK_DAYS} from '../src/universe.js';
 import {aggregate,statsFor} from '../src/engine.js';
 
@@ -42,7 +43,7 @@ test('Round 19: a real-five-year-length mocked scan fills W EMA200 and shows >12
     minimumFractionDigits:2,maximumFractionDigits:2})+'%';
   await expect(weekly).toHaveText(display);
   await page.locator('.sidebar [data-tab="charts"]').click();
-  await page.locator('[data-option="symbol"]').selectOption('SPY');
+  await chooseSymbol(page,'SPY');
   await expect(page.getByText(new RegExp(history.length+' D bars'))).toBeVisible();
   await expect(page.locator('#price-chart canvas').first()).toBeVisible();
   await page.locator('.sidebar [data-tab="data"]').click();

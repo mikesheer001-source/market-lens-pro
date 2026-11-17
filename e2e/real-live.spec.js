@@ -1,4 +1,5 @@
 import {test,expect} from '@playwright/test';
+import {chooseSymbol} from './chart-symbol.js';
 import {LIVE_UNIVERSE} from '../src/universe.js';
 import {LIVE_SCAN_CACHE_REVISION} from '../src/live-history.js';
 import {nyIntradaySession} from '../src/intraday-session.js';
@@ -61,10 +62,10 @@ test('real Alpaca Worker scans entire 133-symbol universe and publishes VXX dail
   await expect(page.locator('[data-weekly-ema200="SPY"]')).not.toHaveText('—');
   const weeklyEmaPct=(await page.locator('[data-weekly-ema200="SPY"]').innerText()).trim();
   await page.locator('.sidebar [data-tab="charts"]').click();
-  await page.locator('[data-option="symbol"]').selectOption('ABBV');
+  await chooseSymbol(page,'ABBV');
   await expect(page.getByText(abbvBars+' D bars',{exact:false})).toBeVisible();
   await expect(page.locator('#price-chart canvas').first()).toBeVisible();
-  await page.locator('[data-option="symbol"]').selectOption('SPY');
+  await chooseSymbol(page,'SPY');
   await expect(page.getByText(spyBars+' D bars',{exact:false})).toBeVisible();
   await expect(page.locator('#price-chart canvas').first()).toBeVisible();
   await page.locator('.sidebar [data-tab="data"]').click();
@@ -78,12 +79,14 @@ test('real Alpaca Worker scans entire 133-symbol universe and publishes VXX dail
     ', W EMA200='+weeklyEmaPct+
     ', '+(await page.locator('#scan-duration').innerText()));
   await page.locator('.sidebar [data-tab="charts"]').click();
-  await expect(page.locator('[data-option="symbol"] option')).toHaveCount(LIVE_UNIVERSE.length);
-  await page.locator('[data-option="symbol"]').selectOption('AAPL');
+  await page.locator('[data-action="chart-symbol-picker"]').click();
+  await expect(page.locator('#chart-symbol-all button')).toHaveCount(LIVE_UNIVERSE.length);
+  await page.locator('#chart-symbol-dialog [data-action="close-dialog"]').click();
+  await chooseSymbol(page,'AAPL');
   await expect(page.locator('#price-chart canvas').first()).toBeVisible();
   await page.locator('.sidebar [data-tab="backtest"]').click();
   await expect(page.locator('[data-option="symbol"] option')).toHaveCount(LIVE_UNIVERSE.length);
-  await page.locator('[data-option="symbol"]').selectOption('SVOL');
+  await chooseSymbol(page,'SVOL');
   await page.locator('[data-action="run-backtest"]').click();
   await expect(page.getByText('Completed trades')).toBeVisible();
   expect(errors).toEqual([]);
@@ -108,7 +111,7 @@ test('actual Alpaca IEX 15m bars produce real 2H candles, volatility analytics a
   await page.locator('.mode-switch [data-action="mode-live"]').click();
   await expect(page.locator('#scan-status')).toContainText('133/133 symbols loaded',{timeout:150000});
   await page.locator('.sidebar [data-tab="charts"]').click();
-  await page.locator('[data-option="symbol"]').selectOption('VXX');
+  await chooseSymbol(page,'VXX');
   await page.locator('[data-option="tf"]').selectOption('15m');
   await expect(page.locator('#price-chart canvas').first()).toBeVisible({timeout:60000});
   await expect(page.locator('.info-strip').first()).toContainText('Alpaca 15-minute trade-bar OHLCV');
@@ -146,7 +149,7 @@ test('real Alpaca IEX OHLCV runs the entire preset strategy leaderboard on VXX w
   await page.locator('.mode-switch [data-action="mode-live"]').click();
   await expect(page.locator('#scan-status')).toContainText('133/133 symbols loaded',{timeout:150000});
   await page.locator('.sidebar [data-tab="backtest"]').click();
-  await page.locator('[data-option="symbol"]').selectOption('VXX');
+  await chooseSymbol(page,'VXX');
   await page.locator('[data-action="compare-strategies"]').first().click();
   await expect(page.locator('.leaderboard-table tbody tr')).toHaveCount(12);
   await expect(page.locator('#leaderboard-source')).toContainText('Alpaca IEX OHLCV');
@@ -202,7 +205,7 @@ test('real Alpaca scan exposes latest-bar freshness and dated computed strategy 
     await page.locator('.sidebar [data-tab="data"]').click();
     await expect(page.locator('#data-freshness [data-data-stale-symbol="VXZ"]')).toContainText(warning);
     await page.locator('.sidebar [data-tab="charts"]').click();
-    await page.locator('[data-option="symbol"]').selectOption('VXZ');
+    await chooseSymbol(page,'VXZ');
     await expect(page.locator('#chart-stale-warning')).toContainText(warning);
     await page.locator('.sidebar [data-tab="volatility"]').click();
     await expect(page.locator('tr[data-vol-symbol="VXZ"]')).toContainText(warning);
@@ -236,7 +239,7 @@ test('Round 11 live 2H comparison auto-fetches real Alpaca 15Min bars, caches in
   await page.locator('.mode-switch [data-action="mode-live"]').click();
   await expect(page.locator('#scan-status')).toContainText('133/133 symbols loaded',{timeout:150000});
   await page.locator('.sidebar [data-tab="backtest"]').click();
-  await page.locator('[data-option="symbol"]').selectOption('VXX');
+  await chooseSymbol(page,'VXX');
   await page.locator('[data-option="tf"]').selectOption('2H');
   // No Chart Lab navigation, no manual Refresh button; the analysis fetch is automatic.
   await page.locator('[data-action="compare-strategies"]').first().click();

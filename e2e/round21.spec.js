@@ -1,4 +1,5 @@
 import {test,expect} from '@playwright/test';
+import {chooseSymbol} from './chart-symbol.js';
 import {sampleData} from '../src/engine.js';
 import {DEFAULT_ALPACA_WORKER,LIVE_SCAN_CACHE_REVISION} from '../src/live-history.js';
 
@@ -75,7 +76,7 @@ test('Round 21: stale imported IndexedDB ABBV history never overrides a real fiv
   await expect(page.locator('tr[data-symbol="ABBV"] td').nth(8)).toHaveText(String(longBars.length));
   await expect(page.locator('[data-weekly-ema200="ABBV"]')).not.toHaveText('—');
   await page.locator('.sidebar [data-tab="charts"]').click();
-  await page.locator('[data-option="symbol"]').selectOption('ABBV');
+  await chooseSymbol(page,'ABBV');
   await expect(page.getByText(longBars.length+' D bars',{exact:false})).toBeVisible();
   await page.locator('.sidebar [data-tab="data"]').click();
   await expect(page.locator('#scan-duration')).toContainText('Worker reported 1825 daily lookback days');
