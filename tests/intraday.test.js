@@ -68,7 +68,7 @@ test('dedicated intraday endpoint fetches real Alpaca 15Min timeframe without cr
     assert.equal(r2.headers.get('X-Intraday-Cache'),'HIT');
     assert.equal(upstreamCalls,1);
     assert.equal((await r2.json()).bars.length,5);
-    const invalid=await worker.fetch(new Request(endpoint.replace('VXX','INVALID'),{headers:{Origin:'https://mikesheer001-source.github.io','CF-Connecting-IP':'198.51.100.100'}}),env);
+    const invalid=await worker.fetch(new Request(endpoint.replace('VXX','%21INVALID'),{headers:{Origin:'https://mikesheer001-source.github.io','CF-Connecting-IP':'198.51.100.100'}}),env);
     assert.equal(invalid.status,400);
   }finally{
     globalThis.fetch=originalFetch;

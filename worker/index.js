@@ -1,3 +1,4 @@
+import { marketScan } from "./market-scan.js";
 import { LIVE_UNIVERSE, ALPACA_BATCH_SIZE, ALPACA_SCAN_LOOKBACK_DAYS, ALPACA_SCAN_CACHE_SECONDS } from "../src/universe.js";
 import { expectedNyseBarDate, freshnessWithUniverse } from "../src/freshness.js";
 import {LIVE_SCAN_CACHE_REVISION} from "../src/live-history.js";
@@ -111,11 +112,12 @@ export default {
       }, 200, origin, env);
     }
 
+    const isMarket = url.pathname === "/api/stocks/market";
     const isScan = url.pathname === "/api/stocks/scan";
     const isBars = url.pathname === "/api/stocks/bars";
     const isIntraday = url.pathname === "/api/stocks/intraday";
     const isDiagnostics = url.pathname === "/api/stocks/diagnostics";
-    if (!isScan && !isBars && !isIntraday && !isDiagnostics) {
+    if (!isMarket && !isScan && !isBars && !isIntraday && !isDiagnostics) {
       return json({ error: "Not found." }, 404, origin, env);
     }
 
@@ -126,6 +128,15 @@ export default {
 
     if (!env.ALPACA_API_KEY || !env.ALPACA_API_SECRET) {
       return json({ error: "Alpaca credentials are not configured on the Worker." }, 503, origin, env);
+    }
+    if (isMarket) {
+      try {
+        return json(await marketScan(url, env), 200, origin, env);
+      } catch (error) {
+        const status = [400, 409, 429].includes(error.status) ? error.status : 502;
+        return json({ error: error.message || "U.S. market scan unavailable." }, status, origin, env,
+          status === 429 ? { "Retry-After": "60" } : {});
+      }
     }
     // Explicit targeted diagnostic: asset status plus actual newest Alpaca daily bar.
     // No prices or credentials are exposed. Up to five symbols per request.
@@ -163,8 +174,8 @@ export default {
     if (isIntraday) {
       const symbol=String(url.searchParams.get("symbol")||"").trim().toUpperCase();
       const feed=String(url.searchParams.get("feed")||env.ALPACA_DATA_FEED||"iex").toLowerCase();
-      if(!LIVE_UNIVERSE.includes(symbol))
-        return json({error:"Choose a symbol from the 133-symbol live universe."},400,origin,env);
+      if(!/^[A-Z][A-Z0-9.\-]{0,19}$/.test(symbol))
+        return json({error:"Provide a valid U.S. ticker."},400,origin,env);
       if(!FEEDS.has(feed))return json({error:"Unsupported Alpaca feed."},400,origin,env);
       const cacheUrl=new URL("/api/stocks/intraday",url.origin);
       cacheUrl.searchParams.set("symbol",symbol);

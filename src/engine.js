@@ -125,7 +125,11 @@ function valueFor(stats,metric) {
 }
 
 function screenSymbol(allBars,rules) {
-  const cache={};const get=tf=>cache[tf]??=statsFor(aggregate(allBars,tf));
+  const cache={};
+  return screenStats(tf=>cache[tf]??=statsFor(aggregate(allBars,tf)),rules);
+}
+
+function screenStats(get,rules) {
   const fails=[],checks=[];
   for(const rule of rules){
     if(rule.enabled===false)continue;
@@ -268,4 +272,4 @@ function csvDownload(rows){
   return [cols.join(','),...rows.map(row=>cols.map(k=>q(row[k])).join(','))].join('\r\n');
 }
 
-export { parseCsv, stamp, normalizeBars, alpacaBars, nyParts, aggregate, sma, ema, rsi, atr, indicators, statsFor, valueFor, screenSymbol, signalSets, backtest, parameterSweep, sampleData, csvDownload };
+export { parseCsv, stamp, normalizeBars, alpacaBars, nyParts, aggregate, sma, ema, rsi, atr, indicators, statsFor, valueFor, screenSymbol, screenStats, signalSets, backtest, parameterSweep, sampleData, csvDownload };

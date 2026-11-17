@@ -360,10 +360,12 @@ tr[data-vol-symbol] td:nth-child(3){min-width:138px}
   display:inline-grid;place-items:center;min-width:34px;min-height:34px;
   border:0;border-radius:4px;padding:0;background:transparent;color:#c1cdc5
 }
-.chart-indicator-gear{
+.chart-indicator-gear,.chart-indicator-remove{
   pointer-events:auto;min-width:28px;min-height:25px;color:#b9c8bf;
   filter:drop-shadow(0 1px 2px #0e1211)
 }
+.chart-indicator-remove{font-size:17px}
+.chart-indicator-remove:hover,.chart-indicator-remove:focus-visible{color:#fff;background:#34403a}
 .chart-indicator-gear svg{width:13px;height:13px}
 .chart-ranges{display:flex;align-items:center;gap:2px;flex-wrap:wrap;border-top:1px solid var(--border);padding:2px 7px;background:#151b19}
 .chart-ranges .btn.small{min-height:32px;border:0;background:transparent;padding:4px 8px}
