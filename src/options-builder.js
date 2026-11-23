@@ -3,6 +3,19 @@ import {MAX_LEGS, PRESETS, boxRate, expirationTime, expiryPnl, expiryStats, init
 import {DEFAULT_ALPACA_WORKER} from './live-history.js';
 
 const DAY = 86_400_000;
+const DEVICE_KEY = 'market-lens-options-device-v1';
+const PENDING_KEY = 'market-lens-options-device-pending-v1';
+const devicePattern = /^[a-f0-9]{64}$/;
+export const optionsApprovalLink = () => new URLSearchParams(location.hash.slice(1)).get('options-setup');
+const readDevice = key => {
+  try {
+    const value = localStorage.getItem(key);
+    return devicePattern.test(value ?? '') ? value : '';
+  } catch { return ''; }
+};
+const randomDevice = () => Array.from(crypto.getRandomValues(new Uint8Array(32)),
+  byte => byte.toString(16).padStart(2,'0')).join('');
+
 const esc = value => String(value ?? '').replaceAll('&','&amp;').replaceAll('<','&lt;')
   .replaceAll('>','&gt;').replaceAll('"','&quot;');
 const currency = new Intl.NumberFormat('en-US',{style:'currency',currency:'USD'});
@@ -65,7 +78,7 @@ function graph({price, high, low, points, expiry, pointAt, focus, marker}) {
 
 export function createOptionsBuilder() {
   let root, timer, pending, generation = 0;
-  let ownerToken = '', feed = 'indicative', expirations = [], chain = [], feedVerified = false, nextPoll = 0;
+  let ownerToken = readDevice(DEVICE_KEY), feed = 'indicative', expirations = [], chain = [], feedVerified = false, nextPoll = 0;
   let message = '', spotSource = '';
   const state = {
     symbol:'SPY', price:'', width:'0.15', expiry:'', legs:[], fee:'0', package:'', preset:'',
@@ -91,10 +104,42 @@ export function createOptionsBuilder() {
     state.legs = state.legs.map(leg => ({...leg,quote:null}));
     nextPoll = 0;
   }
-  async function request(path, params, signal) {
+  function optionsUrl(path) {
     const base = ['localhost','127.0.0.1'].includes(location.hostname) ?
       root.dataset.worker : DEFAULT_ALPACA_WORKER;
-    const url = new URL('/api/options/'+path,base || DEFAULT_ALPACA_WORKER);
+    return new URL('/api/options/'+path,base || DEFAULT_ALPACA_WORKER);
+  }
+  async function approveBrowser(code) {
+    if (!devicePattern.test(code)) return setMessage('This setup link is invalid.');
+    const device = ownerToken || readDevice(PENDING_KEY) || randomDevice();
+    try {
+      localStorage.setItem(PENDING_KEY,device);
+    } catch {
+      return setMessage('Enable site storage in this browser, then reopen the private setup link.');
+    }
+    cancel();
+    const current = generation;
+    pending = new AbortController();
+    setMessage('Enabling private quotes for this browser…');
+    try {
+      const response = await fetch(optionsUrl('device'),{method:'POST',headers:{
+        Authorization:'Bearer '+device,'X-Options-Approval':code
+      },signal:pending.signal,cache:'no-store'});
+      if (!response.ok) {
+        const data = await response.json().catch(() => ({}));
+        throw new Error(data.error || 'Browser setup could not be completed. Reopen your setup link to retry.');
+      }
+      localStorage.setItem(DEVICE_KEY,device);
+      localStorage.removeItem(PENDING_KEY);
+      ownerToken = device;
+      history.replaceState(history.state,'',location.pathname+location.search);
+      if (current === generation) void refreshChain({discover:true});
+    } catch (error) {
+      if (current === generation && error.name !== 'AbortError') setMessage(error.message);
+    } finally { endRequest(current); }
+  }
+  async function request(path, params, signal) {
+    const url = optionsUrl(path);
     url.search = new URLSearchParams({feed,...params}).toString();
     const response = await fetch(url,{headers:{Authorization:'Bearer '+ownerToken},signal,cache:'no-store'});
     const data = await response.json().catch(() => ({}));
@@ -114,7 +159,7 @@ export function createOptionsBuilder() {
     },signal)).contracts || [];
   }
   async function refreshChain({discover = false} = {}) {
-    if (!ownerToken) return setMessage('Enter the owner access code to access Alpaca quotes.');
+    if (!ownerToken) return setMessage('Open your private setup link to enable quotes in this browser.');
     if (Date.now() < nextPoll) return setMessage('The quote rate limit was reached. Retry after '+usTime(nextPoll)+'.');
     cancel();
     const current = generation;
@@ -188,7 +233,7 @@ export function createOptionsBuilder() {
 
   function renderExpiry() {
     $('expiry').innerHTML = expirations.length ? expirations.map(date => option(date,date,date===state.expiry)).join('') :
-      option('','Connect to load expirations');
+      option('','No expirations loaded');
   }
   function renderChain() {
     const body = $('chain');
@@ -382,16 +427,6 @@ export function createOptionsBuilder() {
     if (ob==='preset-apply') void applyPreset();
     if (ob==='refresh-chain') void refreshChain({discover:!expirations.length});
     if (ob==='refresh-legs') void poll(true);
-    if (ob==='disconnect') {
-      ownerToken = '';
-      resetQuotes();
-      renderExpiry();
-      renderChain();
-      renderLegs();
-      refreshMarks();
-      $('owner-code').value = '';
-      setMessage('Owner quotes disconnected.');
-    }
     if (ob==='use-mid' || ob==='use-natural') {
       if (state.legs.some(leg => !(leg.quote?.ask > 0 && leg.quote.bid != null && leg.quote.bid >= 0 && leg.quote.bid <= leg.quote.ask))) return;
       state.legs.forEach(leg => {
@@ -486,12 +521,10 @@ export function createOptionsBuilder() {
       '<label class="field">Strategy preset<select data-ob="preset">'+option('','Choose a preset')+
       Object.keys(PRESETS).map(name=>option(name,name,state.preset===name)).join('')+'</select></label>'+
       '<button type="button" class="btn" data-ob="preset-apply">Apply preset</button><a class="btn" href="#options-chain">View chain</a></div>'+
-      '<details class="options-owner"><summary>Connect Alpaca owner quotes</summary>'+
-      '<form class="options-fields" data-ob="connect"><label class="field">Owner access code<input data-ob="owner-code" type="password" autocomplete="off" aria-describedby="options-owner-help"></label>'+
+      '<details class="options-owner"><summary>Quote settings</summary>'+
       '<label class="field">Options feed<select data-ob="feed">'+option('opra','Real-time OPRA',feed==='opra')+
       option('indicative','Indicative',feed==='indicative')+'</select></label>'+
-      '<button type="submit" class="btn primary">Connect</button><button type="button" class="btn" data-ob="disconnect">Disconnect</button></form>'+
-      '<p id="options-owner-help" class="section-note">Use the separate Worker access code. Indicative quotes are modified and trades are delayed.</p></details>'+
+      '<p class="section-note">Indicative quotes are modified and trades are delayed.</p></details>'+
       '<p class="options-status muted" role="status" data-ob="status">'+esc(message)+'</p></div></div>'+
       '<div class="panel"><div class="panel-header"><h2>Legs</h2><div class="flex">'+
       '<button type="button" class="btn small" data-ob="refresh-legs">Refresh prices</button>'+
@@ -521,28 +554,21 @@ export function createOptionsBuilder() {
     root.addEventListener('click',action);
     root.addEventListener('input',control);
     root.addEventListener('change',control);
-    $('connect').addEventListener('submit',event => {
-      event.preventDefault();
-      const code = $('owner-code').value.trim();
-      if (!code && !ownerToken) return setMessage('Enter the owner access code.');
-      if (code && !/^[A-Za-z0-9_-]{32,128}$/.test(code)) return setMessage('Enter a valid owner access code.');
-      if (code && code !== ownerToken) {
-        resetQuotes();
-        renderChain();
-        renderLegs();
-        refreshMarks();
-      }
-      ownerToken = code || ownerToken;
-      $('owner-code').value = '';
-      void refreshChain({discover:true});
-    });
     renderExpiry();
     renderChain();
     renderLegs();
     refreshMarks();
     timer = setInterval(poll,20_000);
+    const code = optionsApprovalLink();
+    if (code !== null) void approveBrowser(code);
+    else if (ownerToken) void refreshChain({discover:!expirations.length});
+    else setMessage('Open your private setup link to enable quotes in this browser.');
+
   }
-  return {mount,unmount() {
+  return {mount,openApproval() {
+    const code = optionsApprovalLink();
+    if (active() && code !== null) void approveBrowser(code);
+  },unmount() {
     clearInterval(timer);
     cancel();
     root = null;

@@ -1,3 +1,4 @@
+import {deviceAuthorized,enrollDevice} from "./options-device.js";
 import {optionsAuthorized,optionsRequest} from "./options.js";
 import { workspaceRequest, publicWorkspaceRequest } from "./workspace.js";
 export { Workspace } from "./workspace.js";
@@ -43,8 +44,8 @@ function corsHeaders(origin, env) {
     .split(",").map(value => value.trim()).filter(Boolean);
   return {
     "Access-Control-Allow-Origin": origin || allowed[0] || "null",
-    "Access-Control-Allow-Methods": "GET, PUT, OPTIONS",
-    "Access-Control-Allow-Headers": "Accept, Content-Type, Authorization, If-Match",
+    "Access-Control-Allow-Methods": "GET, PUT, POST, OPTIONS",
+    "Access-Control-Allow-Headers": "Accept, Content-Type, Authorization, If-Match, X-Options-Approval",
     "Access-Control-Max-Age": "86400",
     "Access-Control-Expose-Headers": "Retry-After",
     "Vary": "Origin"
@@ -112,8 +113,16 @@ export default {
       headers.set("Access-Control-Expose-Headers", "ETag");
       return new Response(response.body, { status: response.status, headers });
     }
+    if (url.pathname === "/api/options/device" && request.method === "POST") {
+      const ip = request.headers.get("CF-Connecting-IP") || "unknown";
+      if (overRateLimit("options-enroll:"+ip,10)) return json({error:"Try the setup link again in one minute."},429,origin,env,{"Retry-After":"60"});
+      const status = await enrollDevice(request,env).catch(() => 503);
+      if (status === 204) return new Response(null,{status,headers:{...corsHeaders(origin,env),"Cache-Control":"no-store"}});
+      return json({error:status === 409 ? "This setup link has already approved a browser." :
+        status === 503 ? "Browser setup is temporarily unavailable." : "This setup link is invalid or expired."},status,origin,env);
+    }
     if (request.method !== "GET") {
-      return json({ error: "Method not allowed." }, 405, origin, env, { Allow: "GET, PUT, OPTIONS" });
+      return json({ error: "Method not allowed." }, 405, origin, env, { Allow: "GET, PUT, POST, OPTIONS" });
     }
 
     if (url.pathname === "/api/health") {
@@ -130,11 +139,14 @@ export default {
     }
 
     if (/^\/api\/options\/(expirations|chain|snapshots)$/.test(url.pathname)) {
-      if (!env.OPTIONS_OWNER_TOKEN) return json({error:"Owner quotes are disabled until the Worker access code is configured."},503,origin,env);
+      if (!env.OPTIONS_OWNER_TOKEN && !env.WORKSPACES) return json({error:"Private quotes are temporarily unavailable."},503,origin,env);
       const ip = request.headers.get("CF-Connecting-IP") || "unknown";
       if (overRateLimit("options:"+ip)) return json({error:"Quote rate limit reached."},429,origin,env,{"Retry-After":"60"});
-      if (!await optionsAuthorized(request.headers.get("Authorization"),env.OPTIONS_OWNER_TOKEN))
-        return json({error:"Enter the owner access code."},401,origin,env);
+      const authorization = request.headers.get("Authorization");
+      const approved = await deviceAuthorized(authorization,env).catch(() => null);
+      if (!approved && !await optionsAuthorized(authorization,env.OPTIONS_OWNER_TOKEN))
+        return approved === null ? json({error:"Browser verification is temporarily unavailable."},503,origin,env) :
+          json({error:"Open your private setup link to enable quotes in this browser."},401,origin,env);
       if (!env.ALPACA_API_KEY || !env.ALPACA_API_SECRET)
         return json({error:"Alpaca credentials are unavailable."},503,origin,env);
       try {

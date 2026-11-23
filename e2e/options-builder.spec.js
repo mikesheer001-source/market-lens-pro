@@ -19,36 +19,42 @@ test('manual options builder computes a vertical spread and keeps it while switc
   await expect(builder.getByText('$150.00 debit')).toBeVisible();
 });
 
-test('explicit Alpaca feed and quote refresh keep the entry premium locked', async ({page}) => {
+test('the private setup link approves this browser and reloads quotes automatically', async ({page}) => {
   const expiry=new Date(Date.now()+21*86_400_000).toISOString().slice(0,10);
   const symbol='SPY'+expiry.slice(2).replaceAll('-','')+'C00500000';
   const time=new Date().toISOString();
   const initial={bid:1,ask:2,time,iv:.19};
+  let enrollmentCount=0, authorization;
   await page.route('**/api/options/**', route=>{
-    const url=new URL(route.request().url());
-    expect(url.searchParams.get('feed')).toBe('opra');
-    expect(route.request().headers().authorization).toBe('Bearer '+ 'a'.repeat(32));
+    const request=route.request();
+    const url=new URL(request.url());
+    if (url.pathname.endsWith('/device')) {
+      enrollmentCount++;
+      expect(request.method()).toBe('POST');
+      expect(request.headers()['x-options-approval']).toBe('b'.repeat(64));
+      authorization=request.headers().authorization;
+      expect(authorization).toMatch(/^Bearer [a-f0-9]{64}$/);
+      return route.fulfill({status:204});
+    }
+    expect(url.searchParams.get('feed')).toBe('indicative');
+    expect(request.headers().authorization).toBe(authorization);
     if (url.pathname.endsWith('/expirations')) return route.fulfill({json:{
-      feed:'opra',expirations:[expiry],underlying:{value:500,time,feed:'IEX'}}});
-    if (url.pathname.endsWith('/chain')) return route.fulfill({json:{feed:'opra',contracts:[
+      feed:'indicative',expirations:[expiry],underlying:{value:500,time,feed:'IEX'}}});
+    if (url.pathname.endsWith('/chain')) return route.fulfill({json:{feed:'indicative',contracts:[
       {symbol,root:'SPY',type:'call',expiry,strike:500,multiplier:100,quote:initial}]}});
-    return route.fulfill({json:{feed:'opra',quotes:{[symbol]:{...initial,bid:2,ask:3}}}});
+    return route.fulfill({json:{feed:'indicative',quotes:{[symbol]:{...initial,bid:2,ask:3}}}});
   });
-  await page.goto('./');
-  await page.getByRole('navigation',{name:'Primary navigation'}).getByRole('button',{name:'Options Builder'}).click();
+  await page.goto('./#options-setup='+'b'.repeat(64));
   const builder=page.locator('#options-builder');
-  await builder.getByText('Connect Alpaca owner quotes').click();
-  await expect(builder.getByLabel('Options feed')).toHaveValue('indicative');
-  await builder.getByLabel('Options feed').selectOption('opra');
-  await builder.getByLabel('Owner access code').fill('a'.repeat(32));
-  await builder.getByRole('button',{name:'Connect',exact:true}).click();
-  await expect(builder.locator('[data-ob=status]')).toContainText('Real-time OPRA');
+  const status=builder.locator('[data-ob=status]');
+  await expect(status).toContainText('Indicative');
+  await expect(page).not.toHaveURL(/options-setup/);
   await builder.getByRole('button',{name:'Buy',exact:true}).click();
   await expect(builder.getByLabel('Leg 1 entry')).toHaveValue('1.5');
   await builder.getByRole('button',{name:'Refresh prices'}).click();
   await expect(builder.getByText('$250.00 debit')).toBeVisible();
   await expect(builder.getByLabel('Leg 1 entry')).toHaveValue('1.5');
-  await builder.getByRole('button',{name:'Disconnect'}).click();
-  await expect(builder.getByText('$250.00 debit')).toHaveCount(0);
-  await expect(builder.getByLabel('Leg 1 entry')).toHaveValue('1.5');
+  await page.reload();
+  await expect(builder.getByRole('button',{name:'Buy',exact:true})).toBeVisible();
+  expect(enrollmentCount).toBe(1);
 });

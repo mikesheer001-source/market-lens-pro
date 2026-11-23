@@ -83,7 +83,7 @@ The production Cloudflare Worker **was redeployed successfully on November 16, 2
 
 ## Options Builder owner quotes
 
-The public calculator accepts manual premiums. To enable the owner quote view, generate a separate access code with at least 32 URL-safe characters and add it as an encrypted secret named `OPTIONS_OWNER_TOKEN` on the `market-lens-pro-api` Cloudflare Worker. For example, use `openssl rand -hex 24` followed by `npx wrangler secret put OPTIONS_OWNER_TOKEN`, or add the secret directly in the Cloudflare dashboard. Enter that same access code under **Options Builder → Connect Alpaca owner quotes**. The browser holds it only for the open session. Alpaca credentials remain on the Worker.
+The public calculator accepts manual premiums. Open the private one-time browser setup link to enable quotes. The Worker stores a hash of the approved browser credential and the browser remembers its quote access. Quotes then load automatically when the Options Builder opens. Clearing site data or switching browser profiles requires a fresh setup link. Alpaca credentials stay on the Worker. Do not share the setup link.
 
 Select **Real-time OPRA** to check the account's OPRA entitlement, or **Indicative** for the modified-quote feed. The Worker deployment's **Alpaca options entitlement** summary reports whether the configured key returned SPY quotes for each feed and omits prices and credentials. For SPX and XSP, enter the underlying index reference price separately and use listed contracts to verify settlement. The public app uses the production Worker. A local dev server can use a local Worker via Data Center.
 

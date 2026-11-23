@@ -81,3 +81,37 @@ test('chain filters adjusted deliverables and normalizes paged Alpaca snapshots 
     Promise.resolve(Response.json({option_contracts:[base]})) : Promise.resolve(new Response(null,{status:403}))),
   {status:403});
 });
+
+test('browser registry consumes an approval once and accepts retries from the same device', async () => {
+  const {DatabaseSync} = await import('node:sqlite');
+  const {deviceRegistry, deviceAuthorized, deviceDigest} = await import('../worker/options-device.js');
+  const db = new DatabaseSync(':memory:');
+  try {
+    const storage={
+      sql:{exec:(query,...args)=>{
+        const statement=db.prepare(query);
+        if (query.startsWith('SELECT')) return {toArray:()=>statement.all(...args)};
+        statement.run(...args);
+      }},
+      transactionSync:fn=>fn()
+    };
+    const regular='a'.repeat(64), other='b'.repeat(64);
+    const enroll=async token=>deviceRegistry(new Request('https://workspace.internal/internal/options-device',{
+      method:'POST',headers:{'X-Device-Digest':await deviceDigest(token),'X-Approval-Digest':'c'.repeat(64)}
+    }),storage).status;
+    const registry={idFromName:name=>name,get:()=>({fetch:(url,init)=>deviceRegistry(new Request(url,init),storage)})};
+    const env={WORKSPACES:registry};
+    assert.equal(await deviceAuthorized('Bearer '+regular,env),false);
+    assert.equal(await enroll(regular),204);
+    assert.equal(await enroll(regular),204);
+    assert.equal(await enroll(other),409);
+    assert.equal(await deviceAuthorized('Bearer '+regular,env),true);
+    assert.equal(await deviceAuthorized('Bearer '+other,env),false);
+    assert.equal((await worker.fetch(new Request('https://test.example/internal/options-device'),env)).status,404);
+    assert.equal((await worker.fetch(new Request('https://test.example/api/options/device',{
+      method:'POST',headers:{'X-Options-Approval':'c'.repeat(64)}
+    }),env)).status,401);
+  } finally {
+    db.close();
+  }
+});

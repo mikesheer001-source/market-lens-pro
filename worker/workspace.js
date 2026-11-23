@@ -1,3 +1,5 @@
+import {devicePath,deviceRegistry} from './options-device.js';
+
 const documents = new Set(['settings', 'library', 'draft', 'memory', 'signals', 'analysis', 'portfolio', 'imports', 'market']);
 const limit = 16 * 1024 * 1024;
 const chunkSize = 256 * 1024;
@@ -11,7 +13,9 @@ export class Workspace {
   }
 
   async fetch(request) {
-    const name = new URL(request.url).searchParams.get('document');
+    const url = new URL(request.url);
+    if (url.pathname === devicePath) return deviceRegistry(request,this.storage);
+    const name = url.searchParams.get('document');
     if (request.method === 'GET' && !name) {
       return Response.json(Object.fromEntries([...this.sql.exec('SELECT name, version FROM revisions')].map(row => [row.name, row.version])));
     }

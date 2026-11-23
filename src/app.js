@@ -1,4 +1,4 @@
-import {createOptionsBuilder} from './options-builder.js';
+import {createOptionsBuilder, optionsApprovalLink} from './options-builder.js';
 import {workspaceSync} from './workspace-sync.js';
 import {scanMarket} from './market-scan.js';
 import './styles.css';
@@ -101,6 +101,7 @@ async function initApp(){
   await workspace.flush('startup');
   let saved={};try{saved=JSON.parse(localStorage.getItem('market-lens-pro-settings')||'{}')||{};}catch{}
   const startupPrefs=normalizeStartupPreferences(saved);
+  if(optionsApprovalLink() !== null)startupPrefs.tab='options';
   const scriptLibraryKey='market-lens-pro-pine-library-v1',scriptDraftKey='market-lens-pro-pine-draft-v1';
   let scriptLibrary=[];
   try{const parsed=JSON.parse(localStorage.getItem(scriptLibraryKey)||'[]');if(Array.isArray(parsed))scriptLibrary=parsed.filter(x=>x&&typeof x.code==='string'&&typeof x.name==='string').slice(0,30);}catch{}
@@ -1646,6 +1647,11 @@ async function initApp(){
       '<div class="panel"><div class="panel-header"><h2>Market data policy</h2></div><div class="panel-body"><p class="section-note">GitHub Pages serves the public frontend only. Alpaca credentials are stored as Cloudflare Worker secrets and are never sent to this browser. Live data requests go through the Worker proxy.</p><p class="section-note">Imported and demo data remain available in Demo mode. Backtesting is research-only and does not submit orders.</p></div></div>';
   }
   const optionsBuilder=createOptionsBuilder();
+  window.addEventListener('hashchange',()=>{
+    if(optionsApprovalLink()===null)return;
+    if(S.tab==='options')optionsBuilder.openApproval();
+    else{S.tab='options';render();}
+  });
   function render(){
     const optionsHost=$('#options-builder');
     if(S.tab!=='options' && optionsHost)optionsBuilder.unmount();
