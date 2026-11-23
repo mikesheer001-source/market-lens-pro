@@ -1,3 +1,4 @@
+import {createOptionsBuilder} from './options-builder.js';
 import {workspaceSync} from './workspace-sync.js';
 import {scanMarket} from './market-scan.js';
 import './styles.css';
@@ -36,8 +37,8 @@ async function initApp(){
   const pct=n=>n==null||!Number.isFinite(n)?'—':(n>0?'+':'')+format(n)+'%';
   const priceColor=n=>n==null?'muted':n>=0?'positive':'negative';
   const dateLabel=t=>typeof t==='number'?new Date(t*1000).toISOString().slice(0,16).replace('T',' '):String(t);
-  const tabNames={screener:'Screener',charts:'Chart Lab',backtest:'Backtest',optimize:'Optimize',scripts:'Script Lab',data:'Data Center'};
-  const tabIcons={screener:'📊',charts:'📈',backtest:'🧪',optimize:'⚙️',scripts:'🧩',data:'🗂️'};
+  const tabNames={screener:'Screener',charts:'Chart Lab',backtest:'Backtest',options:'Options Builder',optimize:'Optimize',scripts:'Script Lab',data:'Data Center'};
+  const tabIcons={screener:'📊',charts:'📈',backtest:'🧪',options:'◫',optimize:'⚙️',scripts:'🧩',data:'🗂️'};
   const preset={
     trend:[{metric:'emaDist',tf:'D',op:'>',value:0},{metric:'rsi',tf:'D',op:'<',value:60}],
     original:[{metric:'emaDist',tf:'W',op:'>',value:0},{metric:'rsi',tf:'W',op:'<',value:50},{metric:'rsi',tf:'D',op:'<',value:50},{metric:'rsi',tf:'2H',op:'<',value:50}],
@@ -1644,13 +1645,22 @@ async function initApp(){
       '<div class="panel"><div class="panel-header"><h2>Saved imported symbols</h2><div class="flex">'+button('Reset to demo data','clear-imports','small')+button('Export sample CSV','export-sample','small')+'</div></div><div class="panel-body"><div class="data-list">'+(imported.length?imported.map(([symbol,b])=>'<div class="data-item"><div><strong>'+esc(symbol)+'</strong><br/><small>'+b.length+' bars · '+dateLabel(b[0].time)+' to '+dateLabel(b.at(-1).time)+'</small></div><button class="btn small" data-action="choose-symbol" data-symbol="'+esc(symbol)+'">Open chart</button></div>').join(''):'<div class="empty"><strong>No imported data yet.</strong>Four clearly labeled synthetic symbols are included to demonstrate the interface.</div>')+'</div></div></div>'+
       '<div class="panel"><div class="panel-header"><h2>Market data policy</h2></div><div class="panel-body"><p class="section-note">GitHub Pages serves the public frontend only. Alpaca credentials are stored as Cloudflare Worker secrets and are never sent to this browser. Live data requests go through the Worker proxy.</p><p class="section-note">Imported and demo data remain available in Demo mode. Backtesting is research-only and does not submit orders.</p></div></div>';
   }
+  const optionsBuilder=createOptionsBuilder();
   function render(){
+    const optionsHost=$('#options-builder');
+    if(S.tab!=='options' && optionsHost)optionsBuilder.unmount();
     refreshLeaderboardIfRangeChanged();
     destroyCharts();shell();
     document.body.classList.toggle('chart-fullscreen-active',S.chartFullscreen&&S.tab==='charts');
     document.body.classList.toggle('chart-page-active',S.tab==='charts');
     const views={screener:screenerView,charts:chartsView,backtest:backtestView,optimize:optimizeView,scripts:scriptView,data:dataView};
-    $('#main').innerHTML=views[S.tab]();
+    const main=$('#main');
+    if(S.tab==='options'){
+      const host=optionsHost || document.createElement('section');
+      host.id='options-builder';
+      main.append(host);
+      if(!optionsHost)optionsBuilder.mount(host,S.apiBaseUrl);
+    }else main.innerHTML=views[S.tab]();
     if(S.tab==='charts'){
       if(S.data.has(S.symbol)){
         S.chartRecentSymbols=[S.symbol,...S.chartRecentSymbols.filter(symbol=>symbol!==S.symbol)].slice(0,6);

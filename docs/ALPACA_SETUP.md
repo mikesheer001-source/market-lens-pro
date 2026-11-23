@@ -80,3 +80,11 @@ The Worker health endpoint reports only whether credentials are configured and w
 - ALPACA_API_KEY and ALPACA_API_SECRET: encrypted Worker secrets after deployment.
 
 The production Cloudflare Worker **was redeployed successfully on November 16, 2026** at https://market-lens-pro-api.mikesheer001.workers.dev. The GitHub Actions post-deployment smoke test confirmed 133/133 real Alpaca symbols including SVOL and an actual dated VXX daily close. For a different Cloudflare account, the Worker still requires the four GitHub secrets and the manual workflow. The GitHub Pages front end can be deployed and used in Demo mode without any of those credentials. Demo scanning uses exactly four deterministic synthetic sample symbols. With the Oversold preset it currently returns one match, DEMO-COIN. The VXX preset can return a match for DEMO-VXX, but that is a simulated test case, not a real market quote.
+
+## Options Builder owner quotes
+
+The public calculator accepts manual premiums. To enable the owner quote view, generate a separate access code with at least 32 URL-safe characters and add it as an encrypted secret named `OPTIONS_OWNER_TOKEN` on the `market-lens-pro-api` Cloudflare Worker. For example, use `openssl rand -hex 24` followed by `npx wrangler secret put OPTIONS_OWNER_TOKEN`, or add the secret directly in the Cloudflare dashboard. Enter that same access code under **Options Builder → Connect Alpaca owner quotes**. The browser holds it only for the open session. Alpaca credentials remain on the Worker.
+
+Select **Real-time OPRA** to check the account's OPRA entitlement, or **Indicative** for the modified-quote feed. The Worker deployment's **Alpaca options entitlement** summary reports whether the configured key returned SPY quotes for each feed and omits prices and credentials. For SPX and XSP, enter the underlying index reference price separately and use listed contracts to verify settlement. The public app uses the production Worker. A local dev server can use a local Worker via Data Center.
+
+Public quote distribution requires the relevant market data permissions.

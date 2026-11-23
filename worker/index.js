@@ -1,3 +1,4 @@
+import {optionsAuthorized,optionsRequest} from "./options.js";
 import { workspaceRequest, publicWorkspaceRequest } from "./workspace.js";
 export { Workspace } from "./workspace.js";
 import { marketScan } from "./market-scan.js";
@@ -45,6 +46,7 @@ function corsHeaders(origin, env) {
     "Access-Control-Allow-Methods": "GET, PUT, OPTIONS",
     "Access-Control-Allow-Headers": "Accept, Content-Type, Authorization, If-Match",
     "Access-Control-Max-Age": "86400",
+    "Access-Control-Expose-Headers": "Retry-After",
     "Vary": "Origin"
   };
 }
@@ -125,6 +127,22 @@ export default {
         scan_cache_revision: LIVE_SCAN_CACHE_REVISION,
         scan_cache_seconds: ALPACA_SCAN_CACHE_SECONDS
       }, 200, origin, env);
+    }
+
+    if (/^\/api\/options\/(expirations|chain|snapshots)$/.test(url.pathname)) {
+      if (!env.OPTIONS_OWNER_TOKEN) return json({error:"Owner quotes are disabled until the Worker access code is configured."},503,origin,env);
+      const ip = request.headers.get("CF-Connecting-IP") || "unknown";
+      if (overRateLimit("options:"+ip)) return json({error:"Quote rate limit reached."},429,origin,env,{"Retry-After":"60"});
+      if (!await optionsAuthorized(request.headers.get("Authorization"),env.OPTIONS_OWNER_TOKEN))
+        return json({error:"Enter the owner access code."},401,origin,env);
+      if (!env.ALPACA_API_KEY || !env.ALPACA_API_SECRET)
+        return json({error:"Alpaca credentials are unavailable."},503,origin,env);
+      try {
+        return json(await optionsRequest(url,env),200,origin,env);
+      } catch (error) {
+        return json({error:error.status ? error.message : "Alpaca options request failed."},error.status || 502,origin,env,
+          error.retry ? {"Retry-After":String(error.retry)} : {});
+      }
     }
 
     const isMarket = url.pathname === "/api/stocks/market";
