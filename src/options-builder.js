@@ -65,7 +65,7 @@ function graph({price, high, low, points, expiry, pointAt, focus, marker}) {
 
 export function createOptionsBuilder() {
   let root, timer, pending, generation = 0;
-  let ownerToken = '', feed = 'opra', expirations = [], chain = [], feedVerified = false, nextPoll = 0;
+  let ownerToken = '', feed = 'indicative', expirations = [], chain = [], feedVerified = false, nextPoll = 0;
   let message = '', spotSource = '';
   const state = {
     symbol:'SPY', price:'', width:'0.15', expiry:'', legs:[], fee:'0', package:'', preset:'',

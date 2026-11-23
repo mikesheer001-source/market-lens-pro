@@ -38,6 +38,8 @@ test('explicit Alpaca feed and quote refresh keep the entry premium locked', asy
   await page.getByRole('navigation',{name:'Primary navigation'}).getByRole('button',{name:'Options Builder'}).click();
   const builder=page.locator('#options-builder');
   await builder.getByText('Connect Alpaca owner quotes').click();
+  await expect(builder.getByLabel('Options feed')).toHaveValue('indicative');
+  await builder.getByLabel('Options feed').selectOption('opra');
   await builder.getByLabel('Owner access code').fill('a'.repeat(32));
   await builder.getByRole('button',{name:'Connect',exact:true}).click();
   await expect(builder.locator('[data-ob=status]')).toContainText('Real-time OPRA');
