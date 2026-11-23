@@ -77,7 +77,7 @@ test('drags quoted legs between listed strikes and rolls to a tapped expiration'
   await page.goto('./#options-setup='+'b'.repeat(64));
   const builder = page.locator('#options-builder');
   await expect(builder.locator('[data-ob=status]')).toContainText('4 contracts');
-  await builder.getByRole('button',{name:'+ Call',exact:true}).click();
+  await builder.getByRole('button',{name:'+ Buy Call',exact:true}).click();
   const ruler = builder.locator('[data-ob=ruler]');
   const marker = ruler.getByRole('button',{name:'Move leg 1 strike, 100C'});
   const bounds = await marker.boundingBox();
@@ -102,6 +102,91 @@ test('drags quoted legs between listed strikes and rolls to a tapped expiration'
   await expect(builder.getByRole('img',{name:'Profit and loss versus underlying price'})).toBeVisible();
 });
 
+async function gotoBuilderWithGreeks(page) {
+  const expiration = new Date(Date.now()+21*86_400_000).toISOString().slice(0,10);
+  const time = new Date().toISOString();
+  const greeks = {delta:0.5,gamma:0.02,theta:-0.1,vega:0.4,rho:0.05};
+  await page.route('**/api/options/**', route => {
+    const url = new URL(route.request().url());
+    if (url.pathname.endsWith('/device')) return route.fulfill({status:204});
+    if (url.pathname.endsWith('/expirations')) return route.fulfill({json:{
+      feed:'indicative',expirations:[expiration],underlying:{value:100,time,feed:'IEX'}}});
+    const contracts = [95,100,105,110].flatMap(strike => ['call','put'].map(type => ({
+      symbol:'SPY'+expiration+strike+type[0].toUpperCase(),root:'SPY',type,expiry:expiration,
+      strike,multiplier:100,quote:{bid:3,ask:4,time,iv:0.25,greeks}})));
+    return route.fulfill({json:{feed:'indicative',contracts}});
+  });
+  await page.goto('./#options-setup='+'b'.repeat(64));
+  const builder = page.locator('#options-builder');
+  await expect(builder.locator('[data-ob=status]')).toContainText('contracts');
+  return builder;
+}
+
+test('sell legs are created from the quick buttons and flip the net entry to a credit', async ({page}) => {
+  const builder = await gotoBuilderWithGreeks(page);
+  await builder.getByRole('button',{name:'+ Sell Call',exact:true}).click();
+  await expect(builder.getByLabel('Leg 1 side')).toHaveValue('sell');
+  await expect(builder.locator('[data-ob=metrics]')).toContainText('$350.00 credit');
+  await builder.getByRole('button',{name:'+ Sell Put',exact:true}).click();
+  await expect(builder.getByLabel('Leg 2 side')).toHaveValue('sell');
+  await expect(builder.locator('[data-ob=metrics]')).toContainText('$700.00 credit');
+});
+
+test('the × next to a ruler chip removes only that leg', async ({page}) => {
+  const builder = await gotoBuilderWithGreeks(page);
+  await builder.getByRole('button',{name:'+ Buy Call',exact:true}).click();
+  await builder.getByRole('button',{name:'+ Buy Call',exact:true}).click();
+  await expect(builder.locator('[data-ob=metrics]')).toContainText('$700.00 debit');
+  const ruler = builder.locator('[data-ob=ruler]');
+  await ruler.getByRole('button',{name:'Remove leg 2'}).click();
+  await expect(builder.getByLabel('Leg 2 entry')).toHaveCount(0);
+  await expect(builder.getByLabel('Leg 1 entry')).toHaveValue('3.5');
+  await expect(builder.locator('[data-ob=metrics]')).toContainText('$350.00 debit');
+});
+
+test('swiping a chip up removes it and dragging it sideways moves the strike', async ({page}) => {
+  const builder = await gotoBuilderWithGreeks(page);
+  await builder.getByRole('button',{name:'+ Buy Call',exact:true}).click();
+  const ruler = builder.locator('[data-ob=ruler]');
+  let marker = ruler.getByRole('button',{name:'Move leg 1 strike, 100C'});
+  let bounds = await marker.boundingBox();
+  let x = bounds.x+bounds.width/2, y = bounds.y+bounds.height/2;
+  await page.mouse.move(x,y);
+  await page.mouse.down();
+  await page.mouse.move(x,y-60,{steps:5});
+  await page.mouse.up();
+  await expect(builder.locator('[data-ob=position-count]')).toHaveText('0');
+  await expect(builder.getByText('Add legs to see your strategy payoff.')).toBeVisible();
+  await builder.getByRole('button',{name:'+ Buy Call',exact:true}).click();
+  marker = ruler.getByRole('button',{name:'Move leg 1 strike, 100C'});
+  bounds = await marker.boundingBox();
+  const rulerBox = await ruler.boundingBox();
+  x = bounds.x+bounds.width/2; y = bounds.y+bounds.height/2;
+  await page.mouse.move(x,y);
+  await page.mouse.down();
+  await page.mouse.move(x+rulerBox.width*.86*(5/16),y,{steps:7});
+  await page.mouse.up();
+  await expect(builder.getByLabel('Leg 1 strike',{exact:true})).toHaveValue('105');
+  await expect(builder.locator('[data-ob=position-count]')).toHaveText('1');
+});
+
+test('tapping B/S on a chip flips buy to sell and flips debit to credit', async ({page}) => {
+  const builder = await gotoBuilderWithGreeks(page);
+  await builder.getByRole('button',{name:'+ Buy Call',exact:true}).click();
+  await expect(builder.locator('[data-ob=metrics]')).toContainText('$350.00 debit');
+  await builder.locator('[data-flip="0"]').click();
+  await expect(builder.getByLabel('Leg 1 side')).toHaveValue('sell');
+  await expect(builder.locator('[data-ob=metrics]')).toContainText('$350.00 credit');
+});
+
+test('payoff shows Net Greeks from live quotes', async ({page}) => {
+  const builder = await gotoBuilderWithGreeks(page);
+  await builder.getByRole('button',{name:'+ Buy Call',exact:true}).click();
+  await expect(builder.locator('[data-ob=payoff-greeks]')).toContainText('Live Greeks');
+  await expect(builder.locator('[data-ob=payoff-greeks]')).toContainText('Delta 50.00');
+  await expect(builder.locator('[data-ob=greeks]')).toContainText('Delta 50.00');
+});
+
 test('moves a strike with touch on a narrow screen', async ({browser,baseURL}) => {
   const page = await browser.newPage({baseURL,viewport:{width:390,height:844},isMobile:true,hasTouch:true});
   await page.addInitScript(() => localStorage.setItem('market-lens-sync-disabled','1'));
@@ -111,7 +196,7 @@ test('moves a strike with touch on a narrow screen', async ({browser,baseURL}) =
     await page.locator('.mobile-more').getByRole('button',{name:'Options Builder'}).tap();
     const builder = page.locator('#options-builder');
     await builder.getByLabel('Underlying reference price').fill('100');
-    await builder.getByRole('button',{name:'+ Call',exact:true}).tap();
+    await builder.getByRole('button',{name:'+ Buy Call',exact:true}).tap();
     const ruler = builder.locator('[data-ob=ruler]');
     const marker = ruler.getByRole('button',{name:'Move leg 1 strike, 100C'});
     await marker.scrollIntoViewIfNeeded();

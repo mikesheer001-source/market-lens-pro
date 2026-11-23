@@ -1,5 +1,5 @@
 import {MAX_LEGS, PRESETS, boxRate, expirationTime, expiryPnl, expiryStats, initialDebit,
-  quoteEstimates, scenarioPnl} from './options-payoff.js';
+  netGreeks, quoteEstimates, scenarioPnl} from './options-payoff.js';
 import {nearestStrike, strikeDomain, strikeTargets} from './options-strike-ruler.js';
 import {OPTIONS_DEVICE_KEY, getOptionsDevice, optionsApiUrl, requestOptions} from './options-api.js';
 
@@ -325,7 +325,9 @@ export function createOptionsBuilder() {
       lanes[lane].push(x);
       return '<button type="button" class="options-strike-chip '+leg.side+'" data-strike-leg="'+i+'" style="--strike-x:'+x+
         '%;--strike-lane:'+lane+'" aria-label="Move leg '+(i+1)+' strike, '+esc(strikeLabel(leg))+'">'+
-        '<span>'+(leg.side==='buy'?'B':'S')+' · '+esc(strikeLabel(leg))+'</span><small>'+esc(leg.expiry?.slice(5) ?? '')+'</small></button>';
+        '<span data-flip="'+i+'">'+(leg.side==='buy'?'B':'S')+' · </span><span>'+esc(strikeLabel(leg))+'</span><small>'+esc(leg.expiry?.slice(5) ?? '')+'</small></button>'+
+        '<button type="button" class="options-strike-delete" data-remove-chip="'+i+'" style="--strike-x:'+x+
+        '%;--strike-lane:'+lane+'" aria-label="Remove leg '+(i+1)+'">×</button>';
     }).join('');
     const ticks = Array.from({length:7},(_,i) => low+(high-low)*i/6).map((value,i) =>
       '<span class="options-tick'+(i%2?' options-tick-minor':'')+'" style="--strike-x:'+positionPct(value,domain)+'%">'+
@@ -343,6 +345,20 @@ export function createOptionsBuilder() {
     refreshMarks();
   }
 
+  function removeLeg(i) {
+    const leg = state.legs[i];
+    if (!leg) return;
+    state.legs.splice(i,1);
+    setMessage('Removed leg '+(i+1)+' ('+strikeLabel(leg)+').');
+    updatePositions();
+  }
+  function flipLeg(i) {
+    const leg = state.legs[i];
+    if (!leg) return;
+    leg.side = leg.side==='buy' ? 'sell' : 'buy';
+    setMessage('Leg '+(i+1)+' is now '+(leg.side==='buy'?'buy':'sell')+'.');
+    updatePositions();
+  }
   function targetsFor(leg,domain) {
     const contracts = chains.get(leg.expiry) || (chain[0]?.expiry === leg.expiry ? chain : []);
     return strikeTargets(leg,contracts,domain);
@@ -363,6 +379,7 @@ export function createOptionsBuilder() {
     updatePositions(restoreFocus ? i : undefined);
   }
   function startDrag(event) {
+    if (event.target.closest('[data-flip]')) return;
     const marker = event.target.closest('[data-strike-leg]');
     if (!marker || drag || event.button !== 0) return;
     const i = Number(marker.dataset.strikeLeg);
@@ -370,15 +387,24 @@ export function createOptionsBuilder() {
     const targets = targetsFor(leg,domain);
     if (!targets.length) return setMessage('Load contracts for this leg’s expiration to drag its strike.');
     drag = {pointer:event.pointerId,i,leg,marker,domain,targets,startX:event.clientX,
-      width:$('ruler').getBoundingClientRect().width};
+      startY:event.clientY,width:$('ruler').getBoundingClientRect().width};
     $('ruler').setPointerCapture(event.pointerId);
     marker.classList.add('is-dragging');
     event.preventDefault();
   }
   function moveDrag(event) {
     if (!drag || event.pointerId !== drag.pointer) return;
-    const {startX,width,leg,domain,targets,marker} = drag;
-    const dx = event.clientX-startX;
+    const {startX,startY,width,leg,domain,targets,marker} = drag;
+    const dx = event.clientX-startX, dy = event.clientY-startY;
+    if (Math.abs(dy) > 40 && Math.abs(dy) > Math.abs(dx)*1.5) {
+      drag.swipe = true;
+      drag.dy = dy;
+      marker.classList.add('is-swiping');
+      marker.style.translate = '0px '+dy+'px';
+      marker.style.opacity = String(Math.max(0.2,1-Math.abs(dy)/120));
+      return;
+    }
+    if (drag.swipe) return;
     if (!drag.preview && Math.abs(dx)<3) return;
     const price = Number(leg.strike)+dx/Math.max(1,width*.86)*(domain.high-domain.low);
     const row = nearestStrike(targets,price);
@@ -386,13 +412,15 @@ export function createOptionsBuilder() {
     drag.row = row;
     drag.preview = changedLeg(leg,row);
     marker.style.setProperty('--strike-x',positionPct(row.strike,domain)+'%');
-    marker.firstElementChild.textContent = (leg.side==='buy'?'B':'S')+' · '+strikeLabel(drag.preview);
+    marker.children[0].textContent = (leg.side==='buy'?'B':'S')+' · ';
+    marker.children[1].textContent = strikeLabel(drag.preview);
     refreshMarks();
   }
   function endDrag(event) {
     if (!drag || event.pointerId !== drag.pointer) return;
-    const {i,row} = drag;
+    const {i,row,swipe} = drag;
     drag = null;
+    if (swipe && event.type==='pointerup') return removeLeg(i);
     if (event.type==='pointerup' && row) commitStrike(i,row,false);
     else {
       renderRuler();
@@ -516,6 +544,8 @@ export function createOptionsBuilder() {
     const showEmpty = text => {
       $('metrics').innerHTML = '';
       $('greeks').textContent = '';
+      const payoffGreeks = $('payoff-greeks');
+      if (payoffGreeks) payoffGreeks.textContent = '';
       $('plot').hidden = false;
       $('plot').textContent = text;
       $('grid').innerHTML = '';
@@ -594,17 +624,20 @@ export function createOptionsBuilder() {
         const pnl = pnlAt(x,time);
         return '<td class="'+(pnl>=0?'positive':'negative')+'">'+dollars(pnl)+'</td>';
       }).join('')+'</tr>').join('')+'</tbody></table>';
-    const aggregated = FIELDS.map(key => {
-      const total = legs.every(leg => Number.isFinite(leg.quote?.greeks?.[key])) ?
-        legs.reduce((sum,leg)=>sum+leg.quote.greeks[key]*leg.quantity*leg.multiplier*(leg.side==='buy'?1:-1),0) : null;
-      return key.charAt(0).toUpperCase()+key.slice(1)+' '+num(total);
-    });
-    $('greeks').textContent = legs.some(leg => leg.quote) ? 'Quote Greeks · '+aggregated.join(' · ') : '';
+    const totals = netGreeks(legs);
+    const greekText = totals.liveLegs ? 'Live Greeks · '+FIELDS.map(key =>
+      key.charAt(0).toUpperCase()+key.slice(1)+' '+num(totals[key])).join(' · ') :
+      'Live Greeks unavailable — load the chain to refresh.';
+    $('greeks').textContent = legs.length ? greekText : '';
+    const payoffGreeks = $('payoff-greeks');
+    if (payoffGreeks) payoffGreeks.textContent = legs.length ? greekText : '';
   }
 
   function action(event) {
     const button = event.target.closest('button');
     if (!button) return;
+    const flip = event.target.closest('[data-flip]');
+    if (flip) return flipLeg(Number(flip.dataset.flip));
     const {ob,remove,chain:chainIndex,side,expiryDay,scenarioView,quickType} = button.dataset;
     if (expiryDay) selectExpiry(expiryDay);
     if (scenarioView) {
@@ -616,7 +649,8 @@ export function createOptionsBuilder() {
     if (quickType) {
       const spot = numeric(state.price);
       const row = spot > 0 && nearestStrike(chain.filter(row => row.type===quickType),spot);
-      addLeg(row ? marketLeg(row,'buy') : manualLeg({type:quickType}));
+      const side = button.dataset.quickSide === 'sell' ? 'sell' : 'buy';
+      addLeg(row ? marketLeg(row,side) : manualLeg({side,type:quickType}));
       if (!row) $('positions').open = true;
     }
     if (ob==='manual') addLeg(manualLeg());
@@ -637,10 +671,8 @@ export function createOptionsBuilder() {
       state.package = $('package').value = '';
       updatePositions();
     }
-    if (remove !== undefined) {
-      state.legs.splice(Number(remove),1);
-      updatePositions();
-    }
+    if (remove !== undefined) removeLeg(Number(remove));
+    if (button.dataset.removeChip !== undefined) removeLeg(Number(button.dataset.removeChip));
     if (chainIndex !== undefined && chain[chainIndex]) addLeg(marketLeg(chain[chainIndex],side));
   }
   function control(event) {
@@ -722,15 +754,17 @@ export function createOptionsBuilder() {
       Object.keys(PRESETS).map(name=>option(name,name,state.preset===name)).join('')+'</select></label>'+
       '<button type="button" class="btn" data-ob="preset-apply">Apply preset</button></div>'+
       '<div class="options-expirations"><h2>Expiration</h2><div class="options-date-strip" data-ob="expiry-strip" role="group" aria-label="Available expirations"></div></div>'+
-      '<div class="options-ruler-head"><div><h2>Strikes</h2><p>Drag a leg to move its strike. Use arrow keys for fine adjustments.</p></div>'+
-      '<div class="flex"><button type="button" class="btn small" data-quick-type="call">+ Call</button>'+
-      '<button type="button" class="btn small" data-quick-type="put">+ Put</button></div></div>'+
+      '<div class="options-ruler-head"><div><h2>Strikes</h2><p>Drag sideways to move a strike. Swipe up or down to remove a leg. Tap B or S to flip buy/sell. Use arrow keys for fine adjustments.</p></div>'+
+      '<div class="flex options-quick-add"><button type="button" class="btn small" data-quick-type="call" data-quick-side="buy">+ Buy Call</button>'+
+      '<button type="button" class="btn small" data-quick-type="call" data-quick-side="sell">+ Sell Call</button>'+
+      '<button type="button" class="btn small" data-quick-type="put" data-quick-side="buy">+ Buy Put</button>'+
+      '<button type="button" class="btn small" data-quick-type="put" data-quick-side="sell">+ Sell Put</button></div></div>'+
       '<div data-ob="ruler" class="options-ruler" role="group" aria-label="Strike ruler"></div></div>'+
       '<div class="panel-body options-payoff">'+
       '<div class="options-payoff-head"><h2>Payoff</h2><div class="options-view-switch" role="group" aria-label="Payoff view">'+
       ['graph','table'].map(view => '<button type="button" data-scenario-view="'+view+'" aria-pressed="'+(state.view===view)+'">'+
       (view==='graph'?'Graph':'Table')+'</button>').join('')+'</div></div>'+
-      '<div class="options-metrics" data-ob="metrics"></div><div class="options-plot" data-ob="plot"></div>'+
+      '<div class="options-metrics" data-ob="metrics"></div><div class="subtle options-payoff-greeks" data-ob="payoff-greeks"></div><div class="options-plot" data-ob="plot"></div>'+
       '<div class="table-wrap options-scenario-table" data-ob="grid" hidden></div>'+
       '<div class="options-ranges" data-ob="range" hidden>'+
       '<label class="field options-date-control">Scenario date <output data-ob="date-output"></output><input data-ob="scenario-time" type="range" min="0" max="100" value="'+state.time+'"></label>'+

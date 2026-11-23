@@ -623,6 +623,11 @@ tr[data-vol-symbol] td:nth-child(3){min-width:138px}
 .options-strike-chip.sell { color:var(--red); background:color-mix(in srgb,var(--red) 14%,var(--bg)); }
 .options-strike-chip small { font-size:10px; opacity:.8; }
 .options-strike-chip.is-dragging { z-index:2; cursor:grabbing; box-shadow:0 0 0 2px currentColor; }
+.options-strike-chip.is-swiping { cursor:grabbing; }
+.options-strike-delete { position:absolute; top:calc(var(--strike-lane) * 43px + 4px); left:var(--strike-x); transform:translateX(34px); z-index:1; display:grid; place-items:center; width:44px; min-height:44px; padding:0; font:inherit; font-size:18px; font-weight:700; color:var(--muted); border:1px solid var(--border); border-radius:8px; background:var(--bg); cursor:pointer; }
+.options-strike-delete:focus-visible { outline:2px solid var(--text); outline-offset:2px; }
+.options-payoff-greeks { margin:8px 0; }
+.options-quick-add { flex-wrap:wrap; }
 .options-strike-chip:focus-visible, .options-month button:focus-visible, .options-view-switch button:focus-visible {
   outline:2px solid var(--text); outline-offset:2px;
 }

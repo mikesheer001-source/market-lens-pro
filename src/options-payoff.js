@@ -83,6 +83,23 @@ export function expiryStats(legs, debit) {
     roots:roots.sort((a,b) => a-b), flat};
 }
 
+const GREEK_FIELDS = ['delta','gamma','theta','vega','rho'];
+export function netGreeks(legs) {
+  const result = {liveLegs:0,totalLegs:legs.length};
+  for (const field of GREEK_FIELDS) {
+    let total = null;
+    for (const leg of legs) {
+      const value = leg.quote?.greeks?.[field];
+      if (Number.isFinite(value)) total = (total ?? 0) + units(leg) * value;
+    }
+    result[field] = total;
+  }
+  result.liveLegs = legs.filter(leg => GREEK_FIELDS.some(field =>
+    Number.isFinite(leg.quote?.greeks?.[field]))).length;
+  return {delta:result.delta,gamma:result.gamma,theta:result.theta,vega:result.vega,rho:result.rho,
+    liveLegs:result.liveLegs,totalLegs:result.totalLegs};
+}
+
 export function quoteEstimates(legs, fee) {
   if (!legs.length || legs.some(({quote:q}) => !q || !(q.ask > 0) ||
     q.bid == null || q.bid < 0 || q.ask < q.bid)) return null;

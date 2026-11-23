@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import {boxRate, expirationTime, expiryPnl, expiryStats, initialDebit, modelPrice, quoteEstimates, scenarioPnl} from '../src/options-payoff.js';
+import {boxRate, expirationTime, expiryPnl, expiryStats, initialDebit, modelPrice, netGreeks, quoteEstimates, scenarioPnl} from '../src/options-payoff.js';
 import worker from '../worker/index.js';
 import {normalizeSnapshot, optionsRequest, standardContract} from '../worker/options.js';
 
@@ -14,6 +14,15 @@ test('expiration extrema and breakevens include the strike kinks and unbounded t
   assert.deepEqual(expiryStats([vertical[1]],-100),{high:100,low:-Infinity,roots:[111],flat:[]});
   assert.deepEqual(expiryStats([leg('put','buy',100,2),leg('call','buy',100,2)],400).roots,[96,104]);
   assert.deepEqual(expiryStats(vertical,0).flat,[[0,100]]);
+});
+
+test('netGreeks sums live quote Greeks per field, signed by buy/sell', () => {
+  const buyCall = leg('call','buy',100,2,{quote:{greeks:{delta:0.5,gamma:0.02,theta:-0.1,vega:0.4,rho:0.05}}});
+  const sellPut = leg('put','sell',90,1,{quantity:2,quote:{greeks:{delta:-0.3}}});
+  const noQuote = leg('call','buy',110,1);
+  assert.deepEqual(netGreeks([buyCall,sellPut,noQuote]),{delta:110,gamma:2,theta:-10,vega:40,rho:5,liveLegs:2,totalLegs:3});
+  assert.deepEqual(netGreeks([]),{delta:null,gamma:null,theta:null,vega:null,rho:null,liveLegs:0,totalLegs:0});
+  assert.deepEqual(netGreeks([noQuote]),{delta:null,gamma:null,theta:null,vega:null,rho:null,liveLegs:0,totalLegs:1});
 });
 
 test('scenario prices converge to payoff and mixed expiries retain time value after the first leg settles', () => {
