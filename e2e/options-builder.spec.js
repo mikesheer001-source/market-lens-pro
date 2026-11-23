@@ -89,13 +89,13 @@ test('drags quoted legs between listed strikes and rolls to a tapped expiration'
   await page.mouse.move(x+rulerBox.width*.86*(5/16),y,{steps:7});
   await expect(builder.locator('[data-ob=metrics]')).toContainText('$250.00 debit');
   await page.mouse.up();
-  await expect(builder.getByLabel('Leg 1 strike')).toHaveValue('105');
+  await expect(builder.getByLabel('Leg 1 strike',{exact:true})).toHaveValue('105');
   await expect(builder.getByLabel('Leg 1 entry')).toHaveValue('2.5');
   await builder.locator('[data-expiry-day="'+expirations[1]+'"]').click();
   await expect(builder.getByLabel('Leg 1 expiry')).toHaveValue(expirations[1]);
   const rolled = ruler.getByRole('button',{name:'Move leg 1 strike, 105C'});
   await rolled.press('ArrowLeft');
-  await expect(builder.getByLabel('Leg 1 strike')).toHaveValue('100');
+  await expect(builder.getByLabel('Leg 1 strike',{exact:true})).toHaveValue('100');
   await builder.getByRole('button',{name:'Table',exact:true}).click();
   await expect(builder.getByRole('table',{name:'Scenario P&L in dollars'})).toBeVisible();
   await builder.getByRole('button',{name:'Graph',exact:true}).click();
@@ -121,7 +121,7 @@ test('moves a strike with touch on a narrow screen', async ({browser,baseURL}) =
     await session.send('Input.dispatchTouchEvent',{type:'touchStart',touchPoints:[{x,y}]});
     await session.send('Input.dispatchTouchEvent',{type:'touchMove',touchPoints:[{x:x+37,y}]});
     await session.send('Input.dispatchTouchEvent',{type:'touchEnd',touchPoints:[]});
-    await expect.poll(async () => Number(await builder.getByLabel('Leg 1 strike').inputValue())).toBeGreaterThan(100);
+    await expect.poll(async () => Number(await builder.getByLabel('Leg 1 strike',{exact:true}).inputValue())).toBeGreaterThan(100);
     expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(391);
   } finally {
     await page.close();

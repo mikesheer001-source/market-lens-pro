@@ -1,5 +1,6 @@
 export function strikeDomain(spot, strikes, chain) {
-  const center = spot || (strikes.length ? strikes.reduce((total, strike) => total + strike, 0) / strikes.length : null);
+  const center = spot > 0 && spot <= 1e6 ? spot :
+    strikes.length ? strikes.reduce((total,strike) => total+strike,0)/strikes.length : null;
   if (!center) return null;
   const padding = center * (chain.length ? 0.06 : 0.15);
   const values = [...strikes, ...chain.map(row => row.strike)];
