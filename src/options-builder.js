@@ -1,5 +1,6 @@
 import {MAX_LEGS, PRESETS, boxRate, expirationTime, expiryPnl, expiryStats, initialDebit,
   quoteEstimates, scenarioPnl} from './options-payoff.js';
+import {nearestStrike, strikeDomain, strikeTargets} from './options-strike-ruler.js';
 import {DEFAULT_ALPACA_WORKER} from './live-history.js';
 
 const DAY = 86_400_000;
@@ -32,6 +33,11 @@ const index = symbol => ['SPX','SPXW','XSP'].includes(symbol);
 const maxLegMessage = 'The builder supports up to eight legs.';
 const FIELDS = ['delta','gamma','theta','vega','rho'];
 const feedName = feed => feed === 'opra' ? 'Real-time OPRA' : 'Indicative';
+const shortPrice = new Intl.NumberFormat('en-US',{maximumFractionDigits:2});
+const expiryFormat = new Intl.DateTimeFormat('en-US',{month:'short',day:'numeric',year:'numeric',timeZone:'UTC'});
+const monthFormat = new Intl.DateTimeFormat('en-US',{month:'short',year:'2-digit',timeZone:'UTC'});
+const clamp = (value,min,max) => Math.max(min,Math.min(max,value));
+const strikeLabel = leg => shortPrice.format(leg.strike)+(leg.type==='call'?'C':'P');
 
 function option(value, label = value, selected = false) {
   return '<option value="'+esc(value)+'"'+(selected?' selected':'')+'>'+esc(label)+'</option>';
@@ -49,25 +55,35 @@ function quoteCells(leg) {
   const q = leg.quote;
   return q ? esc(dollars(q.bid)+' / '+dollars(q.ask))+'<small>'+esc(quoteAge(q))+'</small>' : '—';
 }
-function graph({price, high, low, points, expiry, pointAt, focus, marker}) {
-  const w = 760, h = 310, l = 78, r = 22, t = 22, b = 46;
+function graph({width, price, high, low, points, expiry, pointAt, focus, marker, roots}) {
+  const w = width, h = width < 480 ? 275 : 345, l = width < 480 ? 58 : 72, r = 20, t = 24, b = 42;
+  const axisMoney = new Intl.NumberFormat('en-US',{style:'currency',currency:'USD',notation:'compact',maximumFractionDigits:2});
   const x = v => l + (w-l-r) * (v-low)/(high-low);
   const min = Math.min(0,...points.flatMap(p => [p.at,p.end]));
   const max = Math.max(0,...points.flatMap(p => [p.at,p.end]));
   const padding = Math.max(1,(max-min)*0.11);
   const y = v => t + (h-t-b) * (max+padding-v)/(max-min+2*padding);
   const path = key => points.map((p,i) => (i?'L':'M')+x(p.x).toFixed(1)+' '+y(p[key]).toFixed(1)).join(' ');
-  const yGrid = Array.from({length:5},(_,i) => min+(max-min)*i/4).map(v =>
+  const zero = y(0);
+  const area = path('end')+' L'+x(high)+' '+zero+' L'+x(low)+' '+zero+' Z';
+  const clip = (id, top, height) => '<clipPath id="options-'+id+'"><rect x="'+l+'" y="'+top+'" width="'+(w-l-r)+'" height="'+height+'"/></clipPath>';
+  const ticks = (n, min, max) => Array.from({length:n},(_,i) => min+(max-min)*i/(n-1));
+  const yGrid = [...new Set(ticks(5,min,max))].map(v =>
     '<line x1="'+l+'" x2="'+(w-r)+'" y1="'+y(v)+'" y2="'+y(v)+'"/>'+
-    '<text x="'+(l-8)+'" y="'+(y(v)+4)+'" text-anchor="end">'+esc(dollars(v))+'</text>').join('');
-  const xGrid = Array.from({length:6},(_,i) => low+(high-low)*i/5).map(v =>
+    '<text x="'+(l-8)+'" y="'+(y(v)+4)+'" text-anchor="end">'+esc(axisMoney.format(v))+'</text>').join('');
+  const xGrid = ticks(width < 480 ? 4 : 6,low,high).map(v =>
     '<line y1="'+t+'" y2="'+(h-b)+'" x1="'+x(v)+'" x2="'+x(v)+'"/>'+
-    '<text x="'+x(v)+'" y="'+(h-b+20)+'" text-anchor="middle">'+esc(dollars(v))+'</text>').join('');
+    '<text x="'+x(v)+'" y="'+(h-b+20)+'" text-anchor="middle">'+esc(axisMoney.format(v))+'</text>').join('');
   const spotLine = v => '<line y1="'+t+'" y2="'+(h-b)+'" x1="'+x(v)+'" x2="'+x(v)+'" class="options-reference"/>';
   return '<svg viewBox="0 0 '+w+' '+h+'" role="img" aria-label="Profit and loss versus underlying price">'+
+    '<defs>'+clip('gain',t,zero-t)+clip('loss',zero,h-b-zero)+'</defs>'+
     '<g class="options-grid">'+yGrid+xGrid+'</g><line x1="'+l+'" x2="'+(w-r)+'" y1="'+y(0)+'" y2="'+y(0)+'" class="options-zero"/>'+
     (price >= low && price <= high ? spotLine(price) : '')+
-    '<path d="'+path('end')+'" class="options-end"/>'+
+    ['gain','loss'].map(kind => '<g class="options-'+kind+'" clip-path="url(#options-'+kind+')">'+
+      '<path d="'+area+'" class="options-area"/><path d="'+path('end')+'" class="options-end"/></g>').join('')+
+    roots.filter(value => value > low && value < high).map(value =>
+      '<line x1="'+x(value)+'" x2="'+x(value)+'" y1="'+t+'" y2="'+(h-b)+'" class="options-breakeven"><title>'+
+      esc('Breakeven '+dollars(value))+'</title></line>').join('')+
     (expiry ? '' : '<path d="'+path('at')+'" class="options-at"/>')+
     '<circle cx="'+x(focus)+'" cy="'+y(pointAt)+'" r="5" class="options-marker">'+
     '<title>'+esc(dollars(focus)+' underlying · '+dollars(pointAt)+' P&L')+'</title></circle>'+
@@ -79,10 +95,11 @@ function graph({price, high, low, points, expiry, pointAt, focus, marker}) {
 export function createOptionsBuilder() {
   let root, timer, pending, generation = 0;
   let ownerToken = readDevice(DEVICE_KEY), feed = 'indicative', expirations = [], chain = [], feedVerified = false, nextPoll = 0;
-  let message = '', spotSource = '';
+  let message = '', spotSource = '', drag, rollFrom, resize;
+  const chains = new Map();
   const state = {
     symbol:'SPY', price:'', width:'0.15', expiry:'', legs:[], fee:'0', package:'', preset:'',
-    iv:'25', shift:'0', rate:'4', dividend:'0', focus:50, time:0
+    iv:'25', shift:'0', rate:'4', dividend:'0', focus:50, time:100, chartRange:18, view:'graph'
   };
   const $ = name => root.querySelector('[data-ob="'+name+'"]');
   const manualExpiry = days => localDate(Date.now()+DAY*days);
@@ -98,7 +115,10 @@ export function createOptionsBuilder() {
   };
   function resetQuotes() {
     cancel();
+    drag = null;
     chain = [];
+    chains.clear();
+    rollFrom = null;
     expirations = [];
     feedVerified = false;
     state.legs = state.legs.map(leg => ({...leg,quote:null}));
@@ -120,7 +140,7 @@ export function createOptionsBuilder() {
     cancel();
     const current = generation;
     pending = new AbortController();
-    setMessage('Enabling private quotes for this browser…');
+    setMessage('Connecting to Alpaca quotes…');
     try {
       const response = await fetch(optionsUrl('device'),{method:'POST',headers:{
         Authorization:'Bearer '+device,'X-Options-Approval':code
@@ -159,7 +179,7 @@ export function createOptionsBuilder() {
     },signal)).contracts || [];
   }
   async function refreshChain({discover = false} = {}) {
-    if (!ownerToken) return setMessage('Open your private setup link to enable quotes in this browser.');
+    if (!ownerToken) return setMessage('Use your quote link to load Alpaca prices.');
     if (Date.now() < nextPoll) return setMessage('The quote rate limit was reached. Retry after '+usTime(nextPoll)+'.');
     cancel();
     const current = generation;
@@ -187,16 +207,21 @@ export function createOptionsBuilder() {
       const data = await loadChain(state.expiry,signal);
       if (current !== generation) return;
       chain = data;
+      chains.set(state.expiry, data);
+      const rolled = rollLegs(data);
       feedVerified = chain.some(row => Number.isFinite(Date.parse(row.quote?.time)));
       renderChain();
       setMessage(feedVerified ? feedName(feed)+' · '+chain.length+' contracts' :
         'No timestamped '+feedName(feed)+' quotes in this strike range.');
+      if (rolled) setMessage(message+' · '+rolled);
       setLegQuotes(Object.fromEntries(chain.filter(row => row.quote).map(row => [row.symbol,row.quote])));
+      renderRuler();
       refreshMarks();
     } catch (error) {
       if (current === generation && error.name !== 'AbortError') {
         chain = [];
         renderChain();
+        renderRuler();
         setMessage(error.message);
       }
     } finally { endRequest(current); }
@@ -231,10 +256,176 @@ export function createOptionsBuilder() {
     } finally { endRequest(current); }
   }
 
+  function selectExpiry(date) {
+    if (date === state.expiry) return;
+    rollFrom ??= state.expiry;
+    state.expiry = date;
+    chain = [];
+    renderExpiry();
+    renderChain();
+    renderRuler();
+    void refreshChain();
+  }
+  function rollLegs(contracts) {
+    const previous = rollFrom;
+    rollFrom = null;
+    if (!previous || previous === state.expiry) return '';
+    let moved = 0, repriced = false, unavailable = 0;
+    state.legs = state.legs.map(leg => {
+      if (leg.expiry !== previous) return leg;
+      if (!leg.symbol) {
+        moved++;
+        return {...leg,expiry:state.expiry};
+      }
+      const row = contracts.find(row => row.type === leg.type && row.root === leg.root && row.strike === Number(leg.strike));
+      if (!row) {
+        unavailable++;
+        return leg;
+      }
+      moved++;
+      repriced = true;
+      return marketLeg(row,leg.side,leg.quantity);
+    });
+    if (repriced) state.package = $('package').value = '';
+    if (moved) renderLegs();
+    return [moved ? moved+' moved to '+state.expiry : '', unavailable ? unavailable+' kept their original date because the contract was unavailable' : ''].filter(Boolean).join(' · ');
+  }
   function renderExpiry() {
     $('expiry').innerHTML = expirations.length ? expirations.map(date => option(date,date,date===state.expiry)).join('') :
       option('','No expirations loaded');
+    const strip = $('expiry-strip');
+    const left = strip.scrollLeft;
+    const hadFocus = strip.contains(document.activeElement);
+    const groups = new Map();
+    for (const date of expirations) {
+      const month = date.slice(0,7);
+      if (!groups.has(month)) groups.set(month,[]);
+      groups.get(month).push(date);
+    }
+    strip.innerHTML = groups.size ? [...groups.values()].map(dates =>
+      '<div class="options-month"><span>'+esc(monthFormat.format(new Date(dates[0]+'T00:00Z')))+'</span><div>'+
+      dates.map(date => '<button type="button" data-expiry-day="'+esc(date)+'" aria-label="'+esc(expiryFormat.format(new Date(date+'T00:00Z')))+
+        '" aria-pressed="'+(date===state.expiry)+'">'+esc(Number(date.slice(-2)))+'</button>').join('')+'</div></div>').join('') :
+      '<span class="muted">Expirations appear when quotes load. Manual dates are available in Positions.</span>';
+    strip.scrollLeft = left;
+    const selected = strip.querySelector('[aria-pressed="true"]');
+    if (selected) {
+      if (hadFocus) selected.focus({preventScroll:true});
+      const bounds = strip.getBoundingClientRect(), chip = selected.getBoundingClientRect();
+      if (chip.left < bounds.left || chip.right > bounds.right) strip.scrollLeft += chip.left - bounds.left;
+    }
   }
+  function rulerDomain() {
+    return strikeDomain(numeric(state.price),state.legs.map(leg => numeric(leg.strike)).filter(value => value > 0),chain);
+  }
+  const positionPct = (strike,{low,high}) => 7 + 86 * clamp((strike-low)/(high-low),0,1);
+
+  function renderRuler(focusIndex) {
+    if (drag) return;
+    const ruler = $('ruler');
+    const domain = rulerDomain();
+    $('position-count').textContent = state.legs.length;
+    if (!domain) {
+      ruler.innerHTML = '<div class="options-ruler-empty">Enter an underlying price or add a position to set the strike range.</div>';
+      return;
+    }
+    const {low,high} = domain;
+    const spot = numeric(state.price);
+    const visible = state.legs.map((leg,i)=>({leg,i})).filter(({leg}) => numeric(leg.strike) > 0);
+    const lanes = [];
+    const narrow = ruler.clientWidth < 540;
+    const markers = visible.map(({leg,i}) => {
+      const x = positionPct(Number(leg.strike),domain);
+      let lane = lanes.findIndex(used => used.every(value => Math.abs(value-x) >= (narrow ? 27 : 15)));
+      if (lane < 0) lane = lanes.push([])-1;
+      lanes[lane].push(x);
+      return '<button type="button" class="options-strike-chip '+leg.side+'" data-strike-leg="'+i+'" style="--strike-x:'+x+
+        '%;--strike-lane:'+lane+'" aria-label="Move leg '+(i+1)+' strike, '+esc(strikeLabel(leg))+'">'+
+        '<span>'+(leg.side==='buy'?'B':'S')+' · '+esc(strikeLabel(leg))+'</span><small>'+esc(leg.expiry?.slice(5) ?? '')+'</small></button>';
+    }).join('');
+    const ticks = Array.from({length:7},(_,i) => low+(high-low)*i/6).map((value,i) =>
+      '<span class="options-tick'+(i%2?' options-tick-minor':'')+'" style="--strike-x:'+positionPct(value,domain)+'%">'+
+      esc(shortPrice.format(value))+'</span>').join('');
+    ruler.innerHTML = '<div class="options-strike-scale" style="--ruler-lanes:'+Math.max(1,lanes.length)+'">'+
+      '<div class="options-strike-lanes">'+markers+'</div><div class="options-strike-axis">'+ticks+
+      (spot > 0 ? '<span class="options-strike-spot" style="--strike-x:'+positionPct(spot,domain)+'%" title="'+esc('Underlying '+dollars(spot))+'"></span>' : '')+
+      '</div></div>';
+    if (focusIndex != null) ruler.querySelector('[data-strike-leg="'+focusIndex+'"]')?.focus({preventScroll:true});
+  }
+
+  function updatePositions(focusIndex) {
+    renderLegs();
+    renderRuler(focusIndex);
+    refreshMarks();
+  }
+
+  function targetsFor(leg,domain) {
+    const contracts = chains.get(leg.expiry) || (chain[0]?.expiry === leg.expiry ? chain : []);
+    return strikeTargets(leg,contracts,domain);
+  }
+  function changedLeg(leg,row) {
+    if (row.strike === Number(leg.strike)) return leg;
+    return leg.symbol ? marketLeg(row,leg.side,leg.quantity) : {...leg,strike:row.strike};
+  }
+  function commitStrike(i,row,restoreFocus) {
+    if (!row || !state.legs[i]) return;
+    const prior = state.legs[i];
+    const next = changedLeg(prior,row);
+    if (prior !== next) {
+      state.legs[i] = next;
+      if (prior.symbol && state.package !== '') state.package = $('package').value = '';
+      setMessage((prior.symbol ? 'Listed' : 'Manual')+' strike set to '+strikeLabel(next)+'.');
+    }
+    updatePositions(restoreFocus ? i : undefined);
+  }
+  function startDrag(event) {
+    const marker = event.target.closest('[data-strike-leg]');
+    if (!marker || drag || event.button !== 0) return;
+    const i = Number(marker.dataset.strikeLeg);
+    const leg = state.legs[i], domain = rulerDomain();
+    const targets = targetsFor(leg,domain);
+    if (!targets.length) return setMessage('Load contracts for this leg’s expiration to drag its strike.');
+    drag = {pointer:event.pointerId,i,leg,marker,domain,targets,startX:event.clientX,
+      width:$('ruler').getBoundingClientRect().width};
+    $('ruler').setPointerCapture(event.pointerId);
+    marker.classList.add('is-dragging');
+    event.preventDefault();
+  }
+  function moveDrag(event) {
+    if (!drag || event.pointerId !== drag.pointer) return;
+    const {startX,width,leg,domain,targets,marker} = drag;
+    const dx = event.clientX-startX;
+    if (!drag.preview && Math.abs(dx)<3) return;
+    const price = Number(leg.strike)+dx/Math.max(1,width*.86)*(domain.high-domain.low);
+    const row = nearestStrike(targets,price);
+    if (!row || row===drag.row) return;
+    drag.row = row;
+    drag.preview = changedLeg(leg,row);
+    marker.style.setProperty('--strike-x',positionPct(row.strike,domain)+'%');
+    marker.firstElementChild.textContent = (leg.side==='buy'?'B':'S')+' · '+strikeLabel(drag.preview);
+    refreshMarks();
+  }
+  function endDrag(event) {
+    if (!drag || event.pointerId !== drag.pointer) return;
+    const {i,row} = drag;
+    drag = null;
+    if (event.type==='pointerup' && row) commitStrike(i,row,false);
+    else {
+      renderRuler();
+      refreshMarks();
+    }
+  }
+  function keyboardStrike(event) {
+    const marker = event.target.closest('[data-strike-leg]');
+    if (!marker || !['ArrowLeft','ArrowRight'].includes(event.key)) return;
+    event.preventDefault();
+    const i = Number(marker.dataset.strikeLeg), leg = state.legs[i];
+    const targets = targetsFor(leg,rulerDomain());
+    const row = event.key==='ArrowLeft' ? targets.findLast(row=>row.strike<Number(leg.strike)) :
+      targets.find(row=>row.strike>Number(leg.strike));
+    if (row) commitStrike(i,row,true);
+  }
+
   function renderChain() {
     const body = $('chain');
     body.innerHTML = chain.length ? chain.map((row,i) => {
@@ -251,8 +442,7 @@ export function createOptionsBuilder() {
   function addLeg(leg) {
     if (state.legs.length >= MAX_LEGS) return setMessage(maxLegMessage);
     state.legs.push(leg);
-    renderLegs();
-    refreshMarks();
+    updatePositions();
   }
   function manualLeg({side='buy',type='call',strike,expiry=state.expiry || manualExpiry(30),quantity=1} = {}) {
     return {side,type,strike:strike ?? numeric(state.price) ?? '',expiry,quantity,entry:'',
@@ -290,7 +480,7 @@ export function createOptionsBuilder() {
     if (chain.length && definition.some(leg => leg[4]) && expirations.includes(second)) {
       const current = generation;
       pending = new AbortController();
-      try { farChain = await loadChain(second,pending.signal); }
+      try { farChain = await loadChain(second,pending.signal); if (current === generation) chains.set(second,farChain); }
       catch (error) { if (current === generation) setMessage(error.message); }
       finally { endRequest(current); }
       if (current !== generation) return;
@@ -320,16 +510,17 @@ export function createOptionsBuilder() {
     setMessage(middle ? 'Preset applied using listed strikes. Entry premiums are editable.' :
       'Manual preset applied. Enter the leg premiums or a net package price.');
     state.package = $('package').value = '';
-    renderLegs();
-    refreshMarks();
+    updatePositions();
   }
 
   function refreshMarks() {
     if (!active()) return;
     const fee = numeric(state.fee);
     const validFee = fee >= 0 && fee != null && fee <= 10000;
-    const legs = state.legs.map(leg => ({...leg,strike:numeric(leg.strike),quantity:numeric(leg.quantity),
-      entry:numeric(leg.entry),expiresAt:expirationTime(leg)}));
+    const legs = state.legs.map((position,i) => {
+      const leg = drag?.i === i && drag.preview ? drag.preview : position;
+      return {...leg,strike:numeric(leg.strike),quantity:numeric(leg.quantity),entry:numeric(leg.entry),expiresAt:expirationTime(leg)};
+    });
     const price = numeric(state.price);
     const estimates = validFee ? quoteEstimates(legs,fee) : null;
     $('estimates').innerHTML = estimates ?
@@ -341,6 +532,7 @@ export function createOptionsBuilder() {
     const showEmpty = text => {
       $('metrics').innerHTML = '';
       $('greeks').textContent = '';
+      $('plot').hidden = false;
       $('plot').textContent = text;
       $('grid').innerHTML = '';
       $('range').hidden = true;
@@ -350,8 +542,9 @@ export function createOptionsBuilder() {
       !Number.isInteger(leg.quantity) || leg.quantity < 1 || leg.quantity > 10000 || !Number.isFinite(leg.expiresAt)))
       return showEmpty('Enter a valid strike, expiration, and quantity for every leg.');
     if (!validFee) return showEmpty('Enter a valid fee per contract.');
-    const pkg = numeric(state.package);
-    if (state.package !== '' && (pkg == null || Math.abs(pkg)>1e9)) return showEmpty('Enter a valid signed package price.');
+    const entryPackage = drag?.preview?.symbol && drag.preview !== drag.leg ? '' : state.package;
+    const pkg = numeric(entryPackage);
+    if (entryPackage !== '' && (pkg == null || Math.abs(pkg)>1e9)) return showEmpty('Enter a valid signed package price.');
     if (pkg == null && legs.some(leg => leg.entry == null || leg.entry < 0 || leg.entry > 1e6))
       return showEmpty('Enter the premium for each leg or a signed package price.');
     const debit = pkg == null ? initialDebit(legs,fee) : pkg + legs.reduce((sum,leg) => sum+fee*leg.quantity,0);
@@ -380,6 +573,7 @@ export function createOptionsBuilder() {
     }
     $('metrics').innerHTML = metrics.map(([label,value]) => '<div><small>'+esc(label)+'</small><strong>'+esc(value)+'</strong></div>').join('');
     if (!validModel && !single) {
+      $('plot').hidden = false;
       $('plot').textContent = 'Enter valid IV, rate, and dividend inputs for mixed expirations.';
       $('range').hidden = true;
       $('grid').innerHTML = '';
@@ -387,22 +581,27 @@ export function createOptionsBuilder() {
     }
     const strikes = legs.map(leg => leg.strike);
     const center = price > 0 && price <= 1e6 ? price : (Math.min(...strikes)+Math.max(...strikes))/2;
-    const span = Math.max(center*.18, (Math.max(...strikes)-Math.min(...strikes))*.25, .1);
-    const low = Math.max(0,Math.min(center-span,Math.min(...strikes)-span/2));
-    const high = Math.max(center+span,Math.max(...strikes)+span/2);
+    const span = Math.max(center * state.chartRange / 100, .01);
+    const low = Math.max(0,center-span);
+    const high = center+span;
     const focus = low + (high-low)*state.focus/100;
     const terminal = x => single ? expiryPnl(legs,x,debit) : scenarioPnl(legs,x,expiry,debit,model);
     const pnlAt = (x,when) => when===expiry ? terminal(x) : scenarioPnl(legs,x,when,debit,model);
-    const prices = [...new Set([...Array.from({length:81},(_,i) => low+(high-low)*i/80),...strikes])].sort((a,b)=>a-b);
+    const prices = [...new Set([...Array.from({length:81},(_,i) => low+(high-low)*i/80),...strikes.filter(strike => strike>low && strike<high)])].sort((a,b)=>a-b);
     const points = prices.map(x => ({x,end:terminal(x),at:allowFuture ? pnlAt(x,at) : terminal(x)}));
     const pointAt = allowFuture ? pnlAt(focus,at) : terminal(focus);
-    $('plot').innerHTML = graph({price,high,low,points,expiry:!allowFuture,pointAt,focus,
+    const width = clamp($('plot').clientWidth || root.clientWidth-28,280,1060);
+    $('plot').innerHTML = graph({width,price,high,low,points,expiry:!allowFuture,pointAt,focus,roots:stats?.roots || [],
       marker:single?'Expiration payoff':'First expiry model'});
     $('range').hidden = false;
     $('date-output').textContent = (allowFuture || at === expiry ? usTime(at) : usTime(expiry)) +
       (!validModel ? ' · Enter valid model inputs for earlier dates' : '');
     $('price-output').textContent = dollars(focus)+' underlying · '+dollars(pointAt)+' P&L';
     $('scenario-time').disabled = expiry <= now;
+    $('range-output').textContent = '±'+state.chartRange+'%';
+    $('iv-output').textContent = (shift > 0 ? '+' : '')+num(shift,0)+' pp';
+    $('plot').hidden = state.view === 'table';
+    $('grid').hidden = state.view !== 'table';
     const datesGrid = validModel ? [...new Set([start,Math.round((expiry+start)/2),expiry])] : [expiry];
     const gridPrices = Array.from({length:9},(_,i) => high-(high-low)*i/8);
     $('grid').innerHTML = '<table class="data-table"><caption>Scenario P&L in dollars</caption><thead><tr><th>Underlying</th>'+
@@ -422,7 +621,20 @@ export function createOptionsBuilder() {
   function action(event) {
     const button = event.target.closest('button');
     if (!button) return;
-    const {ob,remove,chain:chainIndex,side} = button.dataset;
+    const {ob,remove,chain:chainIndex,side,expiryDay,scenarioView,quickType} = button.dataset;
+    if (expiryDay) selectExpiry(expiryDay);
+    if (scenarioView) {
+      state.view = scenarioView;
+      for (const control of root.querySelectorAll('[data-scenario-view]'))
+        control.setAttribute('aria-pressed',String(control.dataset.scenarioView === scenarioView));
+      refreshMarks();
+    }
+    if (quickType) {
+      const spot = numeric(state.price);
+      const row = spot > 0 && nearestStrike(chain.filter(row => row.type===quickType),spot);
+      addLeg(row ? marketLeg(row,'buy') : manualLeg({type:quickType}));
+      if (!row) $('positions').open = true;
+    }
     if (ob==='manual') addLeg(manualLeg());
     if (ob==='preset-apply') void applyPreset();
     if (ob==='refresh-chain') void refreshChain({discover:!expirations.length});
@@ -434,19 +646,16 @@ export function createOptionsBuilder() {
         leg.entry = ob==='use-mid' ? ((bid+ask)/2).toFixed(4) : String(leg.side==='buy'?ask:bid);
       });
       state.package = $('package').value = '';
-      renderLegs();
-      refreshMarks();
+      updatePositions();
     }
     if (ob==='clear') {
       state.legs = [];
       state.package = $('package').value = '';
-      renderLegs();
-      refreshMarks();
+      updatePositions();
     }
     if (remove !== undefined) {
       state.legs.splice(Number(remove),1);
-      renderLegs();
-      refreshMarks();
+      updatePositions();
     }
     if (chainIndex !== undefined && chain[chainIndex]) addLeg(marketLeg(chain[chainIndex],side));
   }
@@ -463,6 +672,7 @@ export function createOptionsBuilder() {
         const cell = $('legs').querySelector('[data-quote-row="'+row+'"]');
         cell.textContent = '—';
       }
+      renderRuler();
       refreshMarks();
       return;
     }
@@ -483,8 +693,7 @@ export function createOptionsBuilder() {
       resetQuotes();
       renderExpiry();
       renderChain();
-      renderLegs();
-      refreshMarks();
+      updatePositions();
       if (ownerToken) void refreshChain({discover:true});
     }
     if (ob==='feed' && event.type==='change' && el.value !== feed) {
@@ -496,14 +705,20 @@ export function createOptionsBuilder() {
       refreshMarks();
       if (ownerToken) void refreshChain({discover:true});
     }
-    if (ob==='expiry' && event.type==='change' && el.value !== state.expiry) {
-      state.expiry = el.value;
-      void refreshChain();
-    }
+    if (ob==='expiry' && event.type==='change') selectExpiry(el.value);
     if (['price','fee','package','width','iv','rate','dividend','shift','preset'].includes(ob) && state[ob] !== el.value) {
       state[ob] = el.value;
-      if (ob==='price') $('spot-source').textContent = spotSource = 'Manual reference';
+      if (ob==='price') {
+        $('spot-source').textContent = spotSource = 'Manual reference';
+        renderRuler();
+      }
+      if (ob==='shift') $('scenario-iv').value = el.value;
       if (ob!=='preset') refreshMarks();
+    }
+    if (ob==='chart-range' || ob==='scenario-iv') {
+      if (ob==='chart-range') state.chartRange = Number(el.value);
+      else state.shift = $('shift').value = el.value;
+      refreshMarks();
     }
     if (ob==='scenario-price' || ob==='scenario-time') {
       state[ob==='scenario-price'?'focus':'time'] = Number(el.value);
@@ -513,20 +728,39 @@ export function createOptionsBuilder() {
   function mount(host, worker) {
     root = host;
     host.dataset.worker = worker;
-    root.innerHTML = '<div class="headrow"><div><h1>Options Builder</h1>'+
-      '<p class="subtle">Build and price multi-leg strategies for U.S. stocks, ETFs, SPX, and XSP.</p></div></div>'+
-      '<div class="panel options-controls"><div class="panel-header"><h2>Strategy</h2></div><div class="panel-body">'+
-      '<div class="options-fields"><label class="field">Ticker<input data-ob="symbol" maxlength="10" value="'+esc(state.symbol)+'"></label>'+
-      '<label class="field">Underlying reference price<input data-ob="price" type="number" min="0.01" step="any" value="'+esc(state.price)+'"><small data-ob="spot-source">'+esc(spotSource)+'</small></label>'+
-      '<label class="field">Strategy preset<select data-ob="preset">'+option('','Choose a preset')+
+    root.innerHTML = '<header class="options-page-head"><div><h1>Options Builder</h1>'+
+      '<p data-ob="status" role="status" class="options-status">'+esc(message)+'</p></div>'+
+      '<a class="btn" href="#options-positions">Positions <span data-ob="position-count">0</span></a></header>'+
+      '<section class="panel options-workbench"><div class="panel-body">'+
+      '<div class="options-fields options-toolbar"><label class="field options-ticker">Ticker<input data-ob="symbol" maxlength="10" value="'+esc(state.symbol)+'"></label>'+
+      '<label class="field options-spot">Underlying reference price<input data-ob="price" type="number" min="0.01" step="any" value="'+esc(state.price)+'"><small data-ob="spot-source">'+esc(spotSource)+'</small></label>'+
+      '<label class="field options-preset">Strategy preset<select data-ob="preset">'+option('','Choose a preset')+
       Object.keys(PRESETS).map(name=>option(name,name,state.preset===name)).join('')+'</select></label>'+
-      '<button type="button" class="btn" data-ob="preset-apply">Apply preset</button><a class="btn" href="#options-chain">View chain</a></div>'+
-      '<details class="options-owner"><summary>Quote settings</summary>'+
-      '<label class="field">Options feed<select data-ob="feed">'+option('opra','Real-time OPRA',feed==='opra')+
-      option('indicative','Indicative',feed==='indicative')+'</select></label>'+
-      '<p class="section-note">Indicative quotes are modified and trades are delayed.</p></details>'+
-      '<p class="options-status muted" role="status" data-ob="status">'+esc(message)+'</p></div></div>'+
-      '<div class="panel"><div class="panel-header"><h2>Legs</h2><div class="flex">'+
+      '<button type="button" class="btn" data-ob="preset-apply">Apply preset</button></div>'+
+      '<div class="options-expirations"><h2>Expiration</h2><div class="options-date-strip" data-ob="expiry-strip" role="group" aria-label="Available expirations"></div></div>'+
+      '<div class="options-ruler-head"><div><h2>Strikes</h2><p>Drag a leg to move its strike. Use arrow keys for fine adjustments.</p></div>'+
+      '<div class="flex"><button type="button" class="btn small" data-quick-type="call">+ Call</button>'+
+      '<button type="button" class="btn small" data-quick-type="put">+ Put</button></div></div>'+
+      '<div data-ob="ruler" class="options-ruler" role="group" aria-label="Strike ruler"></div></div>'+
+      '<div class="panel-body options-payoff">'+
+      '<div class="options-payoff-head"><h2>Payoff</h2><div class="options-view-switch" role="group" aria-label="Payoff view">'+
+      ['graph','table'].map(view => '<button type="button" data-scenario-view="'+view+'" aria-pressed="'+(state.view===view)+'">'+
+      (view==='graph'?'Graph':'Table')+'</button>').join('')+'</div></div>'+
+      '<div class="options-metrics" data-ob="metrics"></div><div class="options-plot" data-ob="plot"></div>'+
+      '<div class="table-wrap options-scenario-table" data-ob="grid" hidden></div>'+
+      '<div class="options-ranges" data-ob="range" hidden>'+
+      '<label class="field options-date-control">Scenario date <output data-ob="date-output"></output><input data-ob="scenario-time" type="range" min="0" max="100" value="'+state.time+'"></label>'+
+      '<label class="field">Price range <output data-ob="range-output"></output><input data-ob="chart-range" type="range" min="5" max="80" value="'+state.chartRange+'"></label>'+
+      '<label class="field">IV shift <output data-ob="iv-output"></output><input data-ob="scenario-iv" type="range" min="-50" max="150" value="'+esc(state.shift)+'"></label>'+
+      '<label class="field options-date-control">Scenario underlying price <output data-ob="price-output"></output><input data-ob="scenario-price" type="range" min="0" max="100" value="'+state.focus+'"></label></div>'+
+      '<details><summary>Pricing assumptions</summary><div class="options-fields options-assumptions">'+
+      '<label class="field">Fallback IV (%)<input data-ob="iv" type="number" min="0.01" step="any" value="'+esc(state.iv)+'"></label>'+
+      '<label class="field">IV shift (points)<input data-ob="shift" type="number" step="any" value="'+esc(state.shift)+'"></label>'+
+      '<label class="field">Risk-free rate (%)<input data-ob="rate" type="number" step="any" value="'+esc(state.rate)+'"></label>'+
+      '<label class="field">Dividend yield (%)<input data-ob="dividend" type="number" min="0" step="any" value="'+esc(state.dividend)+'"></label></div>'+
+      '<p class="section-note">Pre-expiry uses European Black–Scholes with per-leg quoted IV when available. It estimates P&L through the first expiration and assumes settlement at the scenario price. Exercise and assignment, exit fees, and exchange schedule exceptions are outside the model.</p>'+
+      '</details></div></section>'+
+      '<details class="panel options-positions" id="options-positions" data-ob="positions" open><summary>Positions</summary><div class="panel-header"><div class="flex">'+
       '<button type="button" class="btn small" data-ob="refresh-legs">Refresh prices</button>'+
       '<button type="button" class="btn small" data-ob="clear">Clear</button>'+
       '<button type="button" class="btn small primary" data-ob="manual">Add manual leg</button></div></div>'+
@@ -534,35 +768,40 @@ export function createOptionsBuilder() {
       '<th>Contracts</th><th>Entry per unit</th><th>Bid / ask</th><th></th></tr></thead><tbody data-ob="legs"></tbody></table></div>'+
       '<div class="panel-body"><div class="options-fields"><label class="field">Entry fee per contract<input data-ob="fee" type="number" min="0" step="any" value="'+esc(state.fee)+'"></label>'+
       '<label class="field">Net package premium in dollars<input data-ob="package" type="number" step="any" placeholder="Optional · credit is negative" value="'+esc(state.package)+'"></label></div>'+
-      '<div class="options-estimates muted" data-ob="estimates"></div><div class="subtle" data-ob="greeks"></div></div></div>'+
-      '<div class="panel"><div class="panel-header"><h2>Payoff</h2></div><div class="panel-body">'+
-      '<div class="options-metrics" data-ob="metrics"></div><div class="options-plot" data-ob="plot"></div>'+
-      '<div class="options-ranges" data-ob="range" hidden><label class="field">Scenario date<input data-ob="scenario-time" type="range" min="0" max="100" value="'+state.time+'"><output data-ob="date-output"></output></label>'+
-      '<label class="field">Scenario underlying price<input data-ob="scenario-price" type="range" min="0" max="100" value="'+state.focus+'"><output data-ob="price-output"></output></label></div>'+
-      '<details><summary>Pricing assumptions and scenario table</summary><div class="options-fields options-assumptions">'+
-      '<label class="field">Fallback IV (%)<input data-ob="iv" type="number" min="0.01" step="any" value="'+esc(state.iv)+'"></label>'+
-      '<label class="field">IV shift (points)<input data-ob="shift" type="number" step="any" value="'+esc(state.shift)+'"></label>'+
-      '<label class="field">Risk-free rate (%)<input data-ob="rate" type="number" step="any" value="'+esc(state.rate)+'"></label>'+
-      '<label class="field">Dividend yield (%)<input data-ob="dividend" type="number" min="0" step="any" value="'+esc(state.dividend)+'"></label></div>'+
-      '<p class="section-note">Pre-expiry uses European Black–Scholes with per-leg quoted IV when available. It estimates P&L through the first expiration and assumes settlement at the scenario price. Exercise and assignment, exit fees, and exchange schedule exceptions are outside the model.</p>'+
-      '<div class="table-wrap" data-ob="grid"></div></details></div></div>'+
+      '<div class="options-estimates muted" data-ob="estimates"></div><div class="subtle" data-ob="greeks"></div></div></details>'+
       '<div class="panel" id="options-chain"><div class="panel-header"><h2>Options chain</h2></div><div class="panel-body options-fields">'+
       '<label class="field">Expiration<select data-ob="expiry"></select></label>'+
       '<label class="field">Strike window<select data-ob="width">'+[['0.05','±5%'],['0.10','±10%'],['0.15','±15%'],['0.30','±30%'],['0.6','±60%']].map(([v,label])=>option(v,label,v===state.width)).join('')+
-      '</select></label><button type="button" class="btn" data-ob="refresh-chain">Load chain</button></div>'+
+      '</select></label><button type="button" class="btn" data-ob="refresh-chain">Load chain</button>'+
+      '<label class="field">Options feed<select data-ob="feed">'+option('opra','Real-time OPRA',feed==='opra')+
+      option('indicative','Indicative',feed==='indicative')+'</select></label></div>'+
       '<div class="table-wrap options-chain"><table class="data-table"><thead><tr><th>Type</th><th>Strike</th><th>Bid / ask</th><th>Quote time</th><th>IV</th><th>Open interest</th><th></th></tr></thead><tbody data-ob="chain"></tbody></table></div></div>';
     root.addEventListener('click',action);
     root.addEventListener('input',control);
     root.addEventListener('change',control);
+    const ruler = $('ruler');
+    ruler.addEventListener('pointerdown',startDrag);
+    ruler.addEventListener('pointermove',moveDrag);
+    ruler.addEventListener('pointerup',endDrag);
+    ruler.addEventListener('pointercancel',endDrag);
+    ruler.addEventListener('lostpointercapture',endDrag);
+    ruler.addEventListener('keydown',keyboardStrike);
+    let width = host.clientWidth;
+    resize = new ResizeObserver(() => {
+      if (!active() || root.clientWidth === width) return;
+      width = root.clientWidth;
+      renderRuler();
+      refreshMarks();
+    });
+    resize.observe(host);
     renderExpiry();
     renderChain();
-    renderLegs();
-    refreshMarks();
+    updatePositions();
     timer = setInterval(poll,20_000);
     const code = optionsApprovalLink();
     if (code !== null) void approveBrowser(code);
     else if (ownerToken) void refreshChain({discover:!expirations.length});
-    else setMessage('Open your private setup link to enable quotes in this browser.');
+    else setMessage('Use your quote link to load Alpaca prices.');
 
   }
   return {mount,openApproval() {
@@ -570,7 +809,9 @@ export function createOptionsBuilder() {
     if (active() && code !== null) void approveBrowser(code);
   },unmount() {
     clearInterval(timer);
+    resize?.disconnect();
     cancel();
+    drag = null;
     root = null;
   }};
 }

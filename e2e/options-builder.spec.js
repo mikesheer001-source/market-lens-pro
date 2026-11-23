@@ -58,3 +58,72 @@ test('the private setup link approves this browser and reloads quotes automatica
   await expect(builder.getByRole('button',{name:'Buy',exact:true})).toBeVisible();
   expect(enrollmentCount).toBe(1);
 });
+
+test('drags quoted legs between listed strikes and rolls to a tapped expiration', async ({page}) => {
+  const expiration = days => new Date(Date.now()+days*86_400_000).toISOString().slice(0,10);
+  const expirations = [expiration(21),expiration(42)];
+  const time = new Date().toISOString();
+  await page.route('**/api/options/**', route => {
+    const url = new URL(route.request().url());
+    if (url.pathname.endsWith('/device')) return route.fulfill({status:204});
+    if (url.pathname.endsWith('/expirations')) return route.fulfill({json:{
+      feed:'indicative', expirations, underlying:{value:100,time,feed:'IEX'}
+    }});
+    const expiry = url.searchParams.get('expiry');
+    const contracts = [95,100,105,110].map(strike => ({symbol:'SPY'+expiry+strike,root:'SPY',
+      type:'call', expiry, strike, multiplier:100, quote:{bid:strike===105 ? 2 : 3,ask:strike===105 ? 3 : 4,time}}));
+    return route.fulfill({json:{feed:'indicative',contracts}});
+  });
+  await page.goto('./#options-setup='+'b'.repeat(64));
+  const builder = page.locator('#options-builder');
+  await expect(builder.locator('[data-ob=status]')).toContainText('4 contracts');
+  await builder.getByRole('button',{name:'+ Call',exact:true}).click();
+  const ruler = builder.locator('[data-ob=ruler]');
+  const marker = ruler.getByRole('button',{name:'Move leg 1 strike, 100C'});
+  const bounds = await marker.boundingBox();
+  const rulerBox = await ruler.boundingBox();
+  expect(bounds).toBeTruthy();
+  const x = bounds.x+bounds.width/2, y = bounds.y+bounds.height/2;
+  await page.mouse.move(x,y);
+  await page.mouse.down();
+  await page.mouse.move(x+rulerBox.width*.86*(5/16),y,{steps:7});
+  await expect(builder.locator('[data-ob=metrics]')).toContainText('$250.00 debit');
+  await page.mouse.up();
+  await expect(builder.getByLabel('Leg 1 strike')).toHaveValue('105');
+  await expect(builder.getByLabel('Leg 1 entry')).toHaveValue('2.5');
+  await builder.locator('[data-expiry-day="'+expirations[1]+'"]').click();
+  await expect(builder.getByLabel('Leg 1 expiry')).toHaveValue(expirations[1]);
+  const rolled = ruler.getByRole('button',{name:'Move leg 1 strike, 105C'});
+  await rolled.press('ArrowLeft');
+  await expect(builder.getByLabel('Leg 1 strike')).toHaveValue('100');
+  await builder.getByRole('button',{name:'Table',exact:true}).click();
+  await expect(builder.getByRole('table',{name:'Scenario P&L in dollars'})).toBeVisible();
+  await builder.getByRole('button',{name:'Graph',exact:true}).click();
+  await expect(builder.getByRole('img',{name:'Profit and loss versus underlying price'})).toBeVisible();
+});
+
+test('moves a strike with touch on a narrow screen', async ({browser,baseURL}) => {
+  const page = await browser.newPage({baseURL,viewport:{width:390,height:844},isMobile:true,hasTouch:true});
+  await page.addInitScript(() => localStorage.setItem('market-lens-sync-disabled','1'));
+  try {
+    await page.goto('./');
+    await page.locator('.mobile-more summary').tap();
+    await page.locator('.mobile-more').getByRole('button',{name:'Options Builder'}).tap();
+    const builder = page.locator('#options-builder');
+    await builder.getByLabel('Underlying reference price').fill('100');
+    await builder.getByRole('button',{name:'+ Call',exact:true}).tap();
+    const ruler = builder.locator('[data-ob=ruler]');
+    const marker = ruler.getByRole('button',{name:'Move leg 1 strike, 100C'});
+    await marker.scrollIntoViewIfNeeded();
+    const bounds = await marker.boundingBox();
+    const x = Math.round(bounds.x+bounds.width/2), y = Math.round(bounds.y+bounds.height/2);
+    const session = await page.context().newCDPSession(page);
+    await session.send('Input.dispatchTouchEvent',{type:'touchStart',touchPoints:[{x,y}]});
+    await session.send('Input.dispatchTouchEvent',{type:'touchMove',touchPoints:[{x:x+37,y}]});
+    await session.send('Input.dispatchTouchEvent',{type:'touchEnd',touchPoints:[]});
+    await expect.poll(async () => Number(await builder.getByLabel('Leg 1 strike').inputValue())).toBeGreaterThan(100);
+    expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(391);
+  } finally {
+    await page.close();
+  }
+});
