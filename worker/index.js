@@ -118,8 +118,7 @@ export default {
       if (overRateLimit("options-enroll:"+ip,10)) return json({error:"Try the setup link again in one minute."},429,origin,env,{"Retry-After":"60"});
       const status = await enrollDevice(request,env).catch(() => 503);
       if (status === 204) return new Response(null,{status,headers:{...corsHeaders(origin,env),"Cache-Control":"no-store"}});
-      return json({error:status === 409 ? "This setup link has already approved a browser." :
-        status === 503 ? "Browser setup is temporarily unavailable." : "This setup link is invalid or expired."},status,origin,env);
+      return json({error:status === 503 ? "Quote access is temporarily unavailable." : "This quote link is invalid."},status,origin,env);
     }
     if (request.method !== "GET") {
       return json({ error: "Method not allowed." }, 405, origin, env, { Allow: "GET, PUT, POST, OPTIONS" });

@@ -1,4 +1,4 @@
-import {approvalDeadline, approvalDigest} from './options-approval.js';
+import {approvalDigest} from './options-approval.js';
 
 export const deviceTokenPattern = /^[a-f0-9]{64}$/;
 export const devicePath = '/internal/options-device';
@@ -14,13 +14,13 @@ function registry(env) {
 
 export async function enrollDevice(request, env) {
   if (!env.WORKSPACES) return 503;
-  if (!deviceTokenPattern.test(request.headers.get('X-Options-Approval') ?? '')) return 401;
-  const code = await deviceDigest(request.headers.get('X-Options-Approval'));
-  if (code !== approvalDigest || Date.now() > Date.parse(approvalDeadline)) return 401;
+  const code = request.headers.get('X-Options-Approval');
+  if (!deviceTokenPattern.test(code ?? '') || await deviceDigest(code) !== approvalDigest) return 401;
   const token = request.headers.get('Authorization')?.match(/^Bearer ([a-f0-9]{64})$/)?.[1];
   if (!token) return 400;
+  const device = await deviceDigest(token);
   const response = await registry(env).fetch('https://workspace.internal'+devicePath,{
-    method:'POST',headers:{'X-Device-Digest':await deviceDigest(token),'X-Approval-Digest':code}
+    method:'POST',headers:{'X-Device-Digest':device}
   });
   return response.status;
 }
@@ -43,12 +43,8 @@ export function deviceRegistry(request,storage) {
     const approved = sql.exec('SELECT 1 FROM options_devices WHERE device = ?',device).toArray().length;
     return new Response(null,{status:approved ? 204 : 401});
   }
-  const approval = request.headers.get('X-Approval-Digest');
-  if (request.method !== 'POST' || !deviceTokenPattern.test(approval ?? '')) return new Response(null,{status:400});
-  return storage.transactionSync(() => {
-    const prior = sql.exec('SELECT device FROM options_devices WHERE approval = ?',approval).toArray()[0];
-    if (prior) return new Response(null,{status:prior.device === device ? 204 : 409});
-    sql.exec('INSERT INTO options_devices (approval, device) VALUES (?, ?)',approval,device);
-    return new Response(null,{status:204});
-  });
+  if (request.method !== 'POST') return new Response(null,{status:400});
+  // Keep the existing primary key and previously approved devices.
+  sql.exec('INSERT OR IGNORE INTO options_devices (approval, device) VALUES (?, ?)',device,device);
+  return new Response(null,{status:204});
 }

@@ -83,7 +83,7 @@ The production Cloudflare Worker **was redeployed successfully on November 16, 2
 
 ## Options Builder owner quotes
 
-The public calculator accepts manual premiums. Open the private one-time browser setup link to enable quotes. The Worker stores a hash of the approved browser credential and the browser remembers its quote access. Quotes then load automatically when the Options Builder opens. Clearing site data or switching browser profiles requires a fresh setup link. Alpaca credentials stay on the Worker. Do not share the setup link.
+The public calculator accepts manual premiums. Open the Options Builder quote link on any device. The same link enables quotes automatically and the browser remembers access on later visits. If site data is cleared, reopen the same link. Anyone with the link can use it. Alpaca credentials stay on the Worker.
 
 Select **Real-time OPRA** to check the account's OPRA entitlement, or **Indicative** for the modified-quote feed. The Worker deployment's **Alpaca options entitlement** summary reports whether the configured key returned SPY quotes for each feed and omits prices and credentials. For SPX and XSP, enter the underlying index reference price separately and use listed contracts to verify settlement. The public app uses the production Worker. A local dev server can use a local Worker via Data Center.
 
