@@ -42,12 +42,13 @@ export function mergeWorkspace(base, local, remote) {
   return local;
 }
 
-export function workspaceSync({endpoint, names, read, write, notify, enabled = true}) {
+export function workspaceSync({endpoint, names, read, write, notify, backgroundDocuments = [], enabled = true}) {
   let pending;
   try { pending = new Set(JSON.parse(localStorage.getItem(dirtyKey) || '[]')); }
   catch { pending = new Set(); }
   const baselines = new Map();
   const applied = new Map();
+  const deferred = new Map();
   const mutations = new Map();
   let timer, inFlight, staged = false;
   const persist = () => localStorage.setItem(dirtyKey, JSON.stringify([...pending]));
@@ -63,7 +64,6 @@ export function workspaceSync({endpoint, names, read, write, notify, enabled = t
   }
 
   async function exchange(mode) {
-    let hasUpdates = false;
     const request = (name, options = {}) => {
       const url = new URL(endpoint);
       if (name) url.searchParams.set('document', name);
@@ -73,7 +73,8 @@ export function workspaceSync({endpoint, names, read, write, notify, enabled = t
     if (!index.ok) throw new Error('Workspace server returned '+index.status+'.');
     const versions = await index.json();
     for (const name of names) {
-      if (versions[name] === applied.get(name) && !pending.has(name)) continue;
+      if (!pending.has(name) && (versions[name] === applied.get(name) ||
+        mode !== 'startup' && versions[name] === deferred.get(name))) continue;
       if (!versions[name] && !pending.has(name)) continue;
       const local = await read(name);
       const mutation = mutations.get(name);
@@ -116,11 +117,13 @@ export function workspaceSync({endpoint, names, read, write, notify, enabled = t
           }
         }
         if (mutation === mutations.get(name)) {
-          const willStage = mode !== 'startup' && (!sending || receivedNewer) && !same(local,value);
-          if (willStage) hasUpdates = true;
+          const willStage = mode !== 'startup' && !backgroundDocuments.includes(name) &&
+            (!sending || receivedNewer) && !same(local,value);
+          if (willStage) deferred.set(name,version);
           else {
             if ((!sending || receivedNewer || mode === 'startup') && !same(local,value)) await write(name,value);
             applied.set(name,version);
+            deferred.delete(name);
           }
           baselines.set(name,willStage ? local : value);
           pending.delete(name);
@@ -130,7 +133,7 @@ export function workspaceSync({endpoint, names, read, write, notify, enabled = t
       }
       if (!finished) throw new Error('Another device is updating this workspace. Retrying shortly.');
     }
-    staged = hasUpdates;
+    staged = deferred.size > 0;
   }
 
   function flush(mode = 'background') {

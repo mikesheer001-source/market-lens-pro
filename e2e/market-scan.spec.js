@@ -37,3 +37,29 @@ test('Chart Lab indicator × removes the overlay and allows adding it back', asy
   await page.getByRole('button', {name:'EMA 20', exact:true}).click();
   await expect(page.getByRole('button', {name:'Remove EMA 20', exact:true})).toBeVisible();
 });
+
+test('a full market scan updates results without replacing the search box', async ({page}) => {
+  const stats={price:102,ema200:95,rsi:54,bars:250};
+  let finish;
+  const pending=new Promise(resolve=>{finish=resolve;});
+  let started;
+  const batch=new Promise(resolve=>{started=resolve;});
+  await page.route('**/api/stocks/market**',async route=>{
+    if(!new URL(route.request().url()).searchParams.has('batch'))
+      return route.fulfill({json:{id:'quiet-market',session:'2026-11-16',requested:1,batches:1}});
+    started();
+    await pending;
+    return route.fulfill({json:{checked:1,rows:[{symbol:'TESTETF',latestBar:'2026-11-16',frames:{D:stats,W:stats,M:stats}}]}});
+  });
+  await page.goto('./');
+  await page.getByRole('button',{name:'Scan all U.S. listings'}).click();
+  await batch;
+  const search=page.getByRole('textbox',{name:'Search symbols'});
+  await search.fill('TEST');
+  await search.evaluate(el=>el.dataset.retained='yes');
+  finish();
+  await expect(page.getByRole('button',{name:'View TESTETF'})).toBeVisible();
+  await expect(search).toHaveAttribute('data-retained','yes');
+  await expect(search).toBeFocused();
+  await expect(search).toHaveValue('TEST');
+});

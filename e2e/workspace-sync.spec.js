@@ -1,3 +1,4 @@
+import {gzipSync} from 'node:zlib';
 import {test, expect} from '@playwright/test';
 
 test('two devices on the same URL automatically share chart changes and saved scans', async ({browser, baseURL}) => {
@@ -37,6 +38,24 @@ test('two devices on the same URL automatically share chart changes and saved sc
     await b.locator('.sidebar [data-tab="charts"]').click();
     await expect(b.getByRole('button',{name:'Remove EMA 200',exact:true})).toBeVisible();
     await expect(b.getByRole('button',{name:'Remove EMA 20',exact:true})).toHaveCount(0);
+    await b.locator('#price-chart').evaluate(el=>el.dataset.retained='yes');
+    const marketRequest=b.waitForResponse('**/api/shared-workspace?document=market');
+    const market={id:'success',session:'2026-11-16',next:1,checked:1,requested:1,rows:[]};
+    saved.set('market',{version:1,body:gzipSync(JSON.stringify(market))});
+    await marketRequest;
+    await expect.poll(()=>b.evaluate(async ()=>{
+      const db=await new Promise(resolve=>{
+        const request=indexedDB.open('market-lens-pro-datasets');
+        request.onsuccess=()=>resolve(request.result);
+      });
+      try{
+        return await new Promise(resolve=>{
+          const request=db.transaction('workspace').objectStore('workspace').get('market');
+          request.onsuccess=()=>resolve(request.result?.value?.id);
+        });
+      }finally{db.close();}
+    }),{timeout:10000}).toBe('success');
+    await expect(b.locator('#price-chart')).toHaveAttribute('data-retained','yes');
     await b.locator('.sidebar [data-tab="data"]').click();
     await expect(b.getByRole('heading',{name:'Shared workspace'})).toBeVisible();
     await expect(b.getByRole('button',{name:'Join a workspace'})).toHaveCount(0);

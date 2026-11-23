@@ -61,3 +61,31 @@ test('older intraday requests follow page tokens and deduplicate bars',async ({p
   await expect(page.locator('.chart-data')).toContainText('4 15m bars');
   expect(tokens).toEqual([null,'older-page-2']);
 });
+
+test('a quick scan finishing in Chart Lab leaves the chart mounted and caches the results',async ({page})=>{
+  let finish;
+  const pending=new Promise(resolve=>{finish=resolve;});
+  let started;
+  const fetchStarted=new Promise(resolve=>{started=resolve;});
+  await page.route('**/api/stocks/scan?**',async route=>{
+    started();
+    await pending;
+    return route.fulfill({json:{
+      source:'alpaca',feed:'iex',lookback_days:1825,scan_cache_revision:LIVE_SCAN_CACHE_REVISION,
+      requested:133,returned:1,bars:{SPY:daily}
+    }});
+  });
+  await page.goto('./');
+  await page.locator('.mode-switch [data-action="mode-live"]').click();
+  await fetchStarted;
+  await page.locator('.sidebar [data-tab="charts"]').click();
+  const chart=page.locator('#price-chart');
+  await chart.evaluate(el=>el.dataset.retained='yes');
+  const response=page.waitForResponse('**/api/stocks/scan?**');
+  finish();
+  await response;
+  await expect(chart).toHaveAttribute('data-retained','yes');
+  await page.locator('.sidebar [data-tab="screener"]').click();
+  await expect(page.locator('#scan-status')).toContainText('1/133 symbols loaded');
+  await expect(page.getByRole('button',{name:'View SPY',exact:true})).toBeVisible();
+});

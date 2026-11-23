@@ -1,7 +1,7 @@
 import {getOptionsDevice, requestOptions} from './options-api.js';
 import {loadOptionsMedians, medianHorizons} from './options-median.js';
 import {createOptionsBuilder, optionsApprovalLink} from './options-builder.js';
-import {workspaceSync} from './workspace-sync.js';
+import {mergeWorkspace, workspaceSync} from './workspace-sync.js';
 import {scanMarket} from './market-scan.js';
 import './styles.css';
 import {compilePine, executePine, sweepPine, PineError} from './pine.js';
@@ -56,12 +56,12 @@ async function initApp(){
     draft:'market-lens-pro-pine-draft-v1',memory:'market-lens-pro-symbol-memory-v1',
     signals:'market-lens-pro-signal-history-v1',analysis:'market-lens-pro-analysis-v1',portfolio:'market-lens-pro-portfolio-v1'
   };
-  let syncText='',syncUpdate=false;
+  let syncText='';
   const sharedSettings=({tab,apiBaseUrl,...rest}={})=>rest;
   const syncEnabled=localStorage.getItem('market-lens-sync-disabled')!=='1';
-  let lastWorkspaceInput=0;
   const workspace=workspaceSync({
     endpoint:DEFAULT_ALPACA_WORKER+'/api/shared-workspace',enabled:syncEnabled,names:[...Object.keys(workspaceKeys),'imports','market'],
+    backgroundDocuments:['market','settings','signals'],
     read:async name=>{
       if(name==='imports')return databaseRead('symbols');
       if(name==='market')return (await databaseRead('workspace','market'))?.value;
@@ -72,23 +72,37 @@ async function initApp(){
     },
     write:async (name,value)=>{
       if(name==='imports'){await replaceDatasets(value);return;}
-      if(name==='market'){await storeMarket(value);return;}
-      if(name==='settings'){
-        const {tab,apiBaseUrl}=JSON.parse(localStorage.getItem(workspaceKeys.settings)||'{}');
-        value={...sharedSettings(value),tab,apiBaseUrl};
+      if(name==='market'){
+        await storeMarket(value);
+        if(workspaceReady&&!market.controller&&readMarketSnapshot(value))refreshScreenerResults();
+        return;
       }
+      if(name==='settings'){
+        const prior=JSON.parse(localStorage.getItem(workspaceKeys.settings)||'{}');
+        const {tab,apiBaseUrl}=prior;
+        value={...sharedSettings(value),tab,apiBaseUrl};
+        if(workspaceReady)receiveSharedSettings(prior,value);
+      }
+      if(name==='signals'&&workspaceReady)S.signalHistory=value||{};
       localStorage.setItem(workspaceKeys[name],JSON.stringify(value));
     },
     notify:(message,updated)=>{
-      syncText=message;syncUpdate=updated;
+      syncText=updated?'Workspace updates available on next open':message;
       const status=$('#workspace-sync-status');
-      if(status)status.textContent=message;
+      if(status)status.textContent=syncText;
 
     }
   });
+  let lastSettingsSnapshot;
   const saveLocal=(name,value)=>{
     const key=workspaceKeys[name];
     const previous=localStorage.getItem(key);
+    if(name==='settings'){
+      const current=JSON.parse(value);
+      if(lastSettingsSnapshot&&previous)
+        value=JSON.stringify(mergeWorkspace(lastSettingsSnapshot,current,JSON.parse(previous)));
+      lastSettingsSnapshot=current;
+    }
     if(previous===value)return;
     localStorage.setItem(key,value);
     if(!workspaceReady)return;
@@ -172,6 +186,33 @@ async function initApp(){
     leaderboardValidatedOnly:S.leaderboardValidatedOnly,fitValidatedOnly:S.fitValidatedOnly,apiBaseUrl:S.apiBaseUrl,universeFilter:S.universeFilter,
     chartRecentSymbols:S.chartRecentSymbols,chartRecentFrames:S.chartRecentFrames,hiddenScreenColumns:S.hiddenScreenColumns,variantBaseline:S.variantBaseline,backtestPineDraft:S.backtestPineDraft,
     activeIndicators:S.activeIndicators,chartViews:S.chartViews,backtestSections:S.backtestSections,query:S.query,sort:S.sort,ascending:S.ascending,showOnlyMatches:S.showOnlyMatches,showWatch:S.showWatch,marketShown:market.shown,savedScanId:S.savedScanId,viewingSavedScan:!!S.savedScanView}));}catch{}};
+  function receiveSharedSettings(prior,value){
+    if(JSON.stringify(prior.savedScans)!==JSON.stringify(value.savedScans)){
+      S.savedScans=Array.isArray(value.savedScans)?value.savedScans.slice(0,SCAN_LIMIT):[];
+      const picker=$('[data-option="saved-scan-select"]');
+      if(picker){
+        const selected=picker.value;
+        const options=[['','Choose saved scan'],...S.savedScans.map(item=>[item.id,item.name+' · '+item.rows.length+' rows'])];
+        picker.replaceChildren(...options.map(([id,label])=>new Option(label,id)));
+        if(options.some(([id])=>id===selected))picker.value=selected;
+      }
+    }
+    if(JSON.stringify(prior.chart)!==JSON.stringify(value.chart)){
+      // The mounted chart keeps its own series and viewport. Load shared styling on the next chart mount.
+      let next={...S.chart};
+      for(const key of Object.keys(defaultSettings)){
+        if(JSON.stringify(prior.chart?.[key])!==JSON.stringify(value.chart?.[key]))
+          next[key]=value.chart?.[key]??defaultSettings[key];
+      }
+      S.chart=next;
+    }
+    if(JSON.stringify(prior.watchlists)!==JSON.stringify(value.watchlists)){
+      const lists=restoreWatchlists({...value,watchlistId:S.watchlistId});
+      Object.assign(S,{watch:lists.watch,watchlists:lists.watchlists,watchlistId:lists.watchlistId});
+    }
+    if(JSON.stringify(prior.alerts)!==JSON.stringify(value.alerts))
+      S.alerts=Array.isArray(value.alerts)?value.alerts.slice(0,ALERT_LIMIT):[];
+  }
   function rememberPortfolio(){
     S.portfolioTimestamp=new Date().toISOString();
     try{saveLocal('portfolio',JSON.stringify({
@@ -568,6 +609,41 @@ async function initApp(){
   ):S.sources.get(S.symbol)==='ALPACA'?'<div class="info-strip">Alpaca market data · '+esc(String(S.liveFeed||'IEX').toUpperCase())+' feed · REST refresh on demand. This is not a tick-by-tick WebSocket stream.</div>':S.sources.get(S.symbol)==='SIMULATED'?'<div class="info-strip warning"><strong>Simulated prices.</strong> These are generated examples for testing the interface; no price, return, or trading result represents a real ticker.</div>':(S.data.get(S.symbol)||[]).some(b=>b.approximateOhlc)?'<div class="info-strip warning">The imported CSV has Close-only bars. Open/high/low are approximated. Stop, target, and next-open fills are unreliable until full OHLCV data is imported.</div>':'';
   const market={shown:false,controller:null,checked:0,requested:0,next:0,rows:new Map(),page:0,error:''};
   const marketPageSize=100;
+  function readMarketSnapshot(value){
+    if(!value?.id||!Array.isArray(value.rows))return false;
+    if(market.session>value.session||market.session===value.session&&market.id===value.id&&market.next>=value.next)return false;
+    const {checked,requested,next,session,id,rows}=value;
+    Object.assign(market,{checked,requested,next,session,id,rows:new Map(rows.map(row=>[row.symbol,row]))});
+    return true;
+  }
+  let liveScanPending, liveScanActive, deferredScreenerFocus;
+  const quickScreenerVisible=()=>S.tab==='screener'&&!marketShown()&&!S.savedScanView;
+  function refreshScreenerResults(){
+    if(S.tab!=='screener')return;
+    const current=$('#main');
+    if(!current?.querySelector('.screener-results'))return;
+    const active=document.activeElement;
+    const template=document.createElement('template');
+    template.innerHTML=screenerView();
+    let deferred=false;
+    for(const id of ['screener-intro','screener-facts','screener-metrics','screener-status',
+      'screener-results-content','screener-refresh']){
+      const existing=current.querySelector('#'+id), next=template.content.querySelector('#'+id);
+      if(!existing||!next||existing.innerHTML===next.innerHTML)continue;
+      if(existing.contains(active)){deferred=true;continue;}
+      const scroller=existing.querySelector('.table-wrap');
+      const left=scroller?.scrollLeft;
+      existing.replaceChildren(...next.childNodes);
+      if(left)existing.querySelector('.table-wrap').scrollLeft=left;
+    }
+    if(deferred&&deferredScreenerFocus!==active){
+      deferredScreenerFocus=active;
+      active.addEventListener('blur',()=>{
+        if(deferredScreenerFocus!==active)return;
+        deferredScreenerFocus=null;queueMicrotask(refreshScreenerResults);
+      },{once:true});
+    }
+  }
   const marketShown=()=>market.shown&&!S.savedScanView;
   const marketVisible=()=>[...market.rows.values()].filter(row=>
     S.universeFilter!=='volatility'||VOLATILITY_UNIVERSE.includes(row.symbol));
@@ -590,16 +666,13 @@ async function initApp(){
         const status=$('#market-scan-status');
         if(!status)return;
         status.textContent=message||marketMessage();
-        const focused=document.activeElement;
-        if(!message&&(market.next===1||market.next%5===0)&&
-          !(focused instanceof HTMLInputElement)&&!(focused instanceof HTMLSelectElement))render();
       });
     }catch(error){
       if(!controller.signal.aborted)market.error=error.message;
     }finally{
       market.controller=null;
+      refreshScreenerResults();
       await checkpointMarket();
-      if(S.tab==='screener')render();
     }
   }
   function marketControls(){
@@ -824,7 +897,7 @@ async function initApp(){
         '" title="'+esc((r.signal?.reason||r.signal?.exitReason||'')+' · '+(r.signal?.source||r.source||'unknown'))+
         '">'+esc(r.signal?.status||'—')+'</span><small class="signal-date">'+esc(r.signal?.barDate||'')+'</small></td></tr>';
     }).join('');
-    const scanStatus=S.scan.status==='loading'?'<div id="scan-status" class="info-strip">Scanning '+(S.mode==='live'?'the Alpaca market universe':'the Demo universe')+'…</div>':S.scan.status==='complete'?'<div id="scan-status" class="info-strip" data-scan-source="'+esc(S.scan.source||'DEMO')+'">'+(S.scan.source==='ALPACA'?'Live':'Demo')+' scan complete · '+S.scan.returned+'/'+S.scan.requested+' symbols loaded · '+S.scan.matched+' '+(S.scan.matched===1?'match':'matches')+(S.scan.missing?.length?' · '+S.scan.missing.length+' symbols returned no bars':'')+(S.scan.cached?' · served from 15-minute cache':'')+'</div>':S.scan.status==='fallback'?'<div id="scan-status" class="info-strip warning" data-scan-source="DEMO">Live scan failed; Demo mode restored. '+esc(S.scan.error||'Unknown error')+'</div>':'';
+    const scanStatus=S.scan.status==='loading'?'<div id="scan-status" class="info-strip">Scanning '+(S.mode==='live'?'the Alpaca market universe':'the Demo universe')+'…</div>':S.scan.status==='complete'?'<div id="scan-status" class="info-strip" data-scan-source="'+esc(S.scan.source||'DEMO')+'">'+(S.scan.source==='ALPACA'?'Live':'Demo')+' scan complete · '+S.scan.returned+'/'+S.scan.requested+' symbols loaded · '+S.scan.matched+' '+(S.scan.matched===1?'match':'matches')+(S.scan.missing?.length?' · '+S.scan.missing.length+' symbols returned no bars':'')+(S.scan.cached?' · served from 15-minute cache':'')+'</div>':S.scan.status==='fallback'?'<div id="scan-status" class="info-strip warning" data-scan-source="'+esc(S.scan.source||'DEMO')+'">'+(S.mode==='live'?'Live scan failed; showing the previous scan. ':'Live scan failed; Demo mode restored. ')+esc(S.scan.error||'Unknown error')+'</div>':'';
     const freshness=!full&&S.mode==='live'&&S.scan.status==='complete'?S.freshness:null;
     const stale=freshness?.stale||[];
     const freshnessBadge=freshness?'<div id="scan-freshness" class="freshness-strip '+(freshness.allFresh?'fresh-ok':'fresh-warning')+
@@ -842,14 +915,15 @@ async function initApp(){
     const factBar=(S.mode==='demo'||S.sources.get('VXX')==='ALPACA')?S.data.get(factSymbol)?.at(-1):null;
     const factLabel=S.mode==='live'?'ALPACA VXX DAILY CLOSE':'SIMULATED DAILY CLOSE';
     const fact=factBar?'<div class="market-fact" role="status"><span class="market-fact-label">'+factLabel+'</span><strong>'+esc(factSymbol)+' &nbsp; $'+format(factBar.close)+'</strong><small>Bar date: '+esc(String(factBar.time))+(S.mode==='live'?' · '+esc(String(S.liveFeed).toUpperCase())+' feed · Alpaca daily close, not a last-trade quote':' · simulated, not a market quote')+'</small></div>':S.mode==='live'?'<div class="market-fact warning" role="status">Alpaca VXX daily close unavailable — VXX was not returned by the connected feed.</div>':'';
-    return head('Screener',full?'U.S. exchange listings · Alpaca daily, weekly and monthly filters.':'Filter '+symbols.length+' '+(S.mode==='live'?'Alpaca instruments':'demo or imported instruments')+' with explicit technical conditions.',marketControls()+button('Open Chart Lab','view-charts','small')+
-        (reviewableMatches(rows).length?button('Review matches','screener-chart','primary'):''))+ (full?'':fact)+activeAlertBanner()+activeSnapshotBanner()+
-      '<div class="metrics">'+metric(S.savedScanView?'Saved rows':'Symbols loaded',S.savedScanView?rows.length:all.length,S.savedScanView?'Historical snapshot':S.mode==='live'?'Alpaca universe':'Demo and imported data')+metric('Matching filters',matched,'All visible symbols')+metric('Visible results',rows.length,'Search and match filter')+metric('Active conditions',S.rules.length,'AND logic; all must pass') +'</div>'+(full?'<p id="market-scan-status" class="info-strip" role="status">'+esc(marketMessage())+'</p><p class="section-note">Covers active U.S. exchange listings in Alpaca’s directory. Thinly traded tickers may have older or missing bars. Two-hour filters and strategy signals are available in the quick screener.</p>':scanStatus)+freshnessBadge+
+    return '<div id="screener-intro">'+head('Screener',full?'U.S. exchange listings · Alpaca daily, weekly and monthly filters.':'Filter '+symbols.length+' '+(S.mode==='live'?'Alpaca instruments':'demo or imported instruments')+' with explicit technical conditions.',marketControls()+button('Open Chart Lab','view-charts','small')+
+        (reviewableMatches(rows).length?button('Review matches','screener-chart','primary'):''))+'</div>'+
+      '<div id="screener-facts">'+(full?'':fact)+activeAlertBanner()+activeSnapshotBanner()+'</div>'+
+      '<div id="screener-metrics" class="metrics">'+metric(S.savedScanView?'Saved rows':'Symbols loaded',S.savedScanView?rows.length:all.length,S.savedScanView?'Historical snapshot':S.mode==='live'?'Alpaca universe':'Demo and imported data')+metric('Matching filters',matched,'All visible symbols')+metric('Visible results',rows.length,'Search and match filter')+metric('Active conditions',S.rules.length,'AND logic; all must pass') +'</div><div id="screener-status">'+(full?'<p id="market-scan-status" class="info-strip" role="status">'+esc(marketMessage())+'</p><p class="section-note">Covers active U.S. exchange listings in Alpaca’s directory. Thinly traded tickers may have older or missing bars. Two-hour filters and strategy signals are available in the quick screener.</p>':scanStatus)+freshnessBadge+'</div>'+
       '<div class="panel"><div class="panel-header"><h2>Screen rules</h2><div class="flex"><label class="control">Preset '+select([['custom','Custom rules'],['trend','Trend pullback'],['original','Original strict W/D/2H'],['oversold','RSI oversold'],['momentum','Momentum'],['volatility','VXX / Volatility'],['all','Show all']],presetKey,'data-option="preset"')+'</label>'+button('+ Add rule','add-rule')+'</div></div><div class="panel-body"><div class="filters">'+(rules||'<span class="muted">No filters — showing all instruments.</span>')+'</div><div class="section-note" style="margin-top:12px">“Original strict” reproduces the weekly EMA200 and weekly/daily/two-hour RSI filter logic. RSI 5D is calculated from daily closes; daily bars cannot reconstruct true two-hour data. The VXX / Volatility preset narrows the universe to VXX, UVXY, SVXY, VIXY, VIXM, VXZ, SVIX, UVIX, SVOL and ZVOL, using daily RSI, 252-session drawdown and % versus daily EMA200. Demo mode uses the clearly labeled synthetic DEMO-VXX proxy.</div></div></div>'+
-      '<div class="panel"><div class="panel-header"><h2>Market results</h2><div class="flex">'+(full?'':button(S.mode==='live'?'Refresh live scan':'Scan demo universe','scan-universe','small primary'))+button('Export screener CSV','export-screener','small')+button('Columns','screener-columns','small')+
+      '<div class="panel"><div class="panel-header"><h2>Market results</h2><div class="flex"><span id="screener-refresh">'+(full?'':button(S.scan.status==='loading'?'Scanning…':S.mode==='live'?'Refresh live scan':'Scan demo universe','scan-universe','small primary'))+'</span>'+button('Export screener CSV','export-screener','small')+button('Columns','screener-columns','small')+
       (full?'':'<label class="control">Strategy '+selectStrategy+'</label>'+
       '<label class="inline-check"><input type="checkbox" data-option="signals-only" '+(S.signalsOnly?'checked':'')+' '+(S.signalSelection==='none'?'disabled':'')+'/>Signals only (LONG)</label>')+
-      '<input class="textinput" aria-label="Search symbols" data-input="search" placeholder="Search symbol…" value="'+esc(S.query)+'"/><label class="inline-check"><input type="checkbox" data-option="matches" '+(S.showOnlyMatches?'checked':'')+'/>Matches only</label><label class="inline-check"><input type="checkbox" data-option="watchonly" '+(S.showWatch?'checked':'')+'/>Watchlist</label><label class="control">Sort '+select([['symbol','Symbol'],['price','Price'],['rsi','RSI'],['ret20','20D return'],['ema','Daily % EMA'],['drawdown','Drawdown'],['signal','Strategy signal'],['latest','Latest bar']],S.sort,'data-option="sort"')+'</label>'+button(S.ascending?'↑':'↓','sort-order','small')+'</div></div><div class="table-wrap"><table class="data-table screener-results" data-hidden-columns="'+S.hiddenScreenColumns.join(' ')+'"><thead><tr><th scope="col">Symbol</th><th>Close</th><th>RSI D</th><th>RSI W</th><th title="5-period RSI calculated from daily closes; daily OHLC cannot reconstruct true 2-hour bars">RSI 5D</th><th title="Price as percentage difference from 200-period EMA of DAILY closes">% vs D EMA200</th><th>20D return</th><th>DD</th><th>Bars</th><th>Result</th><th>Latest bar</th><th title="Percentage difference from the 200-period EMA of WEEKLY closes; needs 200 real weekly bars">% vs W EMA200</th><th title="Current position based on completed daily bars and next-open fills. EXIT can mean closed this bar or pending exit. Not a live order.">Signal · '+esc(selectedStrategy?.name||'None')+'</th></tr></thead><tbody>'+table+'</tbody></table>'+(rows.length?'':'<div class="empty">No matching symbols. Change a filter or import more price history.</div>')+'</div>'+pagination+
+      '<input class="textinput" aria-label="Search symbols" data-input="search" placeholder="Search symbol…" value="'+esc(S.query)+'"/><label class="inline-check"><input type="checkbox" data-option="matches" '+(S.showOnlyMatches?'checked':'')+'/>Matches only</label><label class="inline-check"><input type="checkbox" data-option="watchonly" '+(S.showWatch?'checked':'')+'/>Watchlist</label><label class="control">Sort '+select([['symbol','Symbol'],['price','Price'],['rsi','RSI'],['ret20','20D return'],['ema','Daily % EMA'],['drawdown','Drawdown'],['signal','Strategy signal'],['latest','Latest bar']],S.sort,'data-option="sort"')+'</label>'+button(S.ascending?'↑':'↓','sort-order','small')+'</div></div><div id="screener-results-content"><div class="table-wrap"><table class="data-table screener-results" data-hidden-columns="'+S.hiddenScreenColumns.join(' ')+'"><thead><tr><th scope="col">Symbol</th><th>Close</th><th>RSI D</th><th>RSI W</th><th title="5-period RSI calculated from daily closes; daily OHLC cannot reconstruct true 2-hour bars">RSI 5D</th><th title="Price as percentage difference from 200-period EMA of DAILY closes">% vs D EMA200</th><th>20D return</th><th>DD</th><th>Bars</th><th>Result</th><th>Latest bar</th><th title="Percentage difference from the 200-period EMA of WEEKLY closes; needs 200 real weekly bars">% vs W EMA200</th><th title="Current position based on completed daily bars and next-open fills. EXIT can mean closed this bar or pending exit. Not a live order.">Signal · '+esc(selectedStrategy?.name||'None')+'</th></tr></thead><tbody>'+table+'</tbody></table>'+(rows.length?'':'<div class="empty">No matching symbols. Change a filter or import more price history.</div>')+'</div>'+pagination+'</div>'+
       (full?'':'<p class="section-note">Signal: LONG = strategy currently holds a long at the latest bar close; EXIT = it closed on that bar or has a close order for next open; FLAT = no long. Signals use the same stop/fee/slippage and next-open rules as Backtest, long-side only. Bars and dates are from '+(S.mode==='live'?'Alpaca '+esc(String(S.liveFeed).toUpperCase()):'clearly labeled Demo/CSV')+'. '+
       (S.signalErrors.length?S.signalErrors.length+' unavailable signals: '+esc(S.signalErrors.slice(0,6).map(e=>e.symbol+': '+e.reason).join('; '))+'.':'No live trades or background monitoring.')+
       '</p>')+'</div><dialog id="screener-dialog" class="chart-dialog" aria-labelledby="screener-dialog-title"></dialog>'+workspaceControls();
@@ -1737,6 +1811,7 @@ async function initApp(){
     else{S.tab='options';render();}
   });
   function render(){
+    if(liveScanPending&&quickScreenerVisible())applyPendingLiveScan();
     const optionsHost=$('#options-builder');
     if(S.tab!=='options' && optionsHost)optionsBuilder.unmount();
     refreshLeaderboardIfRangeChanged();
@@ -2077,7 +2152,8 @@ async function initApp(){
   async function fetchLiveUniverse(options={}){
     let base=canonicalWorkerBase(S.apiBaseUrl);
     if(!base.startsWith('https://'))throw new Error('Enter the Cloudflare Worker URL in Data Center first.');
-    clearSavedScanView();S.scan={status:'loading',source:'ALPACA'};S.tab=options.restoreTab||'screener';render();
+    S.scan={status:'loading',source:'ALPACA'};
+    if(quickScreenerVisible())refreshScreenerResults();
     const scanStartedAt=performance.now();
     const requestHistory=async (workerBase)=>{
       const response=await fetch(liveScanUrl(workerBase,S.liveFeed||'iex'),{
@@ -2094,7 +2170,6 @@ async function initApp(){
         fallback.history.reason);
       ({response,payload,history}=fallback);
       base=DEFAULT_ALPACA_WORKER;
-      S.apiBaseUrl=DEFAULT_ALPACA_WORKER;
       recovered=true;
     }
     if(!history.ok)throw new Error('Stale or truncated live daily history rejected. '+
@@ -2105,21 +2180,39 @@ async function initApp(){
       if(liveBars.length)parsed.push([symbol,liveBars]);
     }
     if(!parsed.length)throw new Error('Alpaca returned no daily bars for the bundled universe. Check the feed and subscription.');
-    if(S.sources.get(S.symbol)!=='ALPACA')S.lastDemoSymbol=S.symbol;
-    for(const [symbol,source] of S.sources)if(source==='ALPACA'){S.sources.delete(symbol);S.data.delete(symbol);}
+    const remembered=options.restoreSymbol;
+    if(options.restoreTab&&remembered&&!parsed.some(([symbol])=>symbol===remembered)&&
+      (market.rows.has(remembered)||saved.lastLiveSymbol===remembered)){
+      try{
+        const url=new URL('/api/stocks/bars',base);
+        url.searchParams.set('symbol',remembered);
+        const extra=await fetch(url);
+        if(extra.ok){
+          const bars=alpacaBars((await extra.json()).bars,'1Day');
+          if(bars.length)parsed.push([remembered,bars]);
+        }
+      }catch{}
+    }
+    return {base,response,payload,history,recovered,parsed,durationMs:performance.now()-scanStartedAt};
+  }
+  function applyLiveUniverse(result,options){
+    const {base,response,payload,history,recovered,parsed,durationMs}=result;
+    if(recovered)S.apiBaseUrl=base;
+    const selected=S.symbol;
+    if(S.sources.get(selected)!=='ALPACA')S.lastDemoSymbol=selected;
+    for(const [symbol,source] of S.sources)if(source==='ALPACA'&&symbol!==selected){S.sources.delete(symbol);S.data.delete(symbol);}
     const loaded=[];
     for(const [symbol,liveBars] of parsed){S.data.set(symbol,liveBars);S.sources.set(symbol,'ALPACA');loaded.push(symbol);}
     S.mode='live';S.liveFeed=payload.feed||'iex';
     const visible=loaded.filter(isVisibleSymbol);
-    const remembered=options.restoreSymbol||S.lastBacktestSymbol||S.lastLiveSymbol||S.symbol;
-    if(options.restoreTab&&remembered&&!loaded.includes(remembered)&&
-      (market.rows.has(remembered)||saved.lastLiveSymbol===remembered)&&await loadMarketChart(remembered)){
-      loaded.push(remembered);
-    }
-    const target=loaded.includes(remembered)?remembered:
-      loaded.includes(S.lastLiveSymbol)?S.lastLiveSymbol:loaded.includes(S.symbol)?S.symbol:visible[0]||loaded[0];
+    const remembered=S.sources.get(selected)==='ALPACA'?selected:options.restoreSymbol||S.lastBacktestSymbol||S.lastLiveSymbol;
+    const target=remembered&&S.sources.get(remembered)==='ALPACA'?remembered:visible[0]||loaded[0];
     S.preferredMode='live';
-    restoreSymbolState(target);
+    if(target!==selected){
+      const timeframe=S.chart.tf;
+      restoreSymbolState(target);
+      if(options.restoreTab==='charts')S.chart.tf=timeframe;
+    }
     const matched=visible.filter(symbol=>screenSymbol(S.data.get(symbol),S.rules).pass).length;
     const expected=payload.freshness?.expected||expectedNyseBarDate(new Date());
     const allBars=Object.fromEntries(LIVE_UNIVERSE.map(sym=>[sym,S.sources.get(sym)==='ALPACA'?S.data.get(sym):[]]));
@@ -2128,26 +2221,56 @@ async function initApp(){
     S.scan={status:'complete',source:'ALPACA',requested:payload.requested||LIVE_UNIVERSE.length,returned:loaded.length,
       matched,missing:payload.missing||[],cached:response.headers.get('X-Scan-Cache')==='HIT',
       retry:payload.retry||null,at:new Date().toISOString(),
-      durationMs:performance.now()-scanStartedAt,workerDurationMs:payload.scan_duration_ms??null,
+      durationMs,workerDurationMs:payload.scan_duration_ms??null,
       history:{...history,baseUrl:base,revision:payload.scan_cache_revision||'unreported',
         recovered}};
     evaluateScreenerSignals(true);
-    evaluateLocalAlerts();S.tab=options.restoreTab||'screener';
-    render();
-    notice((recovered?'Saved Worker returned old history; restored the official Worker. ':'')+
-      'Live scan complete: '+matched+' '+(matched===1?'match':'matches')+' across '+
-      visible.length+' visible symbols ('+loaded.length+'/'+S.scan.requested+' returned).');
+    evaluateLocalAlerts();
+    saveSettings();
+  }
+  function applyPendingLiveScan(){
+    const pending=liveScanPending;
+    liveScanPending=null;
+    if(pending.error){
+      if(S.mode!=='live'){
+        S.mode='demo';S.preferredMode=pending.options.restoreTab?'live':'demo';
+      }
+      S.scan={status:'fallback',source:S.mode==='live'?'ALPACA':'DEMO',error:pending.error};
+      saveSettings();
+    }else applyLiveUniverse(pending.result,pending.options);
+  }
+  function refreshMarketMode(){
+    const header=$('.topbar .top-actions');
+    if(!header)return;
+    const live=S.mode==='live';
+    header.querySelector('.status').lastChild.textContent=live?'Alpaca data':'Demo data';
+    header.querySelector('.source-badge').textContent=status();
+    for(const mode of ['demo','live']){
+      const control=header.querySelector('[data-action="mode-'+mode+'"]');
+      control.classList.toggle('selected',S.mode===mode);
+      control.setAttribute('aria-pressed',String(S.mode===mode));
+    }
   }
   async function switchToLive(options={}){
+    if(liveScanActive)return liveScanActive;
+    liveScanPending=null;
+    const initialMain=$('#main');
     S.preferredMode='live';
-    try{await fetchLiveUniverse(options);}
-    catch(err){
-      S.mode='demo';S.preferredMode=options.restoreTab?'live':'demo';
-      if(S.sources.get(S.symbol)==='ALPACA')S.symbol=S.lastDemoSymbol&&S.sources.get(S.lastDemoSymbol)!=='ALPACA'?S.lastDemoSymbol:'DEMO-SPY';
-      S.scan={status:'fallback',source:'DEMO',error:err.message};
-      S.result=null;S.sweep=null;S.tab='screener';render();
-      notice('Live scan failed; switched back to Demo mode. '+err.message);
-    }
+    liveScanActive=(async()=>{
+      let pending;
+      try{pending={result:await fetchLiveUniverse(options),options};}
+      catch(err){pending={error:err.message,options};}
+      if(S.preferredMode!=='live')return;
+      liveScanPending=pending;
+      if(quickScreenerVisible()){
+        applyPendingLiveScan();refreshMarketMode();refreshScreenerResults();
+      }else if(options.restoreTab&&initialMain===$('#main')){
+        // Hydrate a restored view only if the user has not navigated during startup.
+        applyPendingLiveScan();render();
+      }
+    })();
+    try{await liveScanActive;}
+    finally{liveScanActive=null;}
   }
   function loadPineSource(code,name,id=null){
     S.scriptCode=code;S.scriptName=name;S.scriptId=id;S.scriptSettings={};S.scriptOutput=null;
@@ -2505,9 +2628,9 @@ async function initApp(){
     },
     'pine-clear-plots':()=>{S.activeIndicators=[];S.scriptOutput='Removed all custom indicator plots from Chart Lab.';render();},
     import:()=>$('#csv-file')?.click(),
-    'mode-demo':()=>{market.shown=false;market.controller?.abort();clearSavedScanView();S.mode='demo';S.preferredMode='demo';if(S.sources.get(S.symbol)==='ALPACA')S.symbol=S.lastDemoSymbol&&S.sources.get(S.lastDemoSymbol)!=='ALPACA'?S.lastDemoSymbol:'DEMO-SPY';restoreSymbolState(S.symbol);S.scan={status:'idle'};render();},
-    'mode-live':()=>{market.shown=false;market.controller?.abort();return switchToLive({restoreSymbol:S.lastLiveSymbol});},
-    'scan-universe':()=>{clearSavedScanView();return S.mode==='live'?switchToLive():runDemoScan();},
+    'mode-demo':()=>{liveScanPending=null;market.shown=false;market.controller?.abort();clearSavedScanView();S.mode='demo';S.preferredMode='demo';if(S.sources.get(S.symbol)==='ALPACA')S.symbol=S.lastDemoSymbol&&S.sources.get(S.lastDemoSymbol)!=='ALPACA'?S.lastDemoSymbol:'DEMO-SPY';restoreSymbolState(S.symbol);S.scan={status:'idle'};render();},
+    'mode-live':()=>{market.shown=false;market.controller?.abort();clearSavedScanView();return switchToLive({restoreSymbol:S.lastLiveSymbol});},
+    'scan-universe':()=>{if(liveScanActive)return;clearSavedScanView();return S.mode==='live'?switchToLive():runDemoScan();},
     'test-live':()=>testLiveBackend().catch(err=>notice('Backend test failed: '+err.message)),
     'view-charts':()=>{S.tab='charts';render();},
     'refresh-intraday':()=>{if(S.mode==='live')void loadLiveIntraday(S.symbol,true).catch(()=>{});
@@ -2824,33 +2947,26 @@ async function initApp(){
   document.addEventListener('drop',async ev=>{const drop=ev.target.closest('#dropzone');if(drop){ev.preventDefault();drop.classList.remove('dragging');await importFiles([...ev.dataTransfer.files].filter(f=>f.name.toLowerCase().endsWith('.csv')));}});
   try{
     const existing=(await databaseRead('workspace','market'))?.value;
-    if(existing?.id)Object.assign(market,{...existing,shown:!!saved.marketShown,rows:new Map(existing.rows.map(row=>[row.symbol,row]))});
+    if(readMarketSnapshot(existing))market.shown=!!saved.marketShown;
   }catch{}
   if(S.signalSelection!=='none')evaluateScreenerSignals(false);
   render();
+  const initialView=$('#main');
   await loadStored();
-  if(startupPrefs.mode==='live'){
+  if(startupPrefs.mode==='live'&&S.preferredMode==='live'){
     // Restore Live by rehydrating the real market scan, never relabel Demo prices.
-    const destination=startupPrefs.tab;
+    const destination=initialView===$('#main')?startupPrefs.tab:null;
     await switchToLive({restoreTab:destination,restoreSymbol:destination==='charts'?(startupPrefs.lastSymbol||startupPrefs.selectedSymbol):startupPrefs.selectedSymbol});
-  }else{
+  }else if(initialView===$('#main')){
     const selected=startupPrefs.tab==='charts'?(startupPrefs.lastSymbol||startupPrefs.selectedSymbol):startupPrefs.selectedSymbol;
     if(selected&&S.data.has(selected))restoreSymbolState(selected);
+    if(S.tab==='charts'&&saved.chart?.tf)S.chart.tf=saved.chart.tf;
     render();
   }
-  if(S.tab==='charts'&&saved.chart?.tf&&S.chart.tf!==saved.chart.tf){S.chart.tf=saved.chart.tf;render();}
   workspaceReady=true;
   if(syncEnabled){
-    for(const event of ['pointerdown','wheel','keydown','input']){
-      document.addEventListener(event,()=>{lastWorkspaceInput=performance.now();},{passive:true});
-    }
-    async function refreshSharedWorkspace(){
-      if(document.visibilityState!=='visible')return;
-      await workspace.flush();
-      if(!syncUpdate||performance.now()-lastWorkspaceInput<4000||$('dialog[open]')||
-        market.controller||S.analysisLoading||S.portfolioLoading||
-        document.activeElement?.matches('input, textarea, select'))return;
-      if(await workspace.flush('startup'))location.reload();
+    function refreshSharedWorkspace(){
+      if(document.visibilityState==='visible')return workspace.flush();
     }
     setInterval(()=>void refreshSharedWorkspace(),8000);
     window.addEventListener('online',()=>void refreshSharedWorkspace());
