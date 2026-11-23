@@ -656,5 +656,4 @@ tr[data-vol-symbol] td:nth-child(3){min-width:138px}
 .chart-options-median-level { white-space:nowrap; pointer-events:auto; }
 .chart-options-median-level strong { color:var(--level-color); }
 .chart-median-note { padding:0 12px; color:var(--muted); font-size:12px; }
-.chart-other-indicators { border-top:1px solid var(--border); }
-.chart-other-indicators summary { padding:10px 12px; color:var(--muted); cursor:pointer; }
+.chart-indicator-choices>button .chart-indicator-added { font-size:11px; color:var(--muted); }

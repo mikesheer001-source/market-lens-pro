@@ -72,7 +72,6 @@ test('Chart Lab adds and removes indicators and persists their independent setti
   await expect(page.locator('[data-indicator-row^="ma-"]')).toContainText('EMA 34');
 
   await picker.click();
-  await page.getByText('Other indicators',{exact:true}).click();
   await page.getByRole('button',{name:'MACD 12/26/9',exact:true}).click();
   await expect(page.locator('[data-indicator-row="macd"]')).toContainText('MACD 12/26/9');
   await page.getByRole('button',{name:'Settings for MACD 12/26/9'}).click();

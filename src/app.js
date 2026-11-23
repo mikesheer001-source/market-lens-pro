@@ -1024,7 +1024,7 @@ async function initApp(){
   }
   function openIndicatorDialog(key){
     const dialog=$('#chart-indicator-dialog');
-    if(!dialog||dialog.open)return;
+    if(!dialog||dialog.open&&!key)return;
     const average=movingAverages(S.chart).find(item=>item.id===key);
     const customAverage=average&&key.startsWith('ma-');
     const median=key==='optionsMedian';
@@ -1044,18 +1044,20 @@ async function initApp(){
         (median?button('Refresh levels','options-median-refresh','small'):'')+
         '<button type="submit" class="chart-dialog-apply">Apply</button></div></form>';
     }else{
-      const choose=(action,id,label,color)=>
+      const choose=(action,id,label,color,active=false)=>
         '<button type="button" data-action="'+action+'" data-indicator-key="'+id+'" style="--indicator-color:'+color+'">'+
-        '<span>'+esc(label)+'</span><span aria-hidden="true">+</span></button>';
-      const choices=INDICATOR_ORDER.filter(id=>!isAveragePreset(id)&&!S.chart[id]).map(id=>
-        choose('indicator-add',id,indicatorLabel(id,S.chart),indicatorColors[id])).join('');
-      const optionsChoice=S.chart.optionsMedian?'':choose('options-median-toggle','optionsMedian','Options 50/50 levels','#7bdac6');
+        '<span>'+esc(label)+'</span><span aria-hidden="true"'+(active?' class="chart-indicator-added"':'')+'>'+
+        (active?'On chart':'+')+'</span></button>';
+      const choices=INDICATOR_ORDER.filter(id=>!isAveragePreset(id)).map(id=>
+        choose(S.chart[id]?'indicator-settings':'indicator-add',id,indicatorLabel(id,S.chart),indicatorColors[id],S.chart[id])).join('');
+      const optionsChoice=choose(S.chart.optionsMedian?'indicator-settings':'options-median-toggle',
+        'optionsMedian','Options 50/50 levels','#7bdac6',S.chart.optionsMedian);
       const averageChoices=choose('indicator-add-average','ema','EMA','#e9bd68')+
         choose('indicator-add-average','sma','SMA','#8bb9eb');
-      dialog.innerHTML=header+'<div class="chart-indicator-choices">'+averageChoices+'</div>'+
-        (choices+optionsChoice?'<details class="chart-other-indicators"><summary>Other indicators</summary><div class="chart-indicator-choices">'+choices+optionsChoice+'</div></details>':'');
+      dialog.innerHTML=header+'<div class="chart-indicator-choices">'+averageChoices+optionsChoice+choices+'</div>';
     }
-    dialog.showModal();
+    if(!dialog.open)dialog.showModal();
+    else dialog.querySelector('input')?.focus();
   }
   function applyIndicatorChange(key,changes){
     $('#chart-indicator-dialog')?.close();

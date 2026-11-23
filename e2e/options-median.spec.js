@@ -37,7 +37,6 @@ test('Chart Lab loads six-month and one-year options medians and can hide them',
   await expect(page.locator('#scan-status')).toContainText('1/133 symbols loaded');
   await page.locator('.sidebar [data-tab="charts"]').click();
   await page.getByRole('button',{name:'New indicator'}).click();
-  await page.getByText('Other indicators',{exact:true}).click();
   await page.getByRole('button',{name:'Options 50/50 levels'}).click();
   const result=page.locator('#chart-options-median-result');
   await expect(result.locator('.chart-options-median-level').first()).toHaveAttribute('title',new RegExp(expirations[0]));
@@ -47,7 +46,12 @@ test('Chart Lab loads six-month and one-year options medians and can hide them',
   expect(requested.sort()).toEqual(expirations);
   await expect(page.locator('#chart-indicator-legend').locator(result)).toBeVisible();
   await expect(page.getByLabel('Rate assumption (%)')).toHaveCount(0);
-  await page.getByRole('button',{name:'Settings for Options 50/50'}).click();
+  await page.getByRole('button',{name:'New indicator'}).click();
+  const picker=page.getByRole('dialog');
+  await expect(picker.getByText('Other indicators',{exact:true})).toHaveCount(0);
+  const enabled=picker.getByRole('button',{name:'Options 50/50 levels',exact:true});
+  await expect(enabled).toContainText('On chart');
+  await enabled.click();
   await expect(page.getByLabel('Rate assumption (%)')).toHaveValue('4');
   await page.getByLabel('Rate assumption (%)').fill('5');
   await page.getByRole('button',{name:'Apply',exact:true}).click();
