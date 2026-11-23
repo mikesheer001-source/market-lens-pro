@@ -50,7 +50,7 @@ async function initApp(){
     volatility:[{metric:'rsi',tf:'D',op:'<',value:60},{metric:'drawdown',tf:'D',op:'<',value:-5},{metric:'emaDist',tf:'D',op:'<',value:0}],
     all:[]
   };
-  const defaultSettings={tf:'D',style:'candles',log:false,ema20:true,ema50:false,ema200:true,sma20:false,movingAverages:[],bollinger:false,volume:true,rsi:true,macd:false,rsiPeriod:14,bollPeriod:20,optionsMedian:false,optionsMedianRate:4,ema20Len:20,ema50Len:50,ema200Len:200,sma20Len:20,volumeHeight:17,macdFast:12,macdSlow:26,macdSignal:9,lines:{}};
+  const defaultSettings={tf:'D',style:'candles',log:false,ema20:true,ema50:false,ema200:true,sma20:false,movingAverages:[],indicatorCopies:[],bollinger:false,volume:true,rsi:true,macd:false,rsiPeriod:14,bollPeriod:20,optionsMedian:false,optionsMedianRate:4,ema20Len:20,ema50Len:50,ema200Len:200,sma20Len:20,volumeHeight:17,macdFast:12,macdSlow:26,macdSignal:9,lines:{}};
   const defaultBacktest={strategy:'ema-cross',side:'long',borrowAnnualPct:0,fast:20,slow:100,rsiPeriod:14,buyLevel:30,sellLevel:65,period:20,multiplier:2,capital:10000,allocation:100,feeBps:1,slipBps:2,stopPct:0,targetPct:0};
   const workspaceKeys={
     settings:'market-lens-pro-settings',library:'market-lens-pro-pine-library-v1',
@@ -572,8 +572,8 @@ async function initApp(){
 
   const status=()=>S.mode==='live'?'ALPACA LIVE · '+String(S.liveFeed||'iex').toUpperCase():S.sources.get(S.symbol)==='SIMULATED'?'SIMULATED SAMPLE':S.sources.get(S.symbol)==='IMPORTED'?'IMPORTED OHLCV':'NO DATA';
   const isVisibleSymbol=symbol=>modeSymbol(symbol)&&(S.universeFilter!=='volatility'||VOLATILITY_UNIVERSE.includes(symbol));
-  let medianUnmount;
-  function destroyCharts(){medianUnmount?.();medianUnmount=null;if(chart){chart.remove();chart=null;}if(equityChart){equityChart.remove();equityChart=null;}if(leaderboardChart){leaderboardChart.remove();leaderboardChart=null;}if(tradeChart){tradeChart.remove();tradeChart=null;}}
+  const medianUnmount=[];
+  function destroyCharts(){for(const stop of medianUnmount.splice(0))stop();if(chart){chart.remove();chart=null;}if(equityChart){equityChart.remove();equityChart=null;}if(leaderboardChart){leaderboardChart.remove();leaderboardChart=null;}if(tradeChart){tradeChart.remove();tradeChart=null;}}
   function shell(){
     const links=keys=>keys.map(key=>'<button class="nav-btn '+(S.tab===key?'active':'')+'" data-tab="'+key+
       '"'+(S.tab===key?' aria-current="page"':'')+'><span class="nav-icon" aria-hidden="true">'+tabIcons[key]+'</span>'+tabNames[key]+'</button>').join('');
@@ -993,6 +993,14 @@ async function initApp(){
   }
   const movingAverageLabel=average=>average.type.toUpperCase()+' '+average.length;
   const isAveragePreset=key=>key.startsWith('ema')||key.startsWith('sma');
+  const repeatableIndicators=[...INDICATOR_ORDER.filter(key=>!isAveragePreset(key)),'optionsMedian'];
+  const indicatorCopies=()=>Array.isArray(S.chart.indicatorCopies)?S.chart.indicatorCopies.filter(copy=>
+    /^ind-[a-f0-9-]+$/.test(copy?.id??'')&&repeatableIndicators.includes(copy.type)):[];
+  const indicatorInstances=()=>[
+    ...repeatableIndicators.filter(type=>S.chart[type]).map(type=>({id:type,type,settings:S.chart})),
+    ...indicatorCopies().map(copy=>({...copy,settings:{...defaultSettings,...copy.settings,[copy.type]:true}}))
+  ];
+  const instanceLabel=({type,settings})=>type==='optionsMedian'?'Options 50/50':indicatorLabel(type,settings);
   function chartIndicatorLegend(b){
     const averages=movingAverages(S.chart);
     const readings=new Map(activeIndicatorReadings(b,S.chart).map(row=>[row.key,row]));
@@ -1001,13 +1009,15 @@ async function initApp(){
       const value=readings.has(average.id)?readings.get(average.id).value:(average.type==='ema'?ema:sma)(closes,average.length).at(-1);
       return {key:average.id,label:movingAverageLabel(average),color:average.color,value};
     });
-    for(const key of INDICATOR_ORDER.filter(key=>!isAveragePreset(key)&&S.chart[key])){
-      visible.push({key,label:indicatorLabel(key,S.chart),color:indicatorColors[key],...readings.get(key)});
+    for(const instance of indicatorInstances()){
+      const {id:key,type,settings}=instance;
+      const reading=key===type?readings.get(type):activeIndicatorReadings(b,settings).find(row=>row.key===type);
+      visible.push({...reading,key,type,label:instanceLabel(instance),color:indicatorColors[type]||'#7bdac6'});
     }
-    if(S.chart.optionsMedian)visible.push({key:'optionsMedian',label:'Options 50/50',color:'#7bdac6'});
-    const rows=visible.map(({key,label,color,value,details})=>{
-      const results=key==='optionsMedian'?'<span id="chart-options-median-result" class="chart-indicator-value" role="status"></span>':
-        '<span class="chart-indicator-value">'+indicatorValue(key,value,details)+'</span>';
+    const rows=visible.map(({key,type=key,label,color,value,details})=>{
+      const results=type==='optionsMedian'?'<span '+(key==='optionsMedian'?'id="chart-options-median-result" ':'')+
+        'class="chart-options-median-result chart-indicator-value" role="status"></span>':
+        '<span class="chart-indicator-value">'+indicatorValue(type,value,details)+'</span>';
       return '<div class="chart-indicator-row" data-indicator-row="'+key+'" style="--indicator-color:'+color+'">'+
         '<span class="chart-indicator-name">'+esc(label)+'</span>'+
         '<button type="button" class="chart-icon chart-indicator-gear" data-action="indicator-settings" data-indicator-key="'+key+
@@ -1027,34 +1037,37 @@ async function initApp(){
     if(!dialog||dialog.open&&!key)return;
     const average=movingAverages(S.chart).find(item=>item.id===key);
     const customAverage=average&&key.startsWith('ma-');
-    const median=key==='optionsMedian';
-    const title=key?(average?movingAverageLabel(average):median?'Options 50/50':indicatorLabel(key,S.chart))+' settings':'New indicator';
+    const instance=indicatorInstances().find(item=>item.id===key);
+    const type=instance?.type??key;
+    const median=type==='optionsMedian';
+    const title=key?(average?movingAverageLabel(average):instanceLabel(instance))+' settings':'New indicator';
     const header=dialogHeader(title,'chart-dialog-title');
     if(key){
       const fields=customAverage?[['length','Length',2,500]]:median?
-        [['optionsMedianRate','Rate assumption (%)',-10,25,0.1]]:indicatorInputs(key);
+        [['optionsMedianRate','Rate assumption (%)',-10,25,0.1]]:indicatorInputs(type);
       const inputs=fields.map(([field,label,min,max,step=1])=>
         '<label for="chart-indicator-'+field+'">'+esc(average?'Length':label)+
         '<input id="chart-indicator-'+field+'" type="number" name="'+field+'" data-indicator-field="'+field+'" min="'+min+
-        '" max="'+max+'" step="'+step+'" required value="'+esc(customAverage?average.length:S.chart[field])+'"/></label>').join('');
+        '" max="'+max+'" step="'+step+'" required value="'+esc(customAverage?average.length:(instance?.settings??S.chart)[field])+'"/></label>').join('');
       const note=median?'<p class="chart-median-note">Risk-neutral expiry estimates based on Alpaca Indicative quotes. Lines appear when quotes support a reliable level.</p>':'';
       dialog.innerHTML=header+'<form id="indicator-settings-'+key+'" data-indicator-key="'+key+'">'+
         '<div class="chart-indicator-fields">'+inputs+'</div>'+note+'<div class="chart-dialog-actions">'+
         '<button type="button" class="chart-remove-indicator" data-action="indicator-remove" data-indicator-key="'+key+'">Remove</button>'+
-        (median?button('Refresh levels','options-median-refresh','small'):'')+
+        (median?'<button type="button" class="btn small" data-action="options-median-refresh" data-indicator-key="'+key+'">Refresh levels</button>':'')+
         '<button type="submit" class="chart-dialog-apply">Apply</button></div></form>';
     }else{
-      const choose=(action,id,label,color,active=false)=>
+      const activeTypes=indicatorInstances().map(item=>item.type);
+      const choose=(action,id,label,color,active)=>
         '<button type="button" data-action="'+action+'" data-indicator-key="'+id+'" style="--indicator-color:'+color+'">'+
         '<span>'+esc(label)+'</span><span aria-hidden="true"'+(active?' class="chart-indicator-added"':'')+'>'+
-        (active?'On chart':'+')+'</span></button>';
-      const choices=INDICATOR_ORDER.filter(id=>!isAveragePreset(id)).map(id=>
-        choose(S.chart[id]?'indicator-settings':'indicator-add',id,indicatorLabel(id,S.chart),indicatorColors[id],S.chart[id])).join('');
-      const optionsChoice=choose(S.chart.optionsMedian?'indicator-settings':'options-median-toggle',
-        'optionsMedian','Options 50/50 levels','#7bdac6',S.chart.optionsMedian);
-      const averageChoices=choose('indicator-add-average','ema','EMA','#e9bd68')+
-        choose('indicator-add-average','sma','SMA','#8bb9eb');
-      dialog.innerHTML=header+'<div class="chart-indicator-choices">'+averageChoices+optionsChoice+choices+'</div>';
+        (active?'Add another':'+')+'</span></button>';
+      const choices=repeatableIndicators.map(type=>choose('indicator-add',type,
+        type==='optionsMedian'?'Options 50/50 levels':indicatorLabel(type,S.chart),
+        indicatorColors[type]||'#7bdac6',activeTypes.includes(type))).join('');
+      const averages=movingAverages(S.chart);
+      const averageChoices=['ema','sma'].map(type=>choose('indicator-add-average',type,type.toUpperCase(),
+        type==='ema'?'#e9bd68':'#8bb9eb',averages.some(item=>item.type===type))).join('');
+      dialog.innerHTML=header+'<div class="chart-indicator-choices">'+averageChoices+choices+'</div>';
     }
     if(!dialog.open)dialog.showModal();
     else dialog.querySelector('input')?.focus();
@@ -1064,7 +1077,7 @@ async function initApp(){
     preserveChartViewport();
     S.chart=changes;
     render();
-    const target=(S.chart[key]||movingAverages(S.chart).some(average=>average.id===key))?'[data-action="indicator-settings"][data-indicator-key="'+key+'"]':'[data-action="indicator-picker"]';
+    const target=(S.chart[key]||indicatorCopies().some(item=>item.id===key)||movingAverages(S.chart).some(average=>average.id===key))?'[data-action="indicator-settings"][data-indicator-key="'+key+'"]':'[data-action="indicator-picker"]';
     $(target)?.focus({preventScroll:true});
   }
   function chartReadout(bar,time=bar?.time){
@@ -1123,16 +1136,16 @@ async function initApp(){
       chartIcon('<circle cx="5" cy="12" r="1"/><circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/>')+
       '</summary><div class="chart-tools-menu">'+
       button(S.drawLine?'Cancel price line':'Horizontal line','draw-line','small')+
-      button(S.chart.optionsMedian?'Hide options 50/50':'Options 50/50 levels','options-median-toggle','small')+
+      button(indicatorInstances().some(item=>item.type==='optionsMedian')?'Hide options 50/50':'Options 50/50 levels','options-median-toggle','small')+
       button('Clear price levels','clear-lines','small')+button('Export PNG','chart-png','small')+
       button('Backtest this symbol','view-backtest','small chart-mobile-backtest')+'</div></details></div></div>';
   }
   const optionsMedianCache = new Map();
-  let refreshOptionsMedian;
-  function mountOptionsMedian(base,getLevels){
-    const panel=$('#chart-options-median-result');
+  const refreshOptionsMedian=new Map();
+  function mountOptionsMedian(base,getLevels,{id,settings}){
+    const panel=$('[data-indicator-row="'+id+'"] .chart-options-median-result');
     if(!panel)return;
-    const symbol=S.symbol, token=getOptionsDevice(), worker=S.apiBaseUrl, rate=Number(S.chart.optionsMedianRate)/100;
+    const symbol=S.symbol, token=getOptionsDevice(), worker=S.apiBaseUrl, rate=Number(settings.optionsMedianRate)/100;
     if(symbol.startsWith('DEMO-')){
       panel.textContent='Switch to Live and select an optionable ticker.';
       return;
@@ -1189,10 +1202,10 @@ async function initApp(){
         nextAt=Date.now()+60_000;
       }
     };
-    refreshOptionsMedian=()=>void load(true);
+    refreshOptionsMedian.set(id,()=>void load(true));
     void load();
     const timer=setInterval(()=>void load(),10_000);
-    medianUnmount=()=>{active=false;controller?.abort();clearInterval(timer);refreshOptionsMedian=null;};
+    medianUnmount.push(()=>{active=false;controller?.abort();clearInterval(timer);refreshOptionsMedian.delete(id);});
   }
   function chartsView(){
     const b=chartBars(),source=S.sources.get(S.symbol);
@@ -1882,11 +1895,14 @@ async function initApp(){
     const base=chart.addSeries(type,{...baseOptions,...style});
     const datapoints=b.map(x=>S.chart.style==='line'||S.chart.style==='area'?{time:x.time,value:x.close}:{time:x.time,open:x.open,high:x.high,low:x.low,close:x.close});
     base.setData(datapoints);
-    mountOptionsMedian(base,prices=>{
-      medianPrices=prices;
-      // Reapply the provider to invalidate the series' cached autoscale range.
-      base.applyOptions({autoscaleInfoProvider:baseOptions.autoscaleInfoProvider});
-    });
+    const instances=indicatorInstances(), levelsByInstance=new Map();
+    for(const instance of instances.filter(item=>item.type==='optionsMedian')){
+      mountOptionsMedian(base,prices=>{
+        levelsByInstance.set(instance.id,prices);
+        medianPrices=[...levelsByInstance.values()].flat();
+        base.applyOptions({autoscaleInfoProvider:baseOptions.autoscaleInfoProvider});
+      },instance);
+    }
     const c=b.map(x=>x.close),indicatorData=new Map(),indicatorPanes=new Map();
     for(const {id,type,length,color} of movingAverages(S.chart)){
       const vals=(type==='ema'?ema:sma)(c,length);
@@ -1894,31 +1910,38 @@ async function initApp(){
       const series=chart.addSeries(LineSeries,{color,lineWidth:1,priceLineVisible:false,lastValueVisible:true});
       series.setData(vals.flatMap((v,i)=>v==null?[]:[{time:b[i].time,value:v}]));
     }
-    if(S.chart.bollinger){
-      const bb=bollingerSeries(c,S.chart.bollPeriod);
-      indicatorData.set('bollinger',[bb.basis,bb.upper,bb.lower]);
-      for(const direction of [-1,1]){const ln=chart.addSeries(LineSeries,{color:indicatorColors.bollinger,lineWidth:1,priceLineVisible:false});
-        const values=direction>0?bb.upper:bb.lower;
-        ln.setData(values.flatMap((v,i)=>v==null?[]:[{time:b[i].time,value:v}]));}
-    }
-    if(S.chart.volume){indicatorData.set('volume',[b.map(bar=>bar.volume??null)]);const vol=chart.addSeries(HistogramSeries,{priceScaleId:'volume',priceLineVisible:false,lastValueVisible:false,priceFormat:{type:'volume'}});vol.setData(b.map(x=>({time:x.time,value:x.volume||0,color:x.close>=x.open?'#317c6c88':'#8a3c5388'})));vol.priceScale().applyOptions({scaleMargins:{top:1-S.chart.volumeHeight/100,bottom:0}});}
+    const plot=(values,options,pane=0)=>{
+      const series=chart.addSeries(LineSeries,{lineWidth:1,priceLineVisible:false,...options},pane);
+      series.setData(values.flatMap((value,i)=>value==null?[]:[{time:b[i].time,value}]));
+      return series;
+    };
     let pane=1;
-    if(S.chart.rsi){
-      indicatorPanes.set('rsi',pane);
-      const values=rsi(c,S.chart.rsiPeriod);
-      indicatorData.set('rsi',[values]);
-      const rs=chart.addSeries(LineSeries,{color:colors.indicator,lineWidth:1,priceLineVisible:false},pane++);
-      rs.setData(values.flatMap((v,i)=>v==null?[]:[{time:b[i].time,value:v}]));
-      for(const v of [30,50,70])rs.createPriceLine({price:v,color:v===50?'#536980':'#9c6a70',lineWidth:1,lineStyle:2,axisLabelVisible:false});
-    }
-    if(S.chart.macd){
-      indicatorPanes.set('macd',pane);
-      const m=chart.addSeries(LineSeries,{color:colors.blue,lineWidth:1,priceLineVisible:false},pane);
-      const sig=chart.addSeries(LineSeries,{color:colors.yellow,lineWidth:1,priceLineVisible:false},pane);
-      const macdValues=macdSeries(c,S.chart);
-      indicatorData.set('macd',[macdValues.macd,macdValues.signal]);
-      m.setData(macdValues.macd.flatMap((v,i)=>v==null?[]:[{time:b[i].time,value:v}]));
-      sig.setData(macdValues.signal.flatMap((v,i)=>v==null?[]:[{time:b[i].time,value:v}]));
+    for(const {id,type,settings} of instances){
+      if(type==='bollinger'){
+        const {basis,upper,lower}=bollingerSeries(c,settings.bollPeriod);
+        indicatorData.set(id,[basis,upper,lower]);
+        for(const values of [upper,lower])plot(values,{color:indicatorColors.bollinger});
+      }
+      if(type==='volume'){
+        indicatorData.set(id,[b.map(bar=>bar.volume??null)]);
+        const vol=chart.addSeries(HistogramSeries,{priceScaleId:id,priceLineVisible:false,lastValueVisible:false,priceFormat:{type:'volume'}});
+        vol.setData(b.map(x=>({time:x.time,value:x.volume||0,color:x.close>=x.open?'#317c6c88':'#8a3c5388'})));
+        vol.priceScale().applyOptions({scaleMargins:{top:1-settings.volumeHeight/100,bottom:0}});
+      }
+      if(type==='rsi'){
+        indicatorPanes.set(id,pane);
+        const values=rsi(c,settings.rsiPeriod);
+        indicatorData.set(id,[values]);
+        const rs=plot(values,{color:colors.indicator},pane++);
+        for(const v of [30,50,70])rs.createPriceLine({price:v,color:v===50?'#536980':'#9c6a70',lineWidth:1,lineStyle:2,axisLabelVisible:false});
+      }
+      if(type==='macd'){
+        indicatorPanes.set(id,pane);
+        const {macd,signal}=macdSeries(c,settings);
+        indicatorData.set(id,[macd,signal]);
+        plot(macd,{color:colors.blue},pane);
+        plot(signal,{color:colors.yellow},pane++);
+      }
     }
     if(S.chart.log)base.priceScale().applyOptions({mode:PriceScaleMode.Logarithmic});
     for(const p of S.chart.lines[S.symbol]||[])base.createPriceLine({price:p,color:'#e4b766',lineWidth:1,lineStyle:2,axisLabelVisible:true,title:'Level'});
@@ -1965,7 +1988,7 @@ async function initApp(){
           const localLegend=document.createElement('div');
           localLegend.className='chart-indicator-legend chart-pane-legend';
           localLegend.setAttribute('role','group');
-          localLegend.setAttribute('aria-label',indicatorLabel(key,S.chart)+' pane');
+          localLegend.setAttribute('aria-label',instanceLabel(instances.find(item=>item.id===key))+' pane');
           localLegend.append(row);
           cell.append(localLegend);
         }
@@ -1986,7 +2009,7 @@ async function initApp(){
       readout.innerHTML=chartReadout(b[index]);
       for(const [key,series] of indicatorData){
         const [value,...details]=series.map(values=>values[index]);
-        valuesByIndicator.get(key).textContent=indicatorValue(key,value,details);
+        valuesByIndicator.get(key).textContent=indicatorValue(instances.find(item=>item.id===key)?.type??key,value,details);
       }
     });
     const viewKey=S.symbol+'|'+S.chart.tf;
@@ -2611,9 +2634,11 @@ async function initApp(){
 
   const action={
     'options-median-toggle':()=>{
-      $('#chart-indicator-dialog')?.close();preserveChartViewport();S.chart.optionsMedian=!S.chart.optionsMedian;render();
+      const active=indicatorInstances().some(item=>item.type==='optionsMedian');
+      applyIndicatorChange('optionsMedian',{...S.chart,optionsMedian:!active,
+        indicatorCopies:indicatorCopies().filter(item=>item.type!=='optionsMedian')});
     },
-    'options-median-refresh':()=>refreshOptionsMedian?.(),
+    'options-median-refresh':el=>refreshOptionsMedian.get(el.dataset.indicatorKey)?.(),
     'export-screener':()=>exportScreenerCsv(),
     'run-portfolio':()=>runPortfolioCurrent(),
     'run-best-fit':()=>void runBestFitCurrent(),
@@ -2704,12 +2729,21 @@ async function initApp(){
       openIndicatorDialog(id);
     },
     'indicator-add':el=>{
-      const key=el.dataset.indicatorKey;
-      applyIndicatorChange(key,updateIndicatorSetting(S.chart,key,'enabled',true));
+      const type=el.dataset.indicatorKey;
+      const active=indicatorInstances().find(item=>item.type===type);
+      if(active){
+        const id='ind-'+crypto.randomUUID();
+        const fields=type==='optionsMedian'?['optionsMedianRate']:indicatorInputs(type).map(([field])=>field);
+        const settings=Object.fromEntries(fields.map(field=>[field,active.settings[field]]));
+        applyIndicatorChange(id,{...S.chart,indicatorCopies:[...indicatorCopies(),{id,type,settings}]});
+        openIndicatorDialog(id);
+      }else if(type==='optionsMedian')applyIndicatorChange(type,{...S.chart,optionsMedian:true});
+      else applyIndicatorChange(type,updateIndicatorSetting(S.chart,type,'enabled',true));
     },
     'indicator-remove':el=>{
       const key=el.dataset.indicatorKey;
       if(key.startsWith('ma-'))applyIndicatorChange(key,editMovingAverage(S.chart,key,null));
+      else if(key.startsWith('ind-'))applyIndicatorChange(key,{...S.chart,indicatorCopies:indicatorCopies().filter(item=>item.id!==key)});
       else if(key==='optionsMedian')applyIndicatorChange(key,{...S.chart,optionsMedian:false});
       else applyIndicatorChange(key,updateIndicatorSetting(S.chart,key,'enabled',false));
     },
@@ -2836,6 +2870,12 @@ async function initApp(){
     ev.preventDefault();
     const key=form.dataset.indicatorKey;
     let changes=S.chart;
+    const copy=indicatorCopies().find(item=>item.id===key);
+    if(copy){
+      const settings=Object.fromEntries([...new FormData(form)].map(([field,value])=>[field,Number(value)]));
+      applyIndicatorChange(key,{...S.chart,indicatorCopies:indicatorCopies().map(item=>item.id===key?{...item,settings}:item)});
+      return;
+    }
     for(const [field,value] of new FormData(form)){
       if(key.startsWith('ma-'))changes=editMovingAverage(changes,key,Number(value));
       else if(key==='optionsMedian')changes={...changes,optionsMedianRate:Number(value)};

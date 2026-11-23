@@ -185,3 +185,23 @@ test('EMA and SMA stay in the picker and each copy keeps its own length',async (
   await expect(legend.getByRole('button',{name:'Settings for SMA 30',exact:true})).toBeVisible();
   await expect(legend.getByRole('button',{name:'Settings for SMA 10',exact:true})).toHaveCount(0);
 });
+
+
+test('Bollinger and RSI can be added twice with independent settings',async ({page})=>{
+  await page.goto('./');
+  await page.locator('.sidebar [data-tab="charts"]').click();
+  const add=async name=>{
+    await page.getByRole('button',{name:'New indicator',exact:true}).click();
+    await page.getByRole('dialog').getByRole('button',{name,exact:true}).click();
+  };
+  await add('Bollinger 20');
+  await add('Bollinger 20');
+  await page.getByRole('dialog').locator('input').fill('30');
+  await page.getByRole('button',{name:'Apply',exact:true}).click();
+  await add('RSI 14');
+  await page.getByRole('dialog').locator('input').fill('7');
+  await page.getByRole('button',{name:'Apply',exact:true}).click();
+  await page.reload();
+  for(const name of ['Bollinger 20','Bollinger 30','RSI 14','RSI 7'])
+    await expect(page.getByRole('button',{name:'Settings for '+name,exact:true})).toBeVisible();
+});

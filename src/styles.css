@@ -651,8 +651,8 @@ tr[data-vol-symbol] td:nth-child(3){min-width:138px}
   .options-metrics strong { font-size:14px; }
 }
 
-[data-indicator-row=optionsMedian] { height:auto; min-height:25px; flex-wrap:wrap; }
-#chart-options-median-result { display:inline-flex; flex-wrap:wrap; gap:4px 10px; white-space:normal; }
+.chart-indicator-row:has(.chart-options-median-result) { height:auto; min-height:25px; flex-wrap:wrap; }
+.chart-options-median-result { display:inline-flex; flex-wrap:wrap; gap:4px 10px; white-space:normal; }
 .chart-options-median-level { white-space:nowrap; pointer-events:auto; }
 .chart-options-median-level strong { color:var(--level-color); }
 .chart-median-note { padding:0 12px; color:var(--muted); font-size:12px; }
