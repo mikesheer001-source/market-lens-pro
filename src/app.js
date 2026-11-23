@@ -2459,10 +2459,20 @@ async function initApp(){
       'Fetching '+LIVE_UNIVERSE.length+' Alpaca daily OHLCV histories…';
     render();
     try{
-      if(!reuseData)await fetchLiveUniverse({
-        restoreTab:'backtest',restoreSymbol:S.mode==='live'?S.symbol:S.lastLiveSymbol});
+      if(!reuseData){
+        const options={restoreTab:'backtest',restoreSymbol:S.mode==='live'?S.symbol:S.lastLiveSymbol};
+        const result=await fetchLiveUniverse(options);
+        if(runId!==fitRunSerial)return;
+        if(S.tab!=='backtest'){
+          liveScanPending={result,options};
+          S.fitStatus='';
+          return;
+        }
+        applyLiveUniverse(result,options);
+      }
       if(runId!==fitRunSerial)return;
-      S.fitStatus='Ranking '+LIVE_UNIVERSE.length+' symbols by training Sharpe…';render();
+      S.fitStatus='Ranking '+LIVE_UNIVERSE.length+' symbols by training Sharpe…';
+      if(S.tab==='backtest')render();
       await new Promise(resolve=>setTimeout(resolve,0));
       const histories=new Map(LIVE_UNIVERSE.filter(sym=>S.sources.get(sym)==='ALPACA')
         .map(sym=>[sym,S.data.get(sym)]));
@@ -2473,7 +2483,7 @@ async function initApp(){
           'ALPACA '+String(S.liveFeed).toUpperCase()+' 1Day':'NO ALPACA BARS'};
       S.fitReport=fitAcrossUniverse({...common,strategyScript:script});
       S.fitSort='sharpe';S.fitDescending=true;
-      S.fitStatus='Evaluating preset and Pine strategies for validated OOS fit…';render();
+      S.fitStatus='Evaluating preset and Pine strategies for validated OOS fit…';if(S.tab==='backtest')render();
       const validated=await fitValidatedAcrossUniverse({...common,
         savedScripts:S.scriptLibrary,builtInExamples:PINE_EXAMPLES,
         isCancelled:()=>runId!==fitRunSerial,
@@ -2485,10 +2495,10 @@ async function initApp(){
           if(el)el.textContent=S.fitStatus;
         }});
       if(runId!==fitRunSerial)return;
-      S.fitValidatedReport=validated;S.fitStatus='';S.fitError='';render();
+      S.fitValidatedReport=validated;S.fitStatus='';S.fitError='';if(S.tab==='backtest')render();
     }catch(err){
       if(runId!==fitRunSerial)return;
-      S.fitStatus='';S.fitError=String(err.message||err);render();
+      S.fitStatus='';S.fitError=String(err.message||err);if(S.tab==='backtest')render();
     }
   }
   function loadUniverseFitBest(){
