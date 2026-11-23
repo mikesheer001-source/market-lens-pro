@@ -1,3 +1,5 @@
+import {getOptionsDevice, requestOptions} from './options-api.js';
+import {loadOptionsMedians, medianHorizons} from './options-median.js';
 import {createOptionsBuilder, optionsApprovalLink} from './options-builder.js';
 import {workspaceSync} from './workspace-sync.js';
 import {scanMarket} from './market-scan.js';
@@ -47,7 +49,7 @@ async function initApp(){
     volatility:[{metric:'rsi',tf:'D',op:'<',value:60},{metric:'drawdown',tf:'D',op:'<',value:-5},{metric:'emaDist',tf:'D',op:'<',value:0}],
     all:[]
   };
-  const defaultSettings={tf:'D',style:'candles',log:false,ema20:true,ema50:false,ema200:true,sma20:false,bollinger:false,volume:true,rsi:true,macd:false,rsiPeriod:14,bollPeriod:20,ema20Len:20,ema50Len:50,ema200Len:200,sma20Len:20,volumeHeight:17,macdFast:12,macdSlow:26,macdSignal:9,lines:{}};
+  const defaultSettings={tf:'D',style:'candles',log:false,ema20:true,ema50:false,ema200:true,sma20:false,bollinger:false,volume:true,rsi:true,macd:false,rsiPeriod:14,bollPeriod:20,optionsMedian:false,optionsMedianRate:4,ema20Len:20,ema50Len:50,ema200Len:200,sma20Len:20,volumeHeight:17,macdFast:12,macdSlow:26,macdSignal:9,lines:{}};
   const defaultBacktest={strategy:'ema-cross',side:'long',borrowAnnualPct:0,fast:20,slow:100,rsiPeriod:14,buyLevel:30,sellLevel:65,period:20,multiplier:2,capital:10000,allocation:100,feeBps:1,slipBps:2,stopPct:0,targetPct:0};
   const workspaceKeys={
     settings:'market-lens-pro-settings',library:'market-lens-pro-pine-library-v1',
@@ -528,7 +530,8 @@ async function initApp(){
 
   const status=()=>S.mode==='live'?'ALPACA LIVE · '+String(S.liveFeed||'iex').toUpperCase():S.sources.get(S.symbol)==='SIMULATED'?'SIMULATED SAMPLE':S.sources.get(S.symbol)==='IMPORTED'?'IMPORTED OHLCV':'NO DATA';
   const isVisibleSymbol=symbol=>modeSymbol(symbol)&&(S.universeFilter!=='volatility'||VOLATILITY_UNIVERSE.includes(symbol));
-  function destroyCharts(){if(chart){chart.remove();chart=null;}if(equityChart){equityChart.remove();equityChart=null;}if(leaderboardChart){leaderboardChart.remove();leaderboardChart=null;}if(tradeChart){tradeChart.remove();tradeChart=null;}}
+  let medianUnmount;
+  function destroyCharts(){medianUnmount?.();medianUnmount=null;if(chart){chart.remove();chart=null;}if(equityChart){equityChart.remove();equityChart=null;}if(leaderboardChart){leaderboardChart.remove();leaderboardChart=null;}if(tradeChart){tradeChart.remove();tradeChart=null;}}
   function shell(){
     const links=keys=>keys.map(key=>'<button class="nav-btn '+(S.tab===key?'active':'')+'" data-tab="'+key+
       '"'+(S.tab===key?' aria-current="page"':'')+'><span class="nav-icon" aria-hidden="true">'+tabIcons[key]+'</span>'+tabNames[key]+'</button>').join('');
@@ -952,7 +955,9 @@ async function initApp(){
       const choices=INDICATOR_ORDER.filter(id=>!S.chart[id]).map(id=>
         '<button type="button" data-action="indicator-add" data-indicator-key="'+id+'" style="--indicator-color:'+indicatorColors[id]+'">'+
         '<span>'+esc(indicatorLabel(id,S.chart))+'</span><span aria-hidden="true">+</span></button>').join('');
-      dialog.innerHTML=header+'<div class="chart-indicator-choices">'+(choices||'<p>All available indicators are on the chart.</p>')+'</div>';
+      const optionsChoice=S.chart.optionsMedian?'':'<button type="button" data-action="options-median-toggle" style="--indicator-color:#7bdac6">'+
+        '<span>Options 50/50 levels</span><span aria-hidden="true">+</span></button>';
+      dialog.innerHTML=header+'<div class="chart-indicator-choices">'+(choices+optionsChoice||'<p>All available indicators are on the chart.</p>')+'</div>';
     }
     dialog.showModal();
   }
@@ -1020,8 +1025,86 @@ async function initApp(){
       chartIcon('<circle cx="5" cy="12" r="1"/><circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/>')+
       '</summary><div class="chart-tools-menu">'+
       button(S.drawLine?'Cancel price line':'Horizontal line','draw-line','small')+
+      button(S.chart.optionsMedian?'Hide options 50/50':'Options 50/50 levels','options-median-toggle','small')+
       button('Clear price levels','clear-lines','small')+button('Export PNG','chart-png','small')+
       button('Backtest this symbol','view-backtest','small chart-mobile-backtest')+'</div></details></div></div>';
+  }
+  function optionsMedianControls(){
+    if(!S.chart.optionsMedian)return '';
+    return '<div class="chart-options-median"><div class="chart-options-median-controls"><strong>Options 50/50</strong>'+
+      '<label>Rate assumption (%) <input type="number" min="-10" max="25" step=".1" data-option="median-rate" value="'+
+      esc(S.chart.optionsMedianRate)+'"></label>'+button('Refresh levels','options-median-refresh','small')+'</div>'+
+      '<div id="chart-options-median-result" aria-live="polite"></div>'+
+      '<p>Risk-neutral expiry estimates from Alpaca Indicative quotes. Early exercise and bid/ask spreads can affect the levels.</p></div>';
+  }
+  const optionsMedianCache = new Map();
+  let refreshOptionsMedian;
+  function mountOptionsMedian(base,getLevels){
+    const panel=$('#chart-options-median-result');
+    if(!panel)return;
+    const symbol=S.symbol, token=getOptionsDevice(), worker=S.apiBaseUrl, rate=Number(S.chart.optionsMedianRate)/100;
+    if(symbol.startsWith('DEMO-')){
+      panel.textContent='Switch to Live and select an optionable ticker.';
+      return;
+    }
+    if(!token){
+      panel.textContent='Open your existing Options Builder quote link on this browser to enable Alpaca quotes.';
+      return;
+    }
+    let controller, active=true, lines=[], retryAt=0, nextAt=0;
+    const key=JSON.stringify([symbol,rate,worker]);
+    const clock=new Intl.DateTimeFormat('en-US',{month:'short',day:'numeric',hour:'numeric',minute:'2-digit',timeZone:'America/New_York',timeZoneName:'short'});
+    const paint=({levels,message})=>{
+      if(!active)return;
+      for(const line of lines)base.removePriceLine(line);
+      const valid=levels.filter(item=>Number.isFinite(item.price));
+      getLevels(valid.map(({price})=>price));
+      lines=valid.map(item=>base.createPriceLine({price:item.price,title:item.label+' 50/50',
+        color:item.color,lineWidth:2,lineStyle:2,axisLabelVisible:true}));
+      panel.innerHTML=message?esc(message):medianHorizons.map(({label,color})=>{
+        const row=levels.find(item=>item.label===label);
+        const title=label+' · '+(row?.expiry||'');
+        return '<div class="chart-options-median-level" style="--level-color:'+color+'"><strong>'+
+          esc(title.replace(/ · $/,''))+'</strong><span>'+
+          (row?.error ? esc(row.error) : '≈ $'+format(row?.price)+' · quotes as of '+esc(clock.format(row.quoteTime)))+
+          '</span></div>';
+      }).join('');
+    };
+    const load=async (force=false)=>{
+      if(!active||controller||(!force&&document.hidden))return;
+      if(Date.now()<retryAt)return;
+      const current=optionsMedianCache.get(key);
+      if(!force&&current&&Date.now()-current.time<60_000){
+        paint(current.result);
+        nextAt=current.time+60_000;
+        return;
+      }
+      if(!force&&Date.now()<nextAt)return;
+      controller=new AbortController();
+      const {signal}=controller;
+      if(!lines.length)panel.textContent='Loading option chains…';
+      try{
+        const request=(path,params,signal)=>requestOptions(path,params,signal,{worker,token});
+        const result=await loadOptionsMedians({request,symbol,rate,signal});
+        if(!active)return;
+        retryAt=Date.now()+Math.max(0,...result.levels.map(row=>row.retryAfter||0))*1_000;
+        optionsMedianCache.set(key,{time:Date.now(),result});
+        if(optionsMedianCache.size>24)optionsMedianCache.delete(optionsMedianCache.keys().next().value);
+        paint(result);
+      }catch(error){
+        if(!signal.aborted){
+          if(error.status===429)retryAt=Date.now()+error.retryAfter*1_000;
+          paint({levels:[],message:error.message});
+        }
+      }finally{
+        controller=null;
+        nextAt=Date.now()+60_000;
+      }
+    };
+    refreshOptionsMedian=()=>void load(true);
+    void load();
+    const timer=setInterval(()=>void load(),10_000);
+    medianUnmount=()=>{active=false;controller?.abort();clearInterval(timer);refreshOptionsMedian=null;};
   }
   function chartsView(){
     const b=chartBars(),source=S.sources.get(S.symbol);
@@ -1041,6 +1124,7 @@ async function initApp(){
       (intradayTf(S.chart.tf)?button('Refresh 15m bars','refresh-intraday','small chart-refresh'):'')+
       '<span id="older-history-control">'+olderHistoryControl()+'</span>'+
       '<span class="visually-hidden" id="chart-axis-hint" role="status"></span></div>'+
+      optionsMedianControls()+
       '<dialog id="chart-indicator-dialog" class="chart-dialog" aria-labelledby="chart-dialog-title"></dialog>'+
       '<dialog id="chart-symbol-dialog" class="chart-dialog" aria-labelledby="chart-symbol-title"></dialog>'+
       '<dialog id="scan-rules-dialog" class="chart-dialog" aria-labelledby="scan-rules-title"></dialog></div>';
@@ -1697,12 +1781,24 @@ async function initApp(){
         '</strong>'+esc(state?.error||'Select a daily timeframe or import timestamped intraday OHLCV. We do not simulate market data.')+'</div>';return;}
     chart=newChart(el);
     mountPriceAxisTouch(el,chart);
-    const baseOptions={priceLineVisible:false,lastValueVisible:true};
+    let medianPrices=[];
+    const baseOptions={priceLineVisible:false,lastValueVisible:true,
+      autoscaleInfoProvider:original=>{
+        const result=original();
+        if(!result?.priceRange||!medianPrices.length)return result;
+        return {...result,priceRange:{minValue:Math.min(result.priceRange.minValue,...medianPrices),
+          maxValue:Math.max(result.priceRange.maxValue,...medianPrices)}};
+      }};
     const type=S.chart.style==='line'?LineSeries:S.chart.style==='area'?AreaSeries:S.chart.style==='bars'?BarSeries:CandlestickSeries;
     const style=S.chart.style==='candles'?{upColor:colors.up,downColor:colors.down,borderVisible:false,wickUpColor:colors.up,wickDownColor:colors.down}:S.chart.style==='bars'?{upColor:colors.up,downColor:colors.down}:{color:colors.blue,lineColor:colors.blue,topColor:'#278cb263',bottomColor:'#278cb200',lineWidth:2};
     const base=chart.addSeries(type,{...baseOptions,...style});
     const datapoints=b.map(x=>S.chart.style==='line'||S.chart.style==='area'?{time:x.time,value:x.close}:{time:x.time,open:x.open,high:x.high,low:x.low,close:x.close});
     base.setData(datapoints);
+    mountOptionsMedian(base,prices=>{
+      medianPrices=prices;
+      // Reapply the provider to invalidate the series' cached autoscale range.
+      base.applyOptions({autoscaleInfoProvider:baseOptions.autoscaleInfoProvider});
+    });
     const c=b.map(x=>x.close),indicatorData=new Map(),indicatorPanes=new Map();
     for(const [name,vals,color] of [['ema20',ema(c,S.chart.ema20Len),colors.yellow],['ema50',ema(c,S.chart.ema50Len),colors.blue],['ema200',ema(c,S.chart.ema200Len),colors.indicator],['sma20',sma(c,S.chart.sma20Len),'#f7a75c']]){
       if(!S.chart[name])continue;
@@ -2368,6 +2464,10 @@ async function initApp(){
   }
 
   const action={
+    'options-median-toggle':()=>{
+      $('#chart-indicator-dialog')?.close();preserveChartViewport();S.chart.optionsMedian=!S.chart.optionsMedian;render();
+    },
+    'options-median-refresh':()=>refreshOptionsMedian?.(),
     'export-screener':()=>exportScreenerCsv(),
     'run-portfolio':()=>runPortfolioCurrent(),
     'run-best-fit':()=>void runBestFitCurrent(),
@@ -2630,6 +2730,13 @@ async function initApp(){
   });
   document.addEventListener('change',async ev=>{
     const el=ev.target;
+    if(el.dataset.option==='median-rate'){
+      const value=Number(el.value);
+      if(el.value!==''&&Number.isFinite(value)&&value>=-10&&value<=25){
+        preserveChartViewport();S.chart.optionsMedianRate=value;render();
+      }else el.value=S.chart.optionsMedianRate;
+      return;
+    }
     if(el.id==='csv-file'){if(el.files?.length)await importFiles(el.files);el.value='';return;}
     if(el.id==='pine-library'){const found=S.scriptLibrary.find(x=>x.id===el.value);if(found){loadPineSource(found.code,found.name,found.id);S.scriptSettings={...(found.settings||{})};persistPineDraft();render();}return;}
     if(el.dataset.pineInput){S.scriptSettings[el.dataset.pineInput]=el.type==='checkbox'?el.checked:Number(el.value);persistPineDraft();return;}

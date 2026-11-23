@@ -1,19 +1,12 @@
 import {MAX_LEGS, PRESETS, boxRate, expirationTime, expiryPnl, expiryStats, initialDebit,
   quoteEstimates, scenarioPnl} from './options-payoff.js';
 import {nearestStrike, strikeDomain, strikeTargets} from './options-strike-ruler.js';
-import {DEFAULT_ALPACA_WORKER} from './live-history.js';
+import {OPTIONS_DEVICE_KEY, getOptionsDevice, optionsApiUrl, requestOptions} from './options-api.js';
 
 const DAY = 86_400_000;
-const DEVICE_KEY = 'market-lens-options-device-v1';
 const PENDING_KEY = 'market-lens-options-device-pending-v1';
 const devicePattern = /^[a-f0-9]{64}$/;
 export const optionsApprovalLink = () => new URLSearchParams(location.hash.slice(1)).get('options-setup');
-const readDevice = key => {
-  try {
-    const value = localStorage.getItem(key);
-    return devicePattern.test(value ?? '') ? value : '';
-  } catch { return ''; }
-};
 const randomDevice = () => Array.from(crypto.getRandomValues(new Uint8Array(32)),
   byte => byte.toString(16).padStart(2,'0')).join('');
 
@@ -94,7 +87,7 @@ function graph({width, price, high, low, points, expiry, pointAt, focus, marker,
 
 export function createOptionsBuilder() {
   let root, timer, pending, generation = 0;
-  let ownerToken = readDevice(DEVICE_KEY), feed = 'indicative', expirations = [], chain = [], feedVerified = false, nextPoll = 0;
+  let ownerToken = getOptionsDevice(), feed = 'indicative', expirations = [], chain = [], feedVerified = false, nextPoll = 0;
   let message = '', spotSource = '', drag, rollFrom, resize;
   const chains = new Map();
   const state = {
@@ -124,14 +117,9 @@ export function createOptionsBuilder() {
     state.legs = state.legs.map(leg => ({...leg,quote:null}));
     nextPoll = 0;
   }
-  function optionsUrl(path) {
-    const base = ['localhost','127.0.0.1'].includes(location.hostname) ?
-      root.dataset.worker : DEFAULT_ALPACA_WORKER;
-    return new URL('/api/options/'+path,base || DEFAULT_ALPACA_WORKER);
-  }
   async function approveBrowser(code) {
     if (!devicePattern.test(code)) return setMessage('This setup link is invalid.');
-    const device = ownerToken || readDevice(PENDING_KEY) || randomDevice();
+    const device = ownerToken || getOptionsDevice(PENDING_KEY) || randomDevice();
     try {
       localStorage.setItem(PENDING_KEY,device);
     } catch {
@@ -142,14 +130,14 @@ export function createOptionsBuilder() {
     pending = new AbortController();
     setMessage('Connecting to Alpaca quotes…');
     try {
-      const response = await fetch(optionsUrl('device'),{method:'POST',headers:{
+      const response = await fetch(optionsApiUrl('device',root.dataset.worker),{method:'POST',headers:{
         Authorization:'Bearer '+device,'X-Options-Approval':code
       },signal:pending.signal,cache:'no-store'});
       if (!response.ok) {
         const data = await response.json().catch(() => ({}));
         throw new Error(data.error || 'Browser setup could not be completed. Reopen your setup link to retry.');
       }
-      localStorage.setItem(DEVICE_KEY,device);
+      localStorage.setItem(OPTIONS_DEVICE_KEY,device);
       localStorage.removeItem(PENDING_KEY);
       ownerToken = device;
       history.replaceState(history.state,'',location.pathname+location.search);
@@ -158,17 +146,13 @@ export function createOptionsBuilder() {
       if (current === generation && error.name !== 'AbortError') setMessage(error.message);
     } finally { endRequest(current); }
   }
-  async function request(path, params, signal) {
-    const url = optionsUrl(path);
-    url.search = new URLSearchParams({feed,...params}).toString();
-    const response = await fetch(url,{headers:{Authorization:'Bearer '+ownerToken},signal,cache:'no-store'});
-    const data = await response.json().catch(() => ({}));
-    if (!response.ok) {
-      if (response.status === 429) nextPoll = Date.now()+1000*(Number(response.headers.get('Retry-After')) || 60);
-      throw new Error(data.error || 'Quote request failed (HTTP '+response.status+').');
+  async function request(path,params,signal) {
+    try {
+      return await requestOptions(path,params,signal,{worker:root.dataset.worker,token:ownerToken,feed});
+    } catch(error) {
+      if (error.status===429) nextPoll=Date.now()+1000*error.retryAfter;
+      throw error;
     }
-    if (data.feed !== feed) throw new Error('The quote source changed. Reconnect to refresh.');
-    return data;
   }
   function endRequest(current) {
     if (generation === current) pending = null;
