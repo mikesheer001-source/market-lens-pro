@@ -100,6 +100,33 @@ export function bollingerSeries(closes,length){
   }
   return {basis,upper,lower};
 }
+const legacyMovingAverages=[
+  {id:'ema20',type:'ema',color:'#e9bd68'},
+  {id:'ema50',type:'ema',color:'#71b8b3'},
+  {id:'ema200',type:'ema',color:'#d69c65'},
+  {id:'sma20',type:'sma',color:'#f7a75c'}
+];
+const movingAverageColors=['#8bcca2','#8bb9eb','#e79b9b','#d7c77c','#9ed1cd','#eca980'];
+const savedMovingAverages=chart=>Array.isArray(chart.movingAverages)?chart.movingAverages:[];
+
+export function movingAverages(chart) {
+  const legacy=legacyMovingAverages.filter(({id})=>chart[id]).map(entry=>({...entry,length:chart[entry.id+'Len']}));
+  const custom=savedMovingAverages(chart).filter(entry=>
+    /^ma-[a-f0-9-]+$/.test(entry?.id??'')&&['ema','sma'].includes(entry.type)&&
+    Number.isInteger(entry.length)&&entry.length>=2&&entry.length<=500
+  ).map((entry,index)=>({...entry,color:movingAverageColors[index%movingAverageColors.length]}));
+  return [...legacy,...custom];
+}
+
+export function addMovingAverage(chart,type,id) {
+  return {...chart,movingAverages:[...savedMovingAverages(chart),{id,type,length:20}]};
+}
+
+export function editMovingAverage(chart,id,length) {
+  return {...chart,movingAverages:length===null?savedMovingAverages(chart).filter(entry=>entry.id!==id):
+    savedMovingAverages(chart).map(entry=>entry.id===id?{...entry,length}:entry)};
+}
+
 export function activeIndicatorReadings(bars,chart={}){
   if(!Array.isArray(bars)||!bars.length)return [];
   const c=bars.map(b=>b.close),last=bars.at(-1),out=[];

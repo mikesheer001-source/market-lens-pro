@@ -26,6 +26,7 @@ import { LIVE_UNIVERSE, DEMO_UNIVERSE, VOLATILITY_UNIVERSE, LIVE_EQUITY_COUNT, L
 import {DEFAULT_ALPACA_WORKER,inspectLiveHistory,shouldTryDefaultWorker,liveScanUrl,canonicalWorkerBase}
   from './live-history.js';
 import {INDICATOR_ORDER,activeIndicatorReadings,indicatorInputs,indicatorLabel,updateIndicatorSetting,
+  movingAverages,addMovingAverage,editMovingAverage,
   nextFullscreenState,chartScaleOptions,resetPriceScale,mountPriceAxisTouch,macdSeries,bollingerSeries} from './chart-usability.js';
 async function initApp(){
   const {
@@ -49,7 +50,7 @@ async function initApp(){
     volatility:[{metric:'rsi',tf:'D',op:'<',value:60},{metric:'drawdown',tf:'D',op:'<',value:-5},{metric:'emaDist',tf:'D',op:'<',value:0}],
     all:[]
   };
-  const defaultSettings={tf:'D',style:'candles',log:false,ema20:true,ema50:false,ema200:true,sma20:false,bollinger:false,volume:true,rsi:true,macd:false,rsiPeriod:14,bollPeriod:20,optionsMedian:false,optionsMedianRate:4,ema20Len:20,ema50Len:50,ema200Len:200,sma20Len:20,volumeHeight:17,macdFast:12,macdSlow:26,macdSignal:9,lines:{}};
+  const defaultSettings={tf:'D',style:'candles',log:false,ema20:true,ema50:false,ema200:true,sma20:false,movingAverages:[],bollinger:false,volume:true,rsi:true,macd:false,rsiPeriod:14,bollPeriod:20,optionsMedian:false,optionsMedianRate:4,ema20Len:20,ema50Len:50,ema200Len:200,sma20Len:20,volumeHeight:17,macdFast:12,macdSlow:26,macdSignal:9,lines:{}};
   const defaultBacktest={strategy:'ema-cross',side:'long',borrowAnnualPct:0,fast:20,slow:100,rsiPeriod:14,buyLevel:30,sellLevel:65,period:20,multiplier:2,capital:10000,allocation:100,feeBps:1,slipBps:2,stopPct:0,targetPct:0};
   const workspaceKeys={
     settings:'market-lens-pro-settings',library:'market-lens-pro-pine-library-v1',
@@ -990,18 +991,28 @@ async function initApp(){
     if(key==='bollinger'&&details.every(Number.isFinite)&&details.length)return format(details[0])+' / '+format(value)+' / '+format(details[1]);
     return format(value);
   }
+  const movingAverageLabel=average=>average.type.toUpperCase()+' '+average.length;
+  const isAveragePreset=key=>key.startsWith('ema')||key.startsWith('sma');
   function chartIndicatorLegend(b){
+    const averages=movingAverages(S.chart);
     const readings=new Map(activeIndicatorReadings(b,S.chart).map(row=>[row.key,row]));
-    const rows=INDICATOR_ORDER.filter(key=>S.chart[key]).map(key=>{
-      const label=indicatorLabel(key,S.chart);
-      const value=readings.get(key)?.value;
-      const formatted=indicatorValue(key,value,readings.get(key)?.details);
-      return '<div class="chart-indicator-row" data-indicator-row="'+key+'" style="--indicator-color:'+indicatorColors[key]+'">'+
+    const closes=b.map(bar=>bar.close);
+    const visible=averages.map(average=>{
+      const value=readings.has(average.id)?readings.get(average.id).value:(average.type==='ema'?ema:sma)(closes,average.length).at(-1);
+      return {key:average.id,label:movingAverageLabel(average),color:average.color,value};
+    });
+    for(const key of INDICATOR_ORDER.filter(key=>!isAveragePreset(key)&&S.chart[key])){
+      visible.push({key,label:indicatorLabel(key,S.chart),color:indicatorColors[key],...readings.get(key)});
+    }
+    if(S.chart.optionsMedian)visible.push({key:'optionsMedian',label:'Options 50/50',color:'#7bdac6'});
+    const rows=visible.map(({key,label,color,value,details})=>{
+      const results=key==='optionsMedian'?'<span id="chart-options-median-result" class="chart-indicator-value" role="status"></span>':
+        '<span class="chart-indicator-value">'+indicatorValue(key,value,details)+'</span>';
+      return '<div class="chart-indicator-row" data-indicator-row="'+key+'" style="--indicator-color:'+color+'">'+
         '<span class="chart-indicator-name">'+esc(label)+'</span>'+
-        '<span class="chart-indicator-value">'+formatted+'</span>'+
         '<button type="button" class="chart-icon chart-indicator-gear" data-action="indicator-settings" data-indicator-key="'+key+
         '" aria-label="Settings for '+esc(label)+'" title="Settings for '+esc(label)+'" aria-haspopup="dialog">'+gearIcon+'</button>'+
-        indicatorRemoveButton(label,'indicator-remove','data-indicator-key',key)+'</div>';
+        indicatorRemoveButton(label,'indicator-remove','data-indicator-key',key)+results+'</div>';
     }).join('');
     const custom=S.activeIndicators.map(item=>'<div class="chart-indicator-row"><span class="chart-indicator-name">'+
       esc(item.name)+'</span>'+indicatorRemoveButton(item.name,'pine-remove-plot','data-plot-id',item.id)+'</div>').join('');
@@ -1014,24 +1025,35 @@ async function initApp(){
   function openIndicatorDialog(key){
     const dialog=$('#chart-indicator-dialog');
     if(!dialog||dialog.open)return;
-    const title=key?indicatorLabel(key,S.chart)+' settings':'New indicator';
+    const average=movingAverages(S.chart).find(item=>item.id===key);
+    const customAverage=average&&key.startsWith('ma-');
+    const median=key==='optionsMedian';
+    const title=key?(average?movingAverageLabel(average):median?'Options 50/50':indicatorLabel(key,S.chart))+' settings':'New indicator';
     const header=dialogHeader(title,'chart-dialog-title');
     if(key){
-      const inputs=indicatorInputs(key).map(([field,label,min,max])=>
-        '<label for="chart-indicator-'+field+'">'+esc(label)+
+      const fields=customAverage?[['length','Length',2,500]]:median?
+        [['optionsMedianRate','Rate assumption (%)',-10,25,0.1]]:indicatorInputs(key);
+      const inputs=fields.map(([field,label,min,max,step=1])=>
+        '<label for="chart-indicator-'+field+'">'+esc(average?'Length':label)+
         '<input id="chart-indicator-'+field+'" type="number" name="'+field+'" data-indicator-field="'+field+'" min="'+min+
-        '" max="'+max+'" step="1" required value="'+esc(S.chart[field])+'"/></label>').join('');
+        '" max="'+max+'" step="'+step+'" required value="'+esc(customAverage?average.length:S.chart[field])+'"/></label>').join('');
+      const note=median?'<p class="chart-median-note">Risk-neutral expiry estimates based on Alpaca Indicative quotes. Lines appear when quotes support a reliable level.</p>':'';
       dialog.innerHTML=header+'<form id="indicator-settings-'+key+'" data-indicator-key="'+key+'">'+
-        '<div class="chart-indicator-fields">'+inputs+'</div><div class="chart-dialog-actions">'+
+        '<div class="chart-indicator-fields">'+inputs+'</div>'+note+'<div class="chart-dialog-actions">'+
         '<button type="button" class="chart-remove-indicator" data-action="indicator-remove" data-indicator-key="'+key+'">Remove</button>'+
+        (median?button('Refresh levels','options-median-refresh','small'):'')+
         '<button type="submit" class="chart-dialog-apply">Apply</button></div></form>';
     }else{
-      const choices=INDICATOR_ORDER.filter(id=>!S.chart[id]).map(id=>
-        '<button type="button" data-action="indicator-add" data-indicator-key="'+id+'" style="--indicator-color:'+indicatorColors[id]+'">'+
-        '<span>'+esc(indicatorLabel(id,S.chart))+'</span><span aria-hidden="true">+</span></button>').join('');
-      const optionsChoice=S.chart.optionsMedian?'':'<button type="button" data-action="options-median-toggle" style="--indicator-color:#7bdac6">'+
-        '<span>Options 50/50 levels</span><span aria-hidden="true">+</span></button>';
-      dialog.innerHTML=header+'<div class="chart-indicator-choices">'+(choices+optionsChoice||'<p>All available indicators are on the chart.</p>')+'</div>';
+      const choose=(action,id,label,color)=>
+        '<button type="button" data-action="'+action+'" data-indicator-key="'+id+'" style="--indicator-color:'+color+'">'+
+        '<span>'+esc(label)+'</span><span aria-hidden="true">+</span></button>';
+      const choices=INDICATOR_ORDER.filter(id=>!isAveragePreset(id)&&!S.chart[id]).map(id=>
+        choose('indicator-add',id,indicatorLabel(id,S.chart),indicatorColors[id])).join('');
+      const optionsChoice=S.chart.optionsMedian?'':choose('options-median-toggle','optionsMedian','Options 50/50 levels','#7bdac6');
+      const averageChoices=choose('indicator-add-average','ema','EMA','#e9bd68')+
+        choose('indicator-add-average','sma','SMA','#8bb9eb');
+      dialog.innerHTML=header+'<div class="chart-indicator-choices">'+averageChoices+'</div>'+
+        (choices+optionsChoice?'<details class="chart-other-indicators"><summary>Other indicators</summary><div class="chart-indicator-choices">'+choices+optionsChoice+'</div></details>':'');
     }
     dialog.showModal();
   }
@@ -1040,7 +1062,7 @@ async function initApp(){
     preserveChartViewport();
     S.chart=changes;
     render();
-    const target=S.chart[key]?'[data-action="indicator-settings"][data-indicator-key="'+key+'"]':'[data-action="indicator-picker"]';
+    const target=(S.chart[key]||movingAverages(S.chart).some(average=>average.id===key))?'[data-action="indicator-settings"][data-indicator-key="'+key+'"]':'[data-action="indicator-picker"]';
     $(target)?.focus({preventScroll:true});
   }
   function chartReadout(bar,time=bar?.time){
@@ -1103,14 +1125,6 @@ async function initApp(){
       button('Clear price levels','clear-lines','small')+button('Export PNG','chart-png','small')+
       button('Backtest this symbol','view-backtest','small chart-mobile-backtest')+'</div></details></div></div>';
   }
-  function optionsMedianControls(){
-    if(!S.chart.optionsMedian)return '';
-    return '<div class="chart-options-median"><div class="chart-options-median-controls"><strong>Options 50/50</strong>'+
-      '<label>Rate assumption (%) <input type="number" min="-10" max="25" step=".1" data-option="median-rate" value="'+
-      esc(S.chart.optionsMedianRate)+'"></label>'+button('Refresh levels','options-median-refresh','small')+'</div>'+
-      '<div id="chart-options-median-result" aria-live="polite"></div>'+
-      '<p>Risk-neutral expiry estimates from Alpaca Indicative quotes. Early exercise and bid/ask spreads can affect the levels.</p></div>';
-  }
   const optionsMedianCache = new Map();
   let refreshOptionsMedian;
   function mountOptionsMedian(base,getLevels){
@@ -1137,11 +1151,9 @@ async function initApp(){
         color:item.color,lineWidth:2,lineStyle:2,axisLabelVisible:true}));
       panel.innerHTML=message?esc(message):medianHorizons.map(({label,color})=>{
         const row=levels.find(item=>item.label===label);
-        const title=label+' · '+(row?.expiry||'');
-        return '<div class="chart-options-median-level" style="--level-color:'+color+'"><strong>'+
-          esc(title.replace(/ · $/,''))+'</strong><span>'+
-          (row?.error ? esc(row.error) : '≈ $'+format(row?.price)+' · quotes as of '+esc(clock.format(row.quoteTime)))+
-          '</span></div>';
+        const details=[row?.expiry,row?.error||(row?'Quotes as of '+clock.format(row.quoteTime):'Unavailable')].filter(Boolean).join(' · ');
+        return '<span class="chart-options-median-level" style="--level-color:'+color+'" title="'+esc(details)+'"><strong>'+
+          label+'</strong> '+(row?.price==null?'Unavailable':'≈ $'+format(row.price))+'</span>';
       }).join('');
     };
     const load=async (force=false)=>{
@@ -1198,7 +1210,6 @@ async function initApp(){
       (intradayTf(S.chart.tf)?button('Refresh 15m bars','refresh-intraday','small chart-refresh'):'')+
       '<span id="older-history-control">'+olderHistoryControl()+'</span>'+
       '<span class="visually-hidden" id="chart-axis-hint" role="status"></span></div>'+
-      optionsMedianControls()+
       '<dialog id="chart-indicator-dialog" class="chart-dialog" aria-labelledby="chart-dialog-title"></dialog>'+
       '<dialog id="chart-symbol-dialog" class="chart-dialog" aria-labelledby="chart-symbol-title"></dialog>'+
       '<dialog id="scan-rules-dialog" class="chart-dialog" aria-labelledby="scan-rules-title"></dialog></div>';
@@ -1875,9 +1886,9 @@ async function initApp(){
       base.applyOptions({autoscaleInfoProvider:baseOptions.autoscaleInfoProvider});
     });
     const c=b.map(x=>x.close),indicatorData=new Map(),indicatorPanes=new Map();
-    for(const [name,vals,color] of [['ema20',ema(c,S.chart.ema20Len),colors.yellow],['ema50',ema(c,S.chart.ema50Len),colors.blue],['ema200',ema(c,S.chart.ema200Len),colors.indicator],['sma20',sma(c,S.chart.sma20Len),'#f7a75c']]){
-      if(!S.chart[name])continue;
-      indicatorData.set(name,[vals]);
+    for(const {id,type,length,color} of movingAverages(S.chart)){
+      const vals=(type==='ema'?ema:sma)(c,length);
+      indicatorData.set(id,[vals]);
       const series=chart.addSeries(LineSeries,{color,lineWidth:1,priceLineVisible:false,lastValueVisible:true});
       series.setData(vals.flatMap((v,i)=>v==null?[]:[{time:b[i].time,value:v}]));
     }
@@ -2685,13 +2696,20 @@ async function initApp(){
       $('[data-action="chart-symbol-picker"]')?.focus({preventScroll:true});
     },
     'chart-timeframe':el=>{setTimeframe(el.dataset.timeframe);render();$('[data-timeframe="'+S.chart.tf+'"]')?.focus({preventScroll:true});},
+    'indicator-add-average':el=>{
+      const id='ma-'+crypto.randomUUID();
+      applyIndicatorChange(id,addMovingAverage(S.chart,el.dataset.indicatorKey,id));
+      openIndicatorDialog(id);
+    },
     'indicator-add':el=>{
       const key=el.dataset.indicatorKey;
       applyIndicatorChange(key,updateIndicatorSetting(S.chart,key,'enabled',true));
     },
     'indicator-remove':el=>{
       const key=el.dataset.indicatorKey;
-      applyIndicatorChange(key,updateIndicatorSetting(S.chart,key,'enabled',false));
+      if(key.startsWith('ma-'))applyIndicatorChange(key,editMovingAverage(S.chart,key,null));
+      else if(key==='optionsMedian')applyIndicatorChange(key,{...S.chart,optionsMedian:false});
+      else applyIndicatorChange(key,updateIndicatorSetting(S.chart,key,'enabled',false));
     },
     'draw-line':()=>{S.drawLine=!S.drawLine;preserveChartViewport();render();},
     'clear-lines':()=>{S.chart.lines[S.symbol]=[];preserveChartViewport();render();},
@@ -2816,7 +2834,11 @@ async function initApp(){
     ev.preventDefault();
     const key=form.dataset.indicatorKey;
     let changes=S.chart;
-    for(const [field,value] of new FormData(form))changes=updateIndicatorSetting(changes,key,field,value);
+    for(const [field,value] of new FormData(form)){
+      if(key.startsWith('ma-'))changes=editMovingAverage(changes,key,Number(value));
+      else if(key==='optionsMedian')changes={...changes,optionsMedianRate:Number(value)};
+      else changes=updateIndicatorSetting(changes,key,field,value);
+    }
     applyIndicatorChange(key,changes);
   });
   document.addEventListener('keydown',ev=>{
@@ -2863,13 +2885,6 @@ async function initApp(){
   });
   document.addEventListener('change',async ev=>{
     const el=ev.target;
-    if(el.dataset.option==='median-rate'){
-      const value=Number(el.value);
-      if(el.value!==''&&Number.isFinite(value)&&value>=-10&&value<=25){
-        preserveChartViewport();S.chart.optionsMedianRate=value;render();
-      }else el.value=S.chart.optionsMedianRate;
-      return;
-    }
     if(el.id==='csv-file'){if(el.files?.length)await importFiles(el.files);el.value='';return;}
     if(el.id==='pine-library'){const found=S.scriptLibrary.find(x=>x.id===el.value);if(found){loadPineSource(found.code,found.name,found.id);S.scriptSettings={...(found.settings||{})};persistPineDraft();render();}return;}
     if(el.dataset.pineInput){S.scriptSettings[el.dataset.pineInput]=el.type==='checkbox'?el.checked:Number(el.value);persistPineDraft();return;}

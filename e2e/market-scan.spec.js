@@ -34,7 +34,8 @@ test('Chart Lab indicator × removes the overlay and allows adding it back', asy
   await page.getByRole('button', {name:'Remove EMA 20', exact:true}).click();
   await expect(page.getByRole('button', {name:'Settings for EMA 20', exact:true})).toHaveCount(0);
   await page.getByRole('button', {name:'New indicator'}).click();
-  await page.getByRole('button', {name:'EMA 20', exact:true}).click();
+  await page.getByRole('button', {name:'EMA', exact:true}).click();
+  await page.getByRole('button', {name:'Apply', exact:true}).click();
   await expect(page.getByRole('button', {name:'Remove EMA 20', exact:true})).toBeVisible();
 });
 

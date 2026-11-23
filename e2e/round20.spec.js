@@ -66,10 +66,13 @@ test('Chart Lab adds and removes indicators and persists their independent setti
   await expect(page.locator('[data-indicator-row="ema20"]')).toHaveCount(0);
   const picker=page.getByRole('button',{name:'New indicator',exact:true});
   await picker.click();
-  await page.getByRole('button',{name:'EMA 34',exact:true}).click();
-  await expect(page.locator('[data-indicator-row="ema20"]')).toContainText('EMA 34');
+  await page.getByRole('button',{name:'EMA',exact:true}).click();
+  await page.getByLabel('Length',{exact:true}).fill('34');
+  await page.getByRole('button',{name:'Apply',exact:true}).click();
+  await expect(page.locator('[data-indicator-row^="ma-"]')).toContainText('EMA 34');
 
   await picker.click();
+  await page.getByText('Other indicators',{exact:true}).click();
   await page.getByRole('button',{name:'MACD 12/26/9',exact:true}).click();
   await expect(page.locator('[data-indicator-row="macd"]')).toContainText('MACD 12/26/9');
   await page.getByRole('button',{name:'Settings for MACD 12/26/9'}).click();
@@ -79,7 +82,7 @@ test('Chart Lab adds and removes indicators and persists their independent setti
   await expect(page.locator('#price-chart canvas').first()).toBeVisible();
   await page.reload();
   await page.locator('.sidebar [data-tab="charts"]').click();
-  await expect(page.locator('[data-indicator-row="ema20"]')).toContainText('EMA 34');
+  await expect(page.locator('[data-indicator-row^="ma-"]')).toContainText('EMA 34');
   await expect(page.locator('[data-indicator-row="macd"]')).toContainText('MACD 8/26/9');
   await expect(page.locator('#price-chart canvas').first()).toBeVisible();
   expect(errors).toEqual([]);
@@ -159,4 +162,27 @@ test('Round 20: mobile fullscreen fills small viewport while indicator gear and 
   await expect(page.locator('[data-action="chart-symbol-picker"]')).toHaveAttribute('data-symbol',symbol);
   await expect(page.locator('.mobile-nav [data-tab="charts"]')).toBeVisible();
   expect(errors).toEqual([]);
+});
+
+
+test('EMA and SMA stay in the picker and each copy keeps its own length',async ({page})=>{
+  await page.goto('./');
+  await page.locator('.sidebar [data-tab="charts"]').click();
+  const add=async (type,length)=>{
+    await page.getByRole('button',{name:'New indicator',exact:true}).click();
+    await page.getByRole('button',{name:type,exact:true}).click();
+    await page.getByLabel('Length',{exact:true}).fill(String(length));
+    await page.getByRole('button',{name:'Apply',exact:true}).click();
+  };
+  await add('EMA',9);
+  await add('EMA',25);
+  await add('SMA',10);
+  await add('SMA',30);
+  await page.reload();
+  const legend=page.locator('#chart-indicator-legend');
+  for(const label of ['EMA 9','EMA 25','SMA 10','SMA 30'])
+    await expect(legend.getByRole('button',{name:'Settings for '+label,exact:true})).toBeVisible();
+  await legend.getByRole('button',{name:'Remove SMA 10',exact:true}).click();
+  await expect(legend.getByRole('button',{name:'Settings for SMA 30',exact:true})).toBeVisible();
+  await expect(legend.getByRole('button',{name:'Settings for SMA 10',exact:true})).toHaveCount(0);
 });

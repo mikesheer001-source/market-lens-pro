@@ -651,11 +651,10 @@ tr[data-vol-symbol] td:nth-child(3){min-width:138px}
   .options-metrics strong { font-size:14px; }
 }
 
-.chart-options-median { flex:none; padding:6px 10px 8px; border-top:1px solid var(--border); font-size:12px; }
-.chart-options-median-controls, #chart-options-median-result { display:flex; align-items:center; flex-wrap:wrap; gap:5px 12px; }
-.chart-options-median-controls label { color:var(--muted); }
-.chart-options-median-controls input { width:56px; padding:4px; color:var(--text); background:var(--bg); border:1px solid var(--border); border-radius:4px; }
-.chart-options-median-level { display:flex; gap:5px; align-items:baseline; }
+[data-indicator-row=optionsMedian] { height:auto; min-height:25px; flex-wrap:wrap; }
+#chart-options-median-result { display:inline-flex; flex-wrap:wrap; gap:4px 10px; white-space:normal; }
+.chart-options-median-level { white-space:nowrap; pointer-events:auto; }
 .chart-options-median-level strong { color:var(--level-color); }
-.chart-options-median p { color:var(--muted); margin:3px 0 0; }
-.chart-is-fullscreen .chart-options-median { padding-bottom:max(6px,env(safe-area-inset-bottom)); }
+.chart-median-note { padding:0 12px; color:var(--muted); font-size:12px; }
+.chart-other-indicators { border-top:1px solid var(--border); }
+.chart-other-indicators summary { padding:10px 12px; color:var(--muted); cursor:pointer; }
