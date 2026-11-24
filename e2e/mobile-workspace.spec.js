@@ -6,7 +6,7 @@ test('mobile workspace keeps ticker details, chosen columns, watchlist and recen
   const errors=[];page.on('pageerror',error=>errors.push(error.message));
   await page.goto('./');
   const row=page.locator('.screener-results tr[data-symbol="DEMO-VXX"]');
-  await row.getByRole('button',{name:'Toggle watchlist'}).tap();
+  await row.getByRole('button',{name:'Watch DEMO-VXX',exact:true}).tap();
   await page.getByRole('button',{name:'Columns',exact:true}).tap();
   await page.getByRole('checkbox',{name:'RSI W',exact:true}).uncheck();
   await page.getByRole('button',{name:'Close',exact:true}).tap();

@@ -18,7 +18,8 @@ test('U.S. scan uses technical summaries and loads an uncurated ticker on demand
   await page.goto('./');
   await page.getByRole('button', {name: 'Scan all U.S. listings'}).click();
   await expect(page.locator('#market-scan-status')).toContainText('2 / 2 listings checked · complete');
-  await expect(page.getByRole('button', {name: 'View TESTETF'})).toContainText('MATCH');
+  await expect(page.locator('tr[data-symbol="TESTETF"]')).toContainText('MATCH');
+  await expect(page.getByRole('button', {name: 'View TESTETF'})).toBeVisible();
   expect(chartRequests).toBe(0);
   await page.getByRole('button', {name: 'View TESTETF'}).click();
   await expect(page.getByRole('heading', {name: 'Chart Lab', exact:true})).toBeVisible();

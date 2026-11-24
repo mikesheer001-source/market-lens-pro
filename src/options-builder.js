@@ -88,7 +88,7 @@ function graph({width, price, high, low, points, expiry, pointAt, focus, marker,
 export function createOptionsBuilder() {
   let root, timer, pending, generation = 0;
   let ownerToken = getOptionsDevice(), feed = 'indicative', expirations = [], chain = [], feedVerified = false, nextPoll = 0;
-  let message = '', spotSource = '', drag, rollFrom, resize;
+  let message = '', spotSource = '', drag, rollFrom, resize, lastGreeksMirror = '';
   const chains = new Map();
   const state = {
     symbol:'SPY', price:'', width:'0.15', expiry:'', legs:[], fee:'0', package:'', preset:'',
@@ -324,7 +324,7 @@ export function createOptionsBuilder() {
       if (lane < 0) lane = lanes.push([])-1;
       lanes[lane].push(x);
       return '<button type="button" class="options-strike-chip '+leg.side+'" data-strike-leg="'+i+'" style="--strike-x:'+x+
-        '%;--strike-lane:'+lane+'" aria-label="Move leg '+(i+1)+' strike, '+esc(strikeLabel(leg))+'">'+
+        '%;--strike-lane:'+lane+'" aria-label="Move leg '+(i+1)+' strike, '+esc(strikeLabel(leg))+' — '+leg.side+'; Enter flips side, arrow keys move strike, Delete removes">'+
         '<span data-flip="'+i+'">'+(leg.side==='buy'?'B':'S')+' · </span><span>'+esc(strikeLabel(leg))+'</span><small>'+esc(leg.expiry?.slice(5) ?? '')+'</small></button>'+
         '<button type="button" class="options-strike-delete" data-remove-chip="'+i+'" style="--strike-x:'+x+
         '%;--strike-lane:'+lane+'" aria-label="Remove leg '+(i+1)+'">×</button>';
@@ -334,7 +334,7 @@ export function createOptionsBuilder() {
       esc(shortPrice.format(value))+'</span>').join('');
     ruler.innerHTML = '<div class="options-strike-scale" style="--ruler-lanes:'+Math.max(1,lanes.length)+'">'+
       '<div class="options-strike-lanes">'+markers+'</div><div class="options-strike-axis">'+ticks+
-      (spot > 0 ? '<span class="options-strike-spot" style="--strike-x:'+positionPct(spot,domain)+'%" title="'+esc('Underlying '+dollars(spot))+'"></span>' : '')+
+      (spot > 0 ? '<span class="options-strike-spot" role="img" aria-label="Underlying '+esc(dollars(spot))+'" style="--strike-x:'+positionPct(spot,domain)+'%" title="'+esc('Underlying '+dollars(spot))+'"></span>' : '')+
       '</div></div>';
     if (focusIndex != null) ruler.querySelector('[data-strike-leg="'+focusIndex+'"]')?.focus({preventScroll:true});
   }
@@ -429,21 +429,54 @@ export function createOptionsBuilder() {
   }
   function keyboardStrike(event) {
     const marker = event.target.closest('[data-strike-leg]');
-    if (!marker || !['ArrowLeft','ArrowRight'].includes(event.key)) return;
-    event.preventDefault();
+    if (!marker) return;
     const i = Number(marker.dataset.strikeLeg), leg = state.legs[i];
+    if (!leg) return;
+    const key = event.key;
+    if (key === 'Enter' || key === ' ' || key === 'b' || key === 'B') {
+      // preventDefault stops the native button click so the flip happens once.
+      event.preventDefault();
+      flipLeg(i);
+      $('ruler').querySelector('[data-strike-leg="'+i+'"]')?.focus({preventScroll:true});
+      return;
+    }
+    if (key === 'Delete') {
+      event.preventDefault();
+      removeLeg(i);
+      const next = $('ruler').querySelector('[data-strike-leg="'+Math.min(i,state.legs.length-1)+'"]');
+      if (next) next.focus({preventScroll:true});
+      return;
+    }
+    if (!['ArrowLeft','ArrowRight','Home','End','PageUp','PageDown'].includes(key)) return;
+    event.preventDefault();
     const targets = targetsFor(leg,rulerDomain());
-    const row = event.key==='ArrowLeft' ? targets.findLast(row=>row.strike<Number(leg.strike)) :
-      targets.find(row=>row.strike>Number(leg.strike));
+    if (!targets.length) return;
+    const current = targets.findIndex(row=>row.strike===Number(leg.strike));
+    let row;
+    if (key==='ArrowLeft') row = targets.findLast(row=>row.strike<Number(leg.strike));
+    else if (key==='ArrowRight') row = targets.find(row=>row.strike>Number(leg.strike));
+    else if (key==='Home') row = targets[0];
+    else if (key==='End') row = targets[targets.length-1];
+    else if (key==='PageUp') row = targets[Math.max(0,(current<0?targets.length-1:current)-5)];
+    else if (key==='PageDown') row = targets[Math.min(targets.length-1,(current<0?0:current)+5)];
     if (row) commitStrike(i,row,true);
   }
 
   function renderChain() {
     const body = $('chain');
+    // Item 14c: ATM is the strike closest to the underlying reference price.
+    // Rows are per (call/put, strike), so both rows at that strike are marked.
+    const spot = numeric(state.price);
+    const strikes = [...new Set(chain.map(row => row.strike))];
+    const atm = spot > 0 && strikes.length ? strikes.reduce((a,b) =>
+      Math.abs(b-spot) < Math.abs(a-spot) ? b : a) : null;
+    const chainSpot = $('chain-spot');
+    if (chainSpot) chainSpot.textContent = spot > 0 ? 'Underlying '+dollars(spot) : 'Underlying —';
     body.innerHTML = chain.length ? chain.map((row,i) => {
       const q = row.quote;
       const wide = q?.ask > 0 && (q.bid === 0 || (q.ask-q.bid)/q.ask >= .25);
       return '<tr><td>'+esc(row.type==='call'?'Call':'Put')+'</td><td>'+dollars(row.strike)+
+        (row.strike === atm ? '<small class="options-atm">ATM</small>' : '')+
         '<small>'+esc(expiryLabel(row))+'</small></td><td>'+dollars(q?.bid)+' / '+dollars(q?.ask)+
         (wide?'<small class="options-wide">Wide spread</small>':'')+'</td><td>'+esc(quoteAge(q))+'</td>'+
         '<td>'+pct(q?.iv)+'</td><td>'+num(row.openInterest,0)+(row.openInterestDate?'<small>'+esc(row.openInterestDate)+'</small>':'')+
@@ -610,7 +643,7 @@ export function createOptionsBuilder() {
     $('range').hidden = false;
     $('date-output').textContent = (allowFuture || at === expiry ? usTime(at) : usTime(expiry)) +
       (!validModel ? ' · Enter valid model inputs for earlier dates' : '');
-    $('price-output').textContent = dollars(focus)+' underlying · '+dollars(pointAt)+' P&L';
+    $('price-output').textContent = dollars(focus)+' underlying · '+(pointAt>0?'+':'')+dollars(pointAt)+' P&L';
     $('scenario-time').disabled = expiry <= now;
     $('range-output').textContent = '±'+state.chartRange+'%';
     $('iv-output').textContent = (shift > 0 ? '+' : '')+num(shift,0)+' pp';
@@ -622,7 +655,7 @@ export function createOptionsBuilder() {
       datesGrid.map(time=>'<th>'+esc(usTime(time))+'</th>').join('')+'</tr></thead><tbody>'+
       gridPrices.map(x=>'<tr><th>'+dollars(x)+'</th>'+datesGrid.map(time=>{
         const pnl = pnlAt(x,time);
-        return '<td class="'+(pnl>=0?'positive':'negative')+'">'+dollars(pnl)+'</td>';
+        return '<td class="'+(pnl>=0?'positive':'negative')+'">'+(pnl>0?'+':'')+dollars(pnl)+'</td>';
       }).join('')+'</tr>').join('')+'</tbody></table>';
     const totals = netGreeks(legs);
     const greekText = totals.liveLegs ? 'Live Greeks · '+FIELDS.map(key =>
@@ -631,6 +664,12 @@ export function createOptionsBuilder() {
     $('greeks').textContent = legs.length ? greekText : '';
     const payoffGreeks = $('payoff-greeks');
     if (payoffGreeks) payoffGreeks.textContent = legs.length ? greekText : '';
+    // Item 5: mirror Greeks to the persistent #sr-live on CHANGE only.
+    if (legs.length && greekText && greekText !== lastGreeksMirror) {
+      lastGreeksMirror = greekText;
+      const live = document.querySelector('#sr-live');
+      if (live) live.textContent = greekText;
+    }
   }
 
   function action(event) {
@@ -667,6 +706,7 @@ export function createOptionsBuilder() {
       updatePositions();
     }
     if (ob==='clear') {
+      if (!window.confirm('Clear all legs from this strategy?')) return;
       state.legs = [];
       state.package = $('package').value = '';
       updatePositions();
@@ -744,7 +784,7 @@ export function createOptionsBuilder() {
   function mount(host, worker) {
     root = host;
     host.dataset.worker = worker;
-    root.innerHTML = '<header class="options-page-head"><div><h1>Options Builder</h1>'+
+    root.innerHTML = '<header class="options-page-head"><div><h1 tabindex="-1">Options Builder</h1>'+
       '<p data-ob="status" role="status" class="options-status">'+esc(message)+'</p></div>'+
       '<a class="btn" href="#options-positions">Positions <span data-ob="position-count">0</span></a></header>'+
       '<section class="panel options-workbench"><div class="panel-body">'+
@@ -755,10 +795,10 @@ export function createOptionsBuilder() {
       '<button type="button" class="btn" data-ob="preset-apply">Apply preset</button></div>'+
       '<div class="options-expirations"><h2>Expiration</h2><div class="options-date-strip" data-ob="expiry-strip" role="group" aria-label="Available expirations"></div></div>'+
       '<div class="options-ruler-head"><div><h2>Strikes</h2><p>Drag sideways to move a strike. Swipe up or down to remove a leg. Tap B or S to flip buy/sell. Use arrow keys for fine adjustments.</p></div>'+
-      '<div class="flex options-quick-add"><button type="button" class="btn small" data-quick-type="call" data-quick-side="buy">+ Buy Call</button>'+
-      '<button type="button" class="btn small" data-quick-type="call" data-quick-side="sell">+ Sell Call</button>'+
-      '<button type="button" class="btn small" data-quick-type="put" data-quick-side="buy">+ Buy Put</button>'+
-      '<button type="button" class="btn small" data-quick-type="put" data-quick-side="sell">+ Sell Put</button></div></div>'+
+      '<div class="flex options-quick-add"><button type="button" class="btn small primary" data-quick-type="call" data-quick-side="buy">+ Buy Call</button>'+
+      '<button type="button" class="btn small primary" data-quick-type="call" data-quick-side="sell">+ Sell Call</button>'+
+      '<button type="button" class="btn small primary" data-quick-type="put" data-quick-side="buy">+ Buy Put</button>'+
+      '<button type="button" class="btn small primary" data-quick-type="put" data-quick-side="sell">+ Sell Put</button></div></div>'+
       '<div data-ob="ruler" class="options-ruler" role="group" aria-label="Strike ruler"></div></div>'+
       '<div class="panel-body options-payoff">'+
       '<div class="options-payoff-head"><h2>Payoff</h2><div class="options-view-switch" role="group" aria-label="Payoff view">'+
@@ -787,7 +827,7 @@ export function createOptionsBuilder() {
       '<div class="panel-body"><div class="options-fields"><label class="field">Entry fee per contract<input data-ob="fee" type="number" min="0" step="any" value="'+esc(state.fee)+'"></label>'+
       '<label class="field">Net package premium in dollars<input data-ob="package" type="number" step="any" placeholder="Optional · credit is negative" value="'+esc(state.package)+'"></label></div>'+
       '<div class="options-estimates muted" data-ob="estimates"></div><div class="subtle" data-ob="greeks"></div></div></details>'+
-      '<div class="panel" id="options-chain"><div class="panel-header"><h2>Options chain</h2></div><div class="panel-body options-fields">'+
+      '<div class="panel" id="options-chain"><div class="panel-header"><h2>Options chain</h2><span class="muted" data-ob="chain-spot"></span></div><div class="panel-body options-fields">'+
       '<label class="field">Expiration<select data-ob="expiry"></select></label>'+
       '<label class="field">Strike window<select data-ob="width">'+[['0.05','±5%'],['0.10','±10%'],['0.15','±15%'],['0.30','±30%'],['0.6','±60%']].map(([v,label])=>option(v,label,v===state.width)).join('')+
       '</select></label><button type="button" class="btn" data-ob="refresh-chain">Load chain</button>'+
