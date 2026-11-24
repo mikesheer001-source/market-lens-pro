@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import {estimateOptionsMedian,nearestMedianExpiry} from '../src/options-median.js';
+import {estimateOptionsMedian,estimateOptionsMedianRelaxed,loadOptionsMedians,nearestMedianExpiry} from '../src/options-median.js';
 
 const now=Date.parse('2026-01-15T20:00:00Z');
 const expiry='2026-07-15';
@@ -39,4 +39,43 @@ test('omits levels for stale, wide, sparse, or unbracketed quotes',()=>{
   assert.equal(estimateOptionsMedian(uniformChain({spread:10}),params),null);
   assert.equal(estimateOptionsMedian(uniformChain().slice(0,4),params),null);
   assert.equal(estimateOptionsMedian(uniformChain().filter(row=>row.strike<102),params),null);
+});
+
+test('lower-confidence mode still rejects stale, extreme or unbracketed chains',()=>{
+  const params={spot:100,expiry,now};
+  for(const chain of [uniformChain({quoteAge:8*86_400_000}),uniformChain({spread:10}),
+    uniformChain().slice(0,4),uniformChain().filter(row=>row.strike<102)])
+    assert.equal(estimateOptionsMedianRelaxed(chain,params),null);
+});
+
+test('expands the chain search to 80% when 30% cannot bracket the median',async()=>{
+  const calls=[];
+  const result=await loadOptionsMedians({symbol:'VXX',rate:.04,now,signal:new AbortController().signal,
+    request:async (path,params)=>{
+      if(path==='expirations')return {underlying:{value:100},expirations:[expiry]};
+      calls.push(params.width);
+      return {contracts:params.width===.30?uniformChain().filter(row=>row.strike<102):uniformChain()};
+    }});
+  assert.deepEqual(calls,[.30,.80]);
+  assert.equal(result.levels[0].confidence,'standard');
+  assert.equal(result.levels[0].range,.80);
+  assert.ok(Math.abs(result.levels[0].price-103)<.01);
+  assert.match(result.levels[1].error,/No listed expiration/);
+});
+
+test('reports why chains with no usable quotes are unavailable',async()=>{
+  const result=await loadOptionsMedians({symbol:'VXX',rate:.04,now,signal:new AbortController().signal,
+    request:async path=>path==='expirations'?{underlying:{value:100},expirations:[expiry]}:{contracts:uniformChain({quoteAge:8*86_400_000})}});
+  assert.match(result.levels[0].error,/No fresh, valid two-sided quotes/);
+  assert.equal(result.levels[0].price,undefined);
+});
+
+test('returns a labeled lower-confidence estimate for a defensible wider chain',()=>{
+  const params={spot:100,expiry,now};
+  const chain=uniformChain({spread:2});
+  assert.equal(estimateOptionsMedian(chain,params),null);
+  const result=estimateOptionsMedianRelaxed(chain,params);
+  assert.equal(result.confidence,'lower');
+  assert.ok(Math.abs(result.price-103)<1);
+  assert.ok(result.sensitivity[0]<result.price && result.sensitivity[1]>result.price);
 });

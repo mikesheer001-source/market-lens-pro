@@ -1049,7 +1049,7 @@ async function initApp(){
         '<label for="chart-indicator-'+field+'">'+esc(average?'Length':label)+
         '<input id="chart-indicator-'+field+'" type="number" name="'+field+'" data-indicator-field="'+field+'" min="'+min+
         '" max="'+max+'" step="'+step+'" required value="'+esc(customAverage?average.length:(instance?.settings??S.chart)[field])+'"/></label>').join('');
-      const note=median?'<p class="chart-median-note">Risk-neutral expiry estimates based on Alpaca Indicative quotes. Lines appear when quotes support a reliable level.</p>':'';
+      const note=median?'<p class="chart-median-note">Risk-neutral expiry estimates based on Alpaca Indicative quotes. Tap a level for its quote quality or failure reason. Lower-confidence estimates use wider quote filters and are not price forecasts.</p>':'';
       dialog.innerHTML=header+'<form id="indicator-settings-'+key+'" data-indicator-key="'+key+'">'+
         '<div class="chart-indicator-fields">'+inputs+'</div>'+note+'<div class="chart-dialog-actions">'+
         '<button type="button" class="chart-remove-indicator" data-action="indicator-remove" data-indicator-key="'+key+'">Remove</button>'+
@@ -1154,21 +1154,36 @@ async function initApp(){
       panel.textContent='Open your existing Options Builder quote link on this browser to enable Alpaca quotes.';
       return;
     }
-    let controller, active=true, lines=[], retryAt=0, nextAt=0;
+    let controller, active=true, lines=[], retryAt=0, nextAt=0, expanded='';
     const key=JSON.stringify([symbol,rate,worker]);
     const clock=new Intl.DateTimeFormat('en-US',{month:'short',day:'numeric',hour:'numeric',minute:'2-digit',timeZone:'America/New_York',timeZoneName:'short'});
+    panel.addEventListener('click',event=>{
+      const button=event.target.closest('[data-median-detail]');
+      if(!button)return;
+      event.stopPropagation();
+      expanded=expanded===button.dataset.medianDetail?'':button.dataset.medianDetail;
+      for(const item of panel.querySelectorAll('[data-median-detail]'))
+        item.setAttribute('aria-expanded',String(item.dataset.medianDetail===expanded));
+      for(const detail of panel.querySelectorAll('[data-median-explanation]'))
+        detail.hidden=detail.dataset.medianExplanation!==expanded;
+    });
     const paint=({levels,message})=>{
       if(!active)return;
       for(const line of lines)base.removePriceLine(line);
       const valid=levels.filter(item=>Number.isFinite(item.price));
       getLevels(valid.map(({price})=>price));
-      lines=valid.map(item=>base.createPriceLine({price:item.price,title:item.label+' 50/50',
-        color:item.color,lineWidth:2,lineStyle:2,axisLabelVisible:true}));
+      lines=valid.map(item=>base.createPriceLine({price:item.price,title:item.label+' 50/50'+(item.confidence==='lower'?' (low conf.)':''),
+        color:item.color,lineWidth:item.confidence==='lower'?1:2,lineStyle:item.confidence==='lower'?1:2,axisLabelVisible:true}));
       panel.innerHTML=message?esc(message):medianHorizons.map(({label,color})=>{
         const row=levels.find(item=>item.label===label);
-        const details=[row?.expiry,row?.error||(row?'Quotes as of '+clock.format(row.quoteTime):'Unavailable')].filter(Boolean).join(' · ');
-        return '<span class="chart-options-median-level" style="--level-color:'+color+'" title="'+esc(details)+'"><strong>'+
-          label+'</strong> '+(row?.price==null?'Unavailable':'≈ $'+format(row.price))+'</span>';
+        const hasPrice=Number.isFinite(row?.price), low=row?.confidence==='lower';
+        const details=[row?.expiry,hasPrice?(low?'Lower confidence: wider bid/ask spreads or strike intervals.':'Standard quote-quality filters passed.'):row?.error||'Unavailable',
+          hasPrice?'Quotes as of '+clock.format(row.quoteTime):'',hasPrice?'Strike search ±'+Math.round(row.range*100)+'% · '+row.spreadCount+' vertical spreads':'',
+          low&&row.sensitivity?'Bid/ask crossing bounds: $'+format(row.sensitivity[0])+'–$'+format(row.sensitivity[1])+' (not a statistical confidence interval)':'',
+          hasPrice?'Risk-neutral approximation, not a real-world price forecast.':''].filter(Boolean).join(' · ');
+        return '<button type="button" class="chart-options-median-level" data-median-detail="'+label+'" aria-expanded="'+(expanded===label)+'" style="--level-color:'+color+'" title="'+esc(details)+'"><strong>'+
+          label+'</strong> '+(hasPrice?'≈ $'+format(row.price)+(low?' · Low conf.':''):'Unavailable')+' <span aria-hidden="true">ⓘ</span></button>'+
+          '<span class="chart-options-median-explanation" data-median-explanation="'+label+'"'+(expanded===label?'':' hidden')+'>'+esc(details)+'</span>';
       }).join('');
     };
     const load=async (force=false)=>{

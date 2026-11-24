@@ -673,7 +673,9 @@ tr[data-vol-symbol] td:nth-child(3){min-width:138px}
 
 .chart-indicator-row:has(.chart-options-median-result) { height:auto; min-height:25px; flex-wrap:wrap; }
 .chart-options-median-result { display:inline-flex; flex-wrap:wrap; gap:4px 10px; white-space:normal; }
-.chart-options-median-level { white-space:nowrap; pointer-events:auto; }
+.chart-options-median-level { white-space:nowrap; pointer-events:auto; background:transparent; border:0; color:inherit; font:inherit; padding:4px 0; cursor:pointer; text-align:left; }
+.chart-options-median-level:focus-visible { outline:1px solid var(--level-color); outline-offset:2px; border-radius:3px; }
+.chart-options-median-explanation:not([hidden]) { display:block; flex:1 0 100%; order:2; max-width:min(100%,480px); padding:7px 9px; border:1px solid var(--border); border-radius:6px; background:var(--surface); color:var(--text); line-height:1.45; white-space:normal; overflow-wrap:anywhere; pointer-events:auto; }
 .chart-options-median-level strong { color:var(--level-color); }
 .chart-median-note { padding:0 12px; color:var(--muted); font-size:12px; }
 .chart-indicator-choices>button .chart-indicator-added { font-size:11px; color:var(--muted); }
