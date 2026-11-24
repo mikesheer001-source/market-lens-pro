@@ -529,7 +529,7 @@ async function initApp(){
         return record;
       }catch(err){
         S.intradayStatus.set(key,{status:'error',error:err.message});
-        notice('Real Alpaca 15-minute bars unavailable: '+err.message);
+        if(S.symbol===symbol&&intradayTf(S.chart.tf))notice('Real Alpaca 15-minute bars unavailable: '+err.message);
         throw err;
       }finally{
         if(S.symbol===symbol&&intradayTf(S.chart.tf)&&['charts','backtest','optimize'].includes(S.tab))render();
@@ -625,7 +625,7 @@ async function initApp(){
     template.innerHTML=screenerView();
     let deferred=false;
     for(const id of ['screener-intro','screener-facts','screener-metrics','screener-status',
-      'screener-results-content','screener-refresh']){
+      'screener-results-content','screener-refresh','screener-workspace']){
       const existing=current.querySelector('#'+id), next=template.content.querySelector('#'+id);
       if(!existing||!next||existing.innerHTML===next.innerHTML)continue;
       if(existing.contains(active)){deferred=true;continue;}
@@ -924,7 +924,7 @@ async function initApp(){
       '<input class="textinput" aria-label="Search symbols" data-input="search" placeholder="Search symbol…" value="'+esc(S.query)+'"/><label class="inline-check"><input type="checkbox" data-option="matches" '+(S.showOnlyMatches?'checked':'')+'/>Matches only</label><label class="inline-check"><input type="checkbox" data-option="watchonly" '+(S.showWatch?'checked':'')+'/>Watchlist</label><label class="control">Sort '+select([['symbol','Symbol'],['price','Price'],['rsi','RSI'],['ret20','20D return'],['ema','Daily % EMA'],['drawdown','Drawdown'],['signal','Strategy signal'],['latest','Latest bar']],S.sort,'data-option="sort"')+'</label>'+button(S.ascending?'↑':'↓','sort-order','small')+'</div></div><div id="screener-results-content"><div class="table-wrap"><table class="data-table screener-results" data-hidden-columns="'+S.hiddenScreenColumns.join(' ')+'"><thead><tr><th scope="col">Symbol</th><th>Close</th><th>RSI D</th><th>RSI W</th><th title="5-period RSI calculated from daily closes; daily OHLC cannot reconstruct true 2-hour bars">RSI 5D</th><th title="Price as percentage difference from 200-period EMA of DAILY closes">% vs D EMA200</th><th>20D return</th><th>DD</th><th>Bars</th><th>Result</th><th>Latest bar</th><th title="Percentage difference from the 200-period EMA of WEEKLY closes; needs 200 real weekly bars">% vs W EMA200</th><th title="Current position based on completed daily bars and next-open fills. EXIT can mean closed this bar or pending exit. Not a live order.">Signal · '+esc(selectedStrategy?.name||'None')+'</th></tr></thead><tbody>'+table+'</tbody></table>'+(rows.length?'':'<div class="empty">No matching symbols. Change a filter or import more price history.</div>')+'</div>'+pagination+'</div>'+
       (full?'':'<p class="section-note">Signal: LONG = strategy currently holds a long at the latest bar close; EXIT = it closed on that bar or has a close order for next open; FLAT = no long. Signals use the same stop/fee/slippage and next-open rules as Backtest, long-side only. Bars and dates are from '+('Alpaca '+esc(String(S.liveFeed).toUpperCase())+' or imported CSV')+'. '+
       (S.signalErrors.length?S.signalErrors.length+' unavailable signals: '+esc(S.signalErrors.slice(0,6).map(e=>e.symbol+': '+e.reason).join('; '))+'.':'No live trades or background monitoring.')+
-      '</p>')+'</div><dialog id="screener-dialog" class="chart-dialog" aria-labelledby="screener-dialog-title"></dialog>'+workspaceControls();
+      '</p>')+'</div><dialog id="screener-dialog" class="chart-dialog" aria-labelledby="screener-dialog-title"></dialog><div id="screener-workspace">'+workspaceControls()+'</div>';
   }
   function workspaceControls(){
     const current=S.watchlists.find(x=>x.id===S.watchlistId)||S.watchlists[0];

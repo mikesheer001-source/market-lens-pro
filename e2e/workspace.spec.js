@@ -87,6 +87,7 @@ test('saved scan restores exact rule set and archived filtered rows after reload
 
 test('local price and RSI alerts are evaluated on each scan and persist until dismissed',async ({page})=>{
   await page.goto('./');
+  await expect(page.locator('[data-alert-field="symbol"] option[value="VXX"]')).toHaveCount(1);
   await page.locator('[data-alert-field="symbol"]').selectOption('VXX');
   await page.locator('[data-alert-field="metric"]').selectOption('price');
   await page.locator('[data-alert-field="op"]').selectOption('>');

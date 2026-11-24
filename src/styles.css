@@ -686,7 +686,7 @@ tr[data-vol-symbol] td:nth-child(3){min-width:138px}
 .chart-frame-scale .chart-timeframes button { min-width:0; min-height:26px; padding:2px 3px; font-size:11px; }
 .chart-frame-scale input[type=range] { display:block; width:100%; min-width:0; height:22px; margin:0; padding:0; accent-color:var(--green); cursor:ew-resize; touch-action:pan-y; }
 .chart-ranges { position:relative; padding-right:44px; }
-.chart-resize-handle { position:absolute; right:1px; bottom:1px; width:40px; height:36px; display:grid; place-items:center; border:0; border-radius:4px; background:transparent; color:var(--muted); touch-action:none; user-select:none; -webkit-user-select:none; cursor:ns-resize; }
+.chart-resize-handle { position:absolute; z-index:2; right:1px; bottom:1px; width:40px; height:36px; display:grid; place-items:center; border:0; border-radius:4px; background:transparent; color:var(--muted); touch-action:none; user-select:none; -webkit-user-select:none; cursor:ns-resize; }
 .chart-resize-handle svg { width:23px; height:23px; }
 .chart-resize-handle:hover,.chart-resize-handle:focus-visible,.chart-resize-handle.is-resizing { color:var(--green); background:#26332c; }
 .chart-is-fullscreen .chart-ranges { padding-right:7px; }
