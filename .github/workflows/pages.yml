@@ -40,6 +40,10 @@ jobs:
           for attempt in $(seq 1 12); do
             if gh api "repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID/artifacts?name=$PAGES_ARTIFACT" \
               | jq -e --arg name "$PAGES_ARTIFACT" '[.artifacts[] | select(.name == $name and .expired == false)] | length == 1' >/dev/null; then
+              # The Pages deploy action uses a separate artifact lookup service.
+              # REST visibility alone does not guarantee that service can see it yet.
+              echo "Pages artifact registered; allowing 30 seconds for propagation."
+              sleep 30
               exit 0
             fi
             sleep 5
