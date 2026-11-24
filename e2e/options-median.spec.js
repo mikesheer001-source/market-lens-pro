@@ -38,7 +38,16 @@ test('Chart Lab loads six-month and one-year options medians and can hide them',
     t:bar.time+'T05:00:00Z',o:bar.close,h:bar.close+1,l:bar.close-1,c:bar.close,v:50000
   }));
   const token='a'.repeat(64);
-  await page.addInitScript(({key,token})=>localStorage.setItem(key,token),{key:OPTIONS_DEVICE_KEY,token});
+  await page.addInitScript(({key,token})=>{
+    localStorage.setItem(key,token);
+    const settingsKey='market-lens-pro-settings';
+    if(!localStorage.getItem('median-price-test-seeded')){
+      const settings=JSON.parse(localStorage.getItem(settingsKey)||'{}');
+      settings.chartViews={'SPY|D':{price:{from:250,to:320}}};
+      localStorage.setItem(settingsKey,JSON.stringify(settings));
+      localStorage.setItem('median-price-test-seeded','1');
+    }
+  },{key:OPTIONS_DEVICE_KEY,token});
   await page.route('**/api/stocks/scan?**',route=>route.fulfill({json:{
     source:'alpaca',feed:'iex',lookback_days:1825,scan_cache_revision:LIVE_SCAN_CACHE_REVISION,
     requested:133,returned:1,missing:[],bars:{SPY:daily}
@@ -100,8 +109,13 @@ test('Chart Lab loads six-month and one-year options medians and can hide them',
   await page.locator('[data-indicator-row="optionsMedian"]').getByRole('button',{name:'Settings for Options 50/50'}).click();
   await expect(page.getByLabel('Rate assumption (%)')).toHaveValue('4');
   await page.getByRole('button',{name:'Close',exact:true}).click();
+  const retained=page.locator('[data-indicator-row="ema20"]');
+  await retained.evaluate(el=>el.dataset.retainedMedianTest='yes');
+  await page.locator('#price-chart').evaluate(el=>el.dataset.retainedMedianTest='yes');
   await page.locator('.chart-tools summary').click();
-  await page.getByRole('button',{name:'Hide options 50/50'}).click();
+  await page.getByRole('button',{name:'Hide options 50/50',exact:true}).click();
+  await expect(retained).toHaveAttribute('data-retained-median-test','yes');
+  await expect(page.locator('#price-chart')).toHaveAttribute('data-retained-median-test','yes');
   await expect(result).toHaveCount(0);
   await expect(page.locator('[data-median-show]')).toHaveCount(0);
   await page.evaluate(()=>{window.medianCanvasProbe.texts.length=0;window.medianCanvasProbe.dots.length=0;window.medianCanvasProbe.lines.length=0;});
@@ -110,9 +124,76 @@ test('Chart Lab loads six-month and one-year options medians and can hide them',
   await page.evaluate(()=>new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve))));
   expect(await page.evaluate(()=>window.medianCanvasProbe)).toEqual({texts:[],dots:[],lines:[]});
   await page.locator('.chart-tools summary').click();
-  await page.locator('.chart-tools-menu').getByRole('button',{name:'Options 50/50 levels'}).click();
+  await page.locator('.chart-tools-menu').getByRole('button',{name:'Show options 50/50',exact:true}).click();
   await expect(result).toContainText('$103.00');
   await expect.poll(()=>page.evaluate(()=>window.medianCanvasProbe.dots.length)).toBeGreaterThan(0);
-  await expect(result.getByRole('button',{name:'View dots'})).toBeVisible();
+  await expect(result.getByRole('button',{name:'View dots',exact:true})).toBeVisible();
+  await expect(retained).toHaveAttribute('data-retained-median-test','yes');
+  await page.locator('.chart-tools summary').click();
+  await expect(page.locator('.chart-tools-menu').getByRole('button',{name:'Hide options 50/50',exact:true})).toBeVisible();
+  await page.locator('.chart-tools-menu').getByRole('button',{name:'View 50/50 dots',exact:true}).click();
+  expect(errors).toEqual([]);
+});
+
+
+test('unapproved browser explains missing dots and hiding or showing preserves every other configured indicator across reload',async({page})=>{
+  const errors=[];page.on('pageerror',e=>errors.push(e.message));
+  let quoteRequests=0;
+  await page.route('**/api/options/**',route=>{quoteRequests++;return route.fulfill({status:401,json:{error:'Approval required'}});});
+  await page.addInitScript(()=>{
+    const key='market-lens-pro-settings';
+    if(localStorage.getItem('median-no-approval-seeded'))return;
+    const saved=JSON.parse(localStorage.getItem(key)||'{}');
+    saved.chart={...saved.chart,ema20:true,ema50:true,ema200:true,sma20:true,bollinger:true,rsi:true,volume:true,macd:true,optionsMedian:true,rsiPeriod:19,
+      indicatorCopies:[{id:'ind-123abc',type:'rsi',settings:{rsiPeriod:7}},{id:'ind-456abc',type:'optionsMedian',settings:{optionsMedianRate:5}}]};
+    saved.activeIndicators=[{id:'test-atr',name:'ATR (14)',code:'//@version=5\nindicator("ATR (14)", overlay=true)\nplot(ta.atr(14))',settings:{}}];
+    localStorage.setItem(key,JSON.stringify(saved));
+    localStorage.setItem('median-no-approval-seeded','1');
+  });
+  await page.goto('./');
+  await page.locator('.sidebar [data-tab="charts"]').click();
+  const result=page.locator('#chart-options-median-result');
+  await expect(result).toContainText('No 50/50 dots: options quote access is not enabled');
+  await expect(result).toContainText('Indicative quotes also require browser approval.');
+  await expect(result.getByRole('button',{name:'View dots',exact:true})).toBeVisible();
+  const rows=['ema20','ema50','ema200','sma20','bollinger','rsi','volume','macd','ind-123abc'];
+  for(const id of rows){
+    const row=page.locator('[data-indicator-row="'+id+'"]');
+    await expect(row).toBeVisible();
+    await row.evaluate(el=>el.dataset.retainedMedianTest='yes');
+  }
+  const atr=page.locator('[data-action="pine-remove-plot"][data-plot-id="test-atr"]');
+  await expect(atr).toBeVisible();
+  await page.locator('#price-chart').evaluate(el=>el.dataset.retainedMedianTest='yes');
+  await page.locator('[data-indicator-row="optionsMedian"]').getByRole('button',{name:'Settings for Options 50/50'}).click();
+  await page.getByRole('button',{name:'Refresh levels',exact:true}).click();
+  await expect(page.locator('#options-median-refresh-status')).toContainText('No 50/50 dots: options quote access is not enabled');
+  await page.getByRole('button',{name:'Close',exact:true}).click();
+  await page.locator('.chart-tools summary').click();
+  await page.getByRole('button',{name:'View 50/50 dots',exact:true}).click();
+  await expect(page.locator('.toast')).toContainText('No 50/50 dots');
+  const before=await page.evaluate(()=>JSON.parse(localStorage.getItem('market-lens-pro-settings')).chart);
+  await page.locator('.chart-tools summary').click();
+  await page.getByRole('button',{name:'Hide options 50/50',exact:true}).click();
+  await expect(result).toHaveCount(0);
+  await expect(page.locator('[data-indicator-row="ind-456abc"]')).toHaveCount(0);
+  for(const id of rows)await expect(page.locator('[data-indicator-row="'+id+'"]')).toHaveAttribute('data-retained-median-test','yes');
+  await expect(atr).toBeVisible();
+  await expect(page.locator('#price-chart')).toHaveAttribute('data-retained-median-test','yes');
+  expect(await page.evaluate(()=>JSON.parse(localStorage.getItem('market-lens-pro-settings')).chart)).toEqual(before);
+  await page.reload();
+  await expect(result).toHaveCount(0);
+  for(const id of rows)await expect(page.locator('[data-indicator-row="'+id+'"]')).toBeVisible();
+  await expect(atr).toBeVisible();
+  await page.locator('.chart-tools summary').click();
+  await page.getByRole('button',{name:'Show options 50/50',exact:true}).click();
+  await expect(result).toContainText('No 50/50 dots');
+  await expect(page.locator('[data-indicator-row="ind-456abc"]')).toBeVisible();
+  await page.reload();
+  await expect(result).toContainText('No 50/50 dots');
+  for(const id of rows)await expect(page.locator('[data-indicator-row="'+id+'"]')).toBeVisible();
+  await page.locator('.chart-tools summary').click();
+  await expect(page.getByRole('button',{name:'Hide options 50/50',exact:true})).toBeVisible();
+  expect(quoteRequests).toBe(0);
   expect(errors).toEqual([]);
 });

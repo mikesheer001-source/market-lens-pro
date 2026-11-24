@@ -75,7 +75,7 @@ export function medianDotPrimitive(chart,readPoints){
     paneViews:()=>views,refresh:()=>requestUpdate()};
 }
 
-export function createMedianDotLayer({chart,base,lineSeries,lastTime,tf,onInitialView}){
+export function createMedianDotLayer({chart,base,lineSeries,lastTime,tf,onInitialView,onView}){
   const instances=new Map();
   const all=()=>[...instances.values()].flatMap(({series,points})=>points.map(point=>({series,point})));
   const primitive=medianDotPrimitive(chart,all);
@@ -84,17 +84,24 @@ export function createMedianDotLayer({chart,base,lineSeries,lastTime,tf,onInitia
   const timeScale=chart.timeScale();
   function show(){
     const points=all().map(({point})=>point);
-    if(!points.length)return;
+    if(!points.length)return false;
     const end=Math.max(...points.map(p=>timeScale.timeToIndex(p.time)??-1));
     const last=timeScale.timeToIndex(lastTime);
-    if(last==null||end<0)return;
+    if(last==null||end<0)return false;
     // Keep recent candles beside the projected dates and enough space for a label.
     timeScale.setVisibleLogicalRange({from:Math.max(0,last-60),to:end+Math.max(3,Math.ceil((end-last+60)*.08))});
+    // A persisted manual price range can clip both the latest candle and dots.
+    // Explicitly fit the shared price scale whenever the projection is revealed.
+    base.priceScale().setAutoScale(true);
+    onView?.();
+    primitive.refresh();
+    return true;
   }
   function set(id,levels){
     if(disposed)return;
     const points=medianChartPoints(levels,!['D','W','M'].includes(tf));
     let entry=instances.get(id);
+    if(!entry&&!points.length)return;
     if(!entry){entry={series:chart.addSeries(lineSeries,{...medianDotSeriesOptions,color:'#7bdac6'}),points:[]};instances.set(id,entry);}
     // Don't reset the time scale on periodic quote refreshes with the same dates.
     const unchanged=JSON.stringify(entry.points)===JSON.stringify(points);
@@ -116,5 +123,11 @@ export function createMedianDotLayer({chart,base,lineSeries,lastTime,tf,onInitia
       });
     }
   }
-  return {set,show,dispose(){disposed=true;},hasPoints:()=>all().length>0};
+  return {set,show,dispose(){
+    if(disposed)return;
+    disposed=true;
+    base.detachPrimitive(primitive);
+    for(const {series} of instances.values())chart.removeSeries(series);
+    instances.clear();
+  },hasPoints:()=>all().length>0};
 }

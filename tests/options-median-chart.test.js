@@ -49,23 +49,26 @@ test('canvas primitive draws circles at the exact time and price coordinates, wi
   assert.ok(calls.filter(call=>call[0]==='rect').every(call=>call[4]===34));
 });
 test('layer stores values only at expiration and clears all projection slots when results disappear',async()=>{
-  let timeline=[],range={from:0,to:10},data=[],refreshes=0;
+  let timeline=[],range={from:0,to:10},data=[],refreshes=0,autoScale=false,removed=0,detached=0,viewed=0;
   const scale={getVisibleLogicalRange:()=>range,setVisibleLogicalRange:value=>{range=value;},
     timeToIndex:time=>time==='2026-11-24'?10:timeline.findIndex(x=>x.time===time)+11};
   const series={setData(rows){data=rows;timeline=rows;}};
-  const chart={timeScale:()=>scale,addSeries(_type,options){assert.equal(options.lineVisible,false);assert.equal(options.priceLineVisible,false);return series;}};
-  const base={attachPrimitive(primitive){primitive.attached({requestUpdate:()=>refreshes++});}};
-  const layer=createMedianDotLayer({chart,base,lineSeries:'line',lastTime:'2026-11-24',tf:'D'});
+  const chart={timeScale:()=>scale,addSeries(_type,options){assert.equal(options.lineVisible,false);assert.equal(options.priceLineVisible,false);return series;},removeSeries(value){assert.equal(value,series);removed++;}};
+  const base={attachPrimitive(primitive){primitive.attached({requestUpdate:()=>refreshes++});},detachPrimitive(primitive){primitive.detached();detached++;},priceScale:()=>({setAutoScale(value){autoScale=value;}})};
+  const layer=createMedianDotLayer({chart,base,lineSeries:'line',lastTime:'2026-11-24',tf:'D',onView:()=>viewed++});
   layer.set('median',levels);
   await Promise.resolve();
   assert.deepEqual(data.filter(row=>'value' in row),levels.map(({expiry,price})=>({time:expiry,value:price})));
   assert.ok(data.length>2);
   assert.ok(range.to>scale.timeToIndex(levels.at(-1).expiry));
+  assert.equal(autoScale,true);assert.equal(viewed,1);
+  autoScale=false;assert.equal(layer.show(),true);assert.equal(autoScale,true);
   layer.set('median',[]);
   assert.deepEqual(data,[]);
-  assert.equal(layer.hasPoints(),false);
+  assert.equal(layer.hasPoints(),false);assert.equal(layer.show(),false);
   assert.ok(refreshes>=2);
   layer.dispose();
+  assert.equal(removed,1);assert.equal(detached,1);
   layer.set('median',levels);
   assert.deepEqual(data,[]);
 });

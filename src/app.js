@@ -65,6 +65,15 @@ async function initApp(){
   const sharedSettings=({tab,apiBaseUrl,workspaceSections,...rest}={})=>rest;
   const workspaceLayout=readWorkspaceLayout(localStorage);
   let chartTools=readChartWorkspace(localStorage),refreshWorkspaceOverlays=null;
+  // Visibility is browser-local, like other chart overlay visibility. Never
+  // rewrite shared indicator settings merely to hide a median projection.
+  const medianVisibilityKey='market-lens-pro-options-median-visibility-v1';
+  let medianVisibility=null,syncMedianChart=null,viewMedianDots=null;
+  try{const stored=localStorage.getItem(medianVisibilityKey);if(stored==='shown'||stored==='hidden')medianVisibility=stored;}catch{}
+  function setMedianVisibility(value){
+    medianVisibility=value;
+    try{if(value===null)localStorage.removeItem(medianVisibilityKey);else localStorage.setItem(medianVisibilityKey,value);}catch{}
+  }
   writeWorkspaceLayout(localStorage,workspaceLayout);
   const syncEnabled=localStorage.getItem('market-lens-sync-disabled')!=='1';
   const workspace=workspaceSync({
@@ -603,7 +612,7 @@ async function initApp(){
     hasLiveData()?'ALPACA LIVE · '+String(S.liveFeed||'iex').toUpperCase():'ALPACA · NO DATA';
   const isVisibleSymbol=symbol=>modeSymbol(symbol)&&(S.universeFilter!=='volatility'||VOLATILITY_UNIVERSE.includes(symbol));
   const medianUnmount=[];
-  function destroyCharts(){refreshWorkspaceOverlays=null;for(const stop of medianUnmount.splice(0))stop();if(chart){chart.remove();chart=null;}if(equityChart){equityChart.remove();equityChart=null;}if(leaderboardChart){leaderboardChart.remove();leaderboardChart=null;}if(tradeChart){tradeChart.remove();tradeChart=null;}}
+  function destroyCharts(){refreshWorkspaceOverlays=null;syncMedianChart=null;viewMedianDots=null;for(const stop of medianUnmount.splice(0))stop();if(chart){chart.remove();chart=null;}if(equityChart){equityChart.remove();equityChart=null;}if(leaderboardChart){leaderboardChart.remove();leaderboardChart=null;}if(tradeChart){tradeChart.remove();tradeChart=null;}}
   function shell(){
     const links=keys=>keys.map(key=>'<button class="nav-btn '+(S.tab===key?'active':'')+'" data-tab="'+key+
       '"'+(S.tab===key?' aria-current="page"':'')+'><span class="nav-icon" aria-hidden="true">'+tabIcons[key]+'</span>'+tabNames[key]+'</button>').join('');
@@ -1037,10 +1046,17 @@ async function initApp(){
   const repeatableIndicators=[...INDICATOR_ORDER.filter(key=>!isAveragePreset(key)),'optionsMedian'];
   const indicatorCopies=()=>Array.isArray(S.chart.indicatorCopies)?S.chart.indicatorCopies.filter(copy=>
     /^ind-[a-f0-9-]+$/.test(copy?.id??'')&&repeatableIndicators.includes(copy.type)):[];
-  const indicatorInstances=()=>[
+  const configuredIndicatorInstances=()=>[
     ...repeatableIndicators.filter(type=>S.chart[type]).map(type=>({id:type,type,settings:S.chart})),
     ...indicatorCopies().map(copy=>({...copy,settings:{...defaultSettings,...copy.settings,[copy.type]:true}}))
   ];
+  const indicatorInstances=()=>{
+    const configured=configuredIndicatorInstances();
+    if(medianVisibility==='hidden')return configured.filter(item=>item.type!=='optionsMedian');
+    if(medianVisibility==='shown'&&!configured.some(item=>item.type==='optionsMedian'))
+      configured.push({id:'optionsMedian',type:'optionsMedian',settings:S.chart});
+    return configured;
+  };
   const instanceLabel=({type,settings})=>type==='optionsMedian'?'Options 50/50':indicatorLabel(type,settings);
   function chartIndicatorLegend(b){
     const averages=movingAverages(S.chart);
@@ -1057,7 +1073,7 @@ async function initApp(){
     }
     const rows=visible.map(({key,type=key,label,color,value,details})=>{
       const results=type==='optionsMedian'?'<span '+(key==='optionsMedian'?'id="chart-options-median-result" ':'')+
-        'class="chart-options-median-result chart-indicator-value" role="status"></span>':
+        'class="chart-options-median-result chart-indicator-value" role="status">No 50/50 dots: waiting for chart data and valid option chain quotes.</span>':
         '<span class="chart-indicator-value">'+indicatorValue(type,value,details)+'</span>';
       return '<div class="chart-indicator-row" data-indicator-row="'+key+'" style="--indicator-color:'+color+'">'+
         '<span class="chart-indicator-name">'+esc(label)+'</span>'+
@@ -1090,7 +1106,8 @@ async function initApp(){
         '<label for="chart-indicator-'+field+'">'+esc(average?'Length':label)+
         '<input id="chart-indicator-'+field+'" type="number" name="'+field+'" data-indicator-field="'+field+'" min="'+min+
         '" max="'+max+'" step="'+step+'" required value="'+esc(customAverage?average.length:(instance?.settings??S.chart)[field])+'"/></label>').join('');
-      const note=median?'<p class="chart-median-note">Risk-neutral expiry estimates based on Alpaca Indicative quotes. Tap a level for its quote quality or failure reason. Lower-confidence estimates use wider quote filters and are not price forecasts.</p>':'';
+      const note=median?'<p class="chart-median-note">Risk-neutral expiry estimates based on Alpaca Indicative quotes. The indicator automatically loads chains on an approved browser; changing the rate alone cannot produce a median. Tap a level for quote quality or failure reasons.</p>'+
+        '<p class="chart-median-note" id="options-median-refresh-status" role="status">'+esc(medianStatuses.get(key)||'Waiting for chart data.')+'</p>':'';
       dialog.innerHTML=header+'<form id="indicator-settings-'+key+'" data-indicator-key="'+key+'">'+
         '<div class="chart-indicator-fields">'+inputs+'</div>'+note+'<div class="chart-dialog-actions">'+
         '<button type="button" class="chart-remove-indicator" data-action="indicator-remove" data-indicator-key="'+key+'">Remove</button>'+
@@ -1116,7 +1133,7 @@ async function initApp(){
   function applyIndicatorChange(key,changes){
     $('#chart-indicator-dialog')?.close();
     preserveChartViewport();
-    const hadMedian=indicatorInstances().some(item=>item.type==='optionsMedian');
+    const hadMedian=!!viewMedianDots||indicatorInstances().some(item=>item.type==='optionsMedian');
     S.chart=changes;
     if(hadMedian&&!indicatorInstances().some(item=>item.type==='optionsMedian')&&S.pendingChartRange){
       const total=chartBars().length,range=S.pendingChartRange;
@@ -1194,31 +1211,36 @@ async function initApp(){
       chartIcon('<circle cx="5" cy="12" r="1"/><circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/>')+
       '</summary><div class="chart-tools-menu">'+
       button(S.drawLine?'Cancel price line':'Horizontal line','draw-line','small')+
-      button(indicatorInstances().some(item=>item.type==='optionsMedian')?'Hide options 50/50':'Options 50/50 levels','options-median-toggle','small')+
+      button(indicatorInstances().some(item=>item.type==='optionsMedian')?'Hide options 50/50':'Show options 50/50','options-median-toggle','small')+
+      button('View 50/50 dots','options-median-view','small')+
       button('Workspace tools & overlays','chart-workspace-tools','small')+
       button('Clear price levels','clear-lines','small')+button('Export PNG','chart-png','small')+
       button('Backtest this symbol','view-backtest','small chart-mobile-backtest')+'</div></details>'+
       '<button type="button" class="chart-icon" data-action="chart-settings" aria-label="Chart settings" title="Chart settings" aria-haspopup="dialog">'+chartIcon('<path d="M12 3v2m0 14v2M3 12h2m14 0h2M5.6 5.6l1.4 1.4m10 10 1.4 1.4M18.4 5.6 17 7M7 17l-1.4 1.4"/><circle cx="12" cy="12" r="7"/><circle cx="12" cy="12" r="2.5"/>')+'</button></div></div></div>';
   }
   const optionsMedianCache = new Map();
-  const refreshOptionsMedian=new Map();
+  const refreshOptionsMedian=new Map(),medianStatuses=new Map();
+  const noMedianQuotes='No 50/50 dots: options quote access is not enabled in this browser. Open your existing Options Builder quote link, then return to Chart Lab. Indicative quotes also require browser approval.';
+  function medianStatus(id,message){
+    medianStatuses.set(id,message);
+    const dialog=$('#chart-indicator-dialog');
+    if(dialog?.open&&dialog.querySelector('form')?.dataset.indicatorKey===id){
+      const status=$('#options-median-refresh-status');if(status)status.textContent=message;
+    }
+  }
   function mountOptionsMedian(dotLayer,{id,settings}){
     const panel=$('[data-indicator-row="'+id+'"] .chart-options-median-result');
-    if(!panel)return;
-    const symbol=S.symbol, token=getOptionsDevice(), worker=S.apiBaseUrl, rate=Number(settings.optionsMedianRate)/100;
-    if(!modeSymbol(symbol)){
-      panel.textContent='Select a loaded optionable ticker.';
-      return;
-    }
-    if(!token){
-      panel.textContent='Open your existing Options Builder quote link on this browser to enable Alpaca quotes.';
-      return;
-    }
+    if(!panel)return ()=>{};
+    const symbol=S.symbol, worker=S.apiBaseUrl, rate=Number(settings.optionsMedianRate)/100;
     let controller, active=true, hasLevels=false, retryAt=0, nextAt=0, expanded='';
     const key=JSON.stringify([symbol,rate,worker]);
     const clock=new Intl.DateTimeFormat('en-US',{month:'short',day:'numeric',hour:'numeric',minute:'2-digit',timeZone:'America/New_York',timeZoneName:'short'});
+    const shortcut='<button type="button" class="chart-options-median-view" data-median-show data-action="options-median-view" title="Show expiration dots or explain why none are available">View dots</button>';
+    const unavailable=message=>{
+      hasLevels=false;dotLayer.set(id,[]);medianStatus(id,message);
+      panel.innerHTML='<span class="chart-options-median-status">'+esc(message)+'</span>'+shortcut;
+    };
     panel.addEventListener('click',event=>{
-      if(event.target.closest('[data-median-show]')){event.stopPropagation();dotLayer.show();return;}
       const button=event.target.closest('[data-median-detail]');
       if(!button)return;
       event.stopPropagation();
@@ -1233,7 +1255,12 @@ async function initApp(){
       const valid=levels.filter(item=>Number.isFinite(item.price)&&item.expiry);
       hasLevels=valid.length>0;
       dotLayer.set(id,valid);
-      panel.innerHTML=message?esc(message):medianHorizons.map(({label,color})=>{
+      const summary=message||(!hasLevels?'No 50/50 dots: '+levels.map(row=>row.label+': '+(row.error||'No reliable estimate')).join(' · '):
+        valid.length+' expiration dot'+(valid.length===1?'':'s')+' available. Use View dots to fit the time and price axes.');
+      medianStatus(id,summary);
+      panel.innerHTML=(message?'<span class="chart-options-median-status">'+esc(message)+'</span>':
+        (!hasLevels?'<span class="chart-options-median-status">No reliable 50/50 dots. Tap each horizon for the reason.</span>':'')+
+        medianHorizons.map(({label,color})=>{
         const row=levels.find(item=>item.label===label);
         const hasPrice=Number.isFinite(row?.price), low=row?.confidence==='lower';
         const details=[row?.expiry,hasPrice?(low?'Lower confidence: wider bid/ask spreads or strike intervals.':'Standard quote-quality filters passed.'):row?.error||'Unavailable',
@@ -1243,12 +1270,16 @@ async function initApp(){
         return '<button type="button" class="chart-options-median-level" data-median-detail="'+label+'" aria-expanded="'+(expanded===label)+'" style="--level-color:'+color+'" title="'+esc(details)+'"><strong>'+
           label+'</strong> '+(hasPrice?'50/50 · '+esc(row.expiry)+' · ≈ $'+format(row.price)+(low?' · Low conf.':''):'Unavailable')+' <span aria-hidden="true">ⓘ</span></button>'+
           '<span class="chart-options-median-explanation" data-median-explanation="'+label+'"'+(expanded===label?'':' hidden')+'>'+esc(details)+'</span>';
-      }).join('')+(hasLevels?'<button type="button" class="chart-options-median-view" data-median-show title="Show the exact expiry dots on the time axis">View dots</button>'+
-        (intradayTf(S.chart.tf)?'<span class="chart-median-note" title="Future weekday slots are not minute candles; 20:00 UTC is the calculation time convention.">Future: daily slots</span>':'') :'');
+      }).join(''))+shortcut+
+        (hasLevels&&intradayTf(S.chart.tf)?'<span class="chart-median-note" title="Future weekday slots are not minute candles; 20:00 UTC is the calculation time convention.">Future: daily slots</span>':'');
     };
     const load=async (force=false)=>{
-      if(!active||controller||(!force&&document.hidden))return;
-      if(Date.now()<retryAt)return;
+      if(!active||(!force&&document.hidden))return;
+      if(!modeSymbol(symbol)){unavailable('No 50/50 dots: select a loaded optionable ticker.');return;}
+      const token=getOptionsDevice();
+      if(!token){unavailable(noMedianQuotes);return;}
+      if(controller){if(force)medianStatus(id,'Loading option chains…');return;}
+      if(Date.now()<retryAt){if(force)medianStatus(id,'Quote rate limit reached. Retry after '+clock.format(retryAt)+'.');return;}
       const current=optionsMedianCache.get(key);
       if(!force&&current&&Date.now()-current.time<60_000){
         paint(current.result);
@@ -1258,7 +1289,8 @@ async function initApp(){
       if(!force&&Date.now()<nextAt)return;
       controller=new AbortController();
       const {signal}=controller;
-      if(!hasLevels)panel.textContent='Loading option chains…';
+      medianStatus(id,'Loading option chains…');
+      if(!hasLevels)panel.innerHTML='Loading option chains…'+shortcut;
       try{
         const request=(path,params,signal)=>requestOptions(path,params,signal,{worker,token});
         const result=await loadOptionsMedians({request,symbol,rate,signal});
@@ -1268,9 +1300,9 @@ async function initApp(){
         if(optionsMedianCache.size>24)optionsMedianCache.delete(optionsMedianCache.keys().next().value);
         paint(result);
       }catch(error){
-        if(!signal.aborted){
+        if(!signal.aborted&&active){
           if(error.status===429)retryAt=Date.now()+error.retryAfter*1_000;
-          paint({levels:[],message:error.message});
+          unavailable('No 50/50 dots: '+error.message);
         }
       }finally{
         controller=null;
@@ -1280,7 +1312,23 @@ async function initApp(){
     refreshOptionsMedian.set(id,()=>void load(true));
     void load();
     const timer=setInterval(()=>void load(),10_000);
-    medianUnmount.push(()=>{active=false;controller?.abort();clearInterval(timer);refreshOptionsMedian.delete(id);});
+    return ()=>{active=false;controller?.abort();clearInterval(timer);refreshOptionsMedian.delete(id);medianStatuses.delete(id);};
+  }
+  function toggleMedianVisibility(){
+    const visible=indicatorInstances().some(item=>item.type==='optionsMedian');
+    setMedianVisibility(visible?'hidden':'shown');
+    const toggle=$('[data-action="options-median-toggle"]');
+    if(toggle)toggle.textContent=visible?'Show options 50/50':'Hide options 50/50';
+    // No shell/price-chart reconstruction or shared indicator edits on this path.
+    if(syncMedianChart)syncMedianChart();
+    else if(S.tab==='charts')render();
+  }
+  function showMedianDots(){
+    if(!indicatorInstances().some(item=>item.type==='optionsMedian')){
+      notice('Options 50/50 is hidden. Choose Show options 50/50 first.');return;
+    }
+    if(viewMedianDots?.())return;
+    notice([...medianStatuses.values()][0]||'No 50/50 dots: waiting for chart data and valid option chain quotes.');
   }
   const workspaceToolGroups=[
     ['Chart controls',[
@@ -2223,19 +2271,6 @@ async function initApp(){
     };
     refreshWorkspaceOverlays();
     const instances=indicatorInstances();
-    const medianInstances=instances.filter(item=>item.type==='optionsMedian');
-    if(medianInstances.length){
-      const initialView=S.chartViews[S.symbol+'|'+S.chart.tf]?.range;
-      const lastTime=b.at(-1).time,tf=S.chart.tf;
-      const dotLayer=createMedianDotLayer({chart,base,lineSeries:LineSeries,lastTime,tf,onInitialView:()=>{
-        if(initialView&&stamp(initialView.to)>stamp(lastTime)){
-          try{chart.timeScale().setVisibleRange(initialView);return true;}catch{}
-        }
-        return false;
-      }});
-      medianUnmount.push(()=>dotLayer.dispose());
-      for(const instance of medianInstances)mountOptionsMedian(dotLayer,instance);
-    }
     const c=b.map(x=>x.close),indicatorData=new Map(),indicatorPanes=new Map();
     for(const {id,type,length,color} of movingAverages(S.chart)){
       const vals=(type==='ema'?ema:sma)(c,length);
@@ -2368,6 +2403,36 @@ async function initApp(){
       try{chart.timeScale().setVisibleLogicalRange(S.pendingChartRange);}catch{}
       S.pendingChartRange=null;
     }
+    let dotLayer=null,medianStops=[];
+    const stopMedian=()=>{
+      for(const stop of medianStops.splice(0))stop();
+      if(dotLayer){dotLayer.dispose();dotLayer=null;}
+      viewMedianDots=null;
+      legend.querySelectorAll('[data-indicator-row]').forEach(row=>{
+        if(row.querySelector('.chart-options-median-result'))row.remove();
+      });
+    };
+    syncMedianChart=()=>{
+      const before=timeScale.getVisibleLogicalRange(),hadDots=dotLayer?.hasPoints();
+      stopMedian();
+      const medians=indicatorInstances().filter(item=>item.type==='optionsMedian');
+      if(!medians.length){
+        if(hadDots&&before&&before.to>b.length+3)
+          timeScale.setVisibleLogicalRange({from:Math.max(0,b.length-Math.min(180,Math.max(30,before.to-before.from))),to:b.length+3});
+        else if(before)timeScale.setVisibleLogicalRange(before);
+        return;
+      }
+      const template=document.createElement('template');template.innerHTML=chartIndicatorLegend(b);
+      for(const row of template.content.querySelectorAll('[data-indicator-row]')){
+        if(row.querySelector('.chart-options-median-result'))legend.append(row);
+      }
+      dotLayer=createMedianDotLayer({chart,base,lineSeries:LineSeries,lastTime:b.at(-1).time,tf:S.chart.tf,
+        onView:()=>{if(S.chartViews[viewKey]?.price){S.chartViews[viewKey].price=null;saveSettings();}}});
+      viewMedianDots=()=>dotLayer?.show()||false;
+      for(const instance of medians)medianStops.push(mountOptionsMedian(dotLayer,instance));
+    };
+    medianUnmount.push(stopMedian);
+    syncMedianChart();
     let viewTimer;
     const rememberChartView=()=>{
       clearTimeout(viewTimer);
@@ -2988,12 +3053,12 @@ async function initApp(){
     'chart-workspace-refresh':()=>{
       if(liveScanActive)return;preserveChartViewport();clearSavedScanView();void switchToLive({chartRefresh:true,restoreSymbol:S.symbol});
     },
-    'options-median-toggle':()=>{
-      const active=indicatorInstances().some(item=>item.type==='optionsMedian');
-      applyIndicatorChange('optionsMedian',{...S.chart,optionsMedian:!active,
-        indicatorCopies:indicatorCopies().filter(item=>item.type!=='optionsMedian')});
+    'options-median-toggle':toggleMedianVisibility,
+    'options-median-view':showMedianDots,
+    'options-median-refresh':el=>{
+      const key=el.dataset.indicatorKey,refresh=refreshOptionsMedian.get(key);
+      if(refresh)refresh();else medianStatus(key,'No 50/50 dots: waiting for chart data and valid option chain quotes.');
     },
-    'options-median-refresh':el=>refreshOptionsMedian.get(el.dataset.indicatorKey)?.(),
     'export-screener':()=>exportScreenerCsv(),
     'run-portfolio':()=>runPortfolioCurrent(),
     'run-best-fit':()=>void runBestFitCurrent(),
@@ -3107,14 +3172,23 @@ async function initApp(){
         const settings=Object.fromEntries(fields.map(field=>[field,active.settings[field]]));
         applyIndicatorChange(id,{...S.chart,indicatorCopies:[...indicatorCopies(),{id,type,settings}]});
         openIndicatorDialog(id);
-      }else if(type==='optionsMedian')applyIndicatorChange(type,{...S.chart,optionsMedian:true});
+      }else if(type==='optionsMedian'){
+        setMedianVisibility('shown');applyIndicatorChange(type,{...S.chart,optionsMedian:true});
+      }
       else applyIndicatorChange(type,updateIndicatorSetting(S.chart,type,'enabled',true));
     },
     'indicator-remove':el=>{
       const key=el.dataset.indicatorKey;
       if(key.startsWith('ma-'))applyIndicatorChange(key,editMovingAverage(S.chart,key,null));
-      else if(key.startsWith('ind-'))applyIndicatorChange(key,{...S.chart,indicatorCopies:indicatorCopies().filter(item=>item.id!==key)});
-      else if(key==='optionsMedian')applyIndicatorChange(key,{...S.chart,optionsMedian:false});
+      else if(key.startsWith('ind-')){
+        const copies=indicatorCopies(),removed=copies.find(item=>item.id===key),remaining=copies.filter(item=>item.id!==key);
+        if(removed?.type==='optionsMedian'&&!S.chart.optionsMedian&&!remaining.some(item=>item.type==='optionsMedian'))setMedianVisibility('hidden');
+        applyIndicatorChange(key,{...S.chart,indicatorCopies:remaining});
+      }
+      else if(key==='optionsMedian'){
+        setMedianVisibility(indicatorCopies().some(item=>item.type==='optionsMedian')?null:'hidden');
+        applyIndicatorChange(key,{...S.chart,optionsMedian:false});
+      }
       else applyIndicatorChange(key,updateIndicatorSetting(S.chart,key,'enabled',false));
     },
     'draw-line':()=>{S.drawLine=!S.drawLine;preserveChartViewport();render();},

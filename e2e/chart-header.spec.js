@@ -44,7 +44,7 @@ for(const width of [1440,768,390,320]){
     await expect(ticker.locator('.chart-ticker-name')).toHaveText('VXX');
     await assertHeader(page);
     await page.locator('.chart-tools summary').click();
-    for(const label of ['Horizontal line','Options 50/50 levels','Workspace tools & overlays','Clear price levels','Export PNG'])
+    for(const label of ['Horizontal line','Show options 50/50','View 50/50 dots','Workspace tools & overlays','Clear price levels','Export PNG'])
       await expect(page.locator('.chart-tools-menu').getByRole('button',{name:label,exact:true})).toBeVisible();
     await page.getByRole('button',{name:'Workspace tools & overlays',exact:true}).click();
     const dialog=page.locator('#chart-workspace-dialog');
