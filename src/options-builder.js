@@ -324,13 +324,12 @@ export function createOptionsBuilder() {
       const x = positionPct(Number(leg.strike),domain);
       const center = clamp(x*width/100,Math.min(36,width/2),Math.max(width-36,width/2));
       const occupied = lanes[side];
-      let lane = occupied.findIndex(used => used.every(value => Math.abs(value-center) >= 116));
+      let lane = occupied.findIndex(used => used.every(value => Math.abs(value-center) >= 76));
       if (lane < 0) lane = occupied.push([])-1;
       occupied[lane].push(center);
-      markers[side].push('<div class="options-strike-marker '+(x>70?'delete-left':'')+'" style="--strike-x:'+x+'%;--strike-lane:'+lane+'">'+
+      markers[side].push('<div class="options-strike-marker" style="--strike-x:'+x+'%;--strike-lane:'+lane+'">'+
         '<button type="button" class="options-strike-chip '+side+'" data-strike-leg="'+i+'" aria-label="Move leg '+(i+1)+' strike, '+esc(strikeLabel(leg))+'">'+
-        '<span data-flip="'+i+'">'+(side==='buy'?'B':'S')+' · </span><span>'+esc(strikeLabel(leg))+'</span><small>'+esc(leg.expiry?.slice(5) ?? '')+'</small></button>'+
-        '<button type="button" class="options-strike-delete" data-remove-chip="'+i+'" aria-label="Remove leg '+(i+1)+'">×</button></div>');
+        '<span data-flip="'+i+'">'+(side==='buy'?'B':'S')+' · </span><span>'+esc(strikeLabel(leg))+'</span><small>'+esc(leg.expiry?.slice(5) ?? '')+'</small></button></div>');
     }
     const ticks = Array.from({length:7},(_,i) => low+(high-low)*i/6).map((value,i) =>
       '<span class="options-tick'+(i%2?' options-tick-minor':'')+'" style="--strike-x:'+positionPct(value,domain)+'%">'+
@@ -389,7 +388,6 @@ export function createOptionsBuilder() {
     const i = Number(marker.dataset.strikeLeg);
     const leg = state.legs[i], domain = rulerDomain();
     const targets = targetsFor(leg,domain);
-    if (!targets.length) return setMessage('Load contracts for this leg’s expiration to drag its strike.');
     drag = {pointer:event.pointerId,i,leg,marker,domain,targets,startX:event.clientX,
       startY:event.clientY,width:$('ruler').getBoundingClientRect().width};
     $('ruler').setPointerCapture(event.pointerId);
@@ -400,15 +398,18 @@ export function createOptionsBuilder() {
     if (!drag || event.pointerId !== drag.pointer) return;
     const {startX,startY,width,leg,domain,targets,marker} = drag;
     const dx = event.clientX-startX, dy = event.clientY-startY;
-    if (Math.abs(dy) > 40 && Math.abs(dy) > Math.abs(dx)*1.5) {
-      drag.swipe = true;
-      drag.dy = dy;
-      marker.classList.add('is-swiping');
-      marker.style.translate = '0px '+dy+'px';
-      marker.style.opacity = String(Math.max(0.2,1-Math.abs(dy)/120));
+    // A vertical gesture may remove a leg only by moving away from the axis.
+    if (!drag.intent && Math.max(Math.abs(dx),Math.abs(dy)) >= 8)
+      drag.intent = Math.abs(dy)>Math.abs(dx)*1.5 ? 'vertical' : 'horizontal';
+    if (drag.intent==='vertical') {
+      const outward = leg.side==='buy' ? -dy : dy;
+      const shift = Math.max(0,outward)*(leg.side==='buy' ? -1 : 1);
+      marker.classList.toggle('is-swiping',outward>0);
+      marker.style.translate = '0px '+shift+'px';
+      marker.style.opacity = String(Math.max(0.2,1-Math.max(0,outward)/120));
       return;
     }
-    if (drag.swipe) return;
+    if (!drag.intent || !targets.length) return;
     if (!drag.preview && Math.abs(dx)<3) return;
     const price = Number(leg.strike)+dx/Math.max(1,width*.86)*(domain.high-domain.low);
     const row = nearestStrike(targets,price);
@@ -417,17 +418,21 @@ export function createOptionsBuilder() {
     drag.preview = changedLeg(leg,row);
     const x = positionPct(row.strike,domain);
     marker.parentElement.style.setProperty('--strike-x',x+'%');
-    marker.parentElement.classList.toggle('delete-left',x>70);
     marker.children[0].textContent = (leg.side==='buy'?'B':'S')+' · ';
     marker.children[1].textContent = strikeLabel(drag.preview);
     refreshMarks();
   }
   function endDrag(event) {
     if (!drag || event.pointerId !== drag.pointer) return;
-    const {i,row,swipe} = drag;
+    const {i,row,intent,leg,startX,startY,targets} = drag;
+    const dx = event.clientX-startX, dy = event.clientY-startY;
+    const outward = leg.side==='buy' ? -dy : dy;
     drag = null;
-    if (swipe && event.type==='pointerup') return removeLeg(i);
-    if (event.type==='pointerup' && row) commitStrike(i,row,false);
+    if (event.type==='pointerup' && intent==='vertical' && outward>40 && outward>Math.abs(dx)*1.5)
+      return removeLeg(i);
+    if (event.type==='pointerup' && intent==='horizontal' && !targets.length)
+      setMessage('Load contracts for this leg’s expiration to drag its strike.');
+    if (event.type==='pointerup' && intent==='horizontal' && row) commitStrike(i,row,false);
     else {
       renderRuler();
       refreshMarks();
@@ -678,7 +683,6 @@ export function createOptionsBuilder() {
       updatePositions();
     }
     if (remove !== undefined) removeLeg(Number(remove));
-    if (button.dataset.removeChip !== undefined) removeLeg(Number(button.dataset.removeChip));
     if (chainIndex !== undefined && chain[chainIndex]) addLeg(marketLeg(chain[chainIndex],side));
   }
   function control(event) {
@@ -760,7 +764,7 @@ export function createOptionsBuilder() {
       Object.keys(PRESETS).map(name=>option(name,name,state.preset===name)).join('')+'</select></label>'+
       '<button type="button" class="btn" data-ob="preset-apply">Apply preset</button></div>'+
       '<div class="options-expirations"><h2>Expiration</h2><div class="options-date-strip" data-ob="expiry-strip" role="group" aria-label="Available expirations"></div></div>'+
-      '<div class="options-ruler-head"><h2>Strikes</h2><p>Drag to move · Swipe up/down or × to remove · Tap B/S to flip · Arrow keys to fine-tune</p></div>'+
+      '<div class="options-ruler-head"><h2>Strikes</h2><p>Drag sideways to move · Swipe buys up or sells down to remove · Tap B/S to flip · Arrow keys to fine-tune</p></div>'+
       '<div class="options-quick-add buy" role="group" aria-label="Add buy legs"><button type="button" class="btn small" data-quick-type="call" data-quick-side="buy">+ Buy Call</button>'+
       '<button type="button" class="btn small" data-quick-type="put" data-quick-side="buy">+ Buy Put</button></div>'+
       '<div data-ob="ruler" class="options-ruler" role="group" aria-label="Strike ruler"></div>'+

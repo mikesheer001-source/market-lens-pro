@@ -153,16 +153,35 @@ test('buy and sell controls and legs sit on opposite sides of the strike axis on
   expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(391);
 });
 
-test('the × next to a ruler chip removes only that leg', async ({page}) => {
+test('strike chips delete only when swiped away from the axis', async ({page}) => {
   const builder = await gotoBuilderWithGreeks(page);
   await builder.getByRole('button',{name:'+ Buy Call',exact:true}).click();
-  await builder.getByRole('button',{name:'+ Buy Call',exact:true}).click();
-  await expect(builder.locator('[data-ob=metrics]')).toContainText('$700.00 debit');
+  await builder.getByRole('button',{name:'+ Sell Call',exact:true}).click();
   const ruler = builder.locator('[data-ob=ruler]');
-  await ruler.getByRole('button',{name:'Remove leg 2'}).click();
-  await expect(builder.getByLabel('Leg 2 entry')).toHaveCount(0);
-  await expect(builder.getByLabel('Leg 1 entry')).toHaveValue('3.5');
-  await expect(builder.locator('[data-ob=metrics]')).toContainText('$350.00 debit');
+  await expect(ruler.getByRole('button',{name:/Remove leg/})).toHaveCount(0);
+  const count = builder.locator('[data-ob=position-count]');
+  const swipe = async (side,dy,returnToStart=false) => {
+    const marker = ruler.locator('.options-strike-chip.'+side);
+    await marker.scrollIntoViewIfNeeded();
+    const box = await marker.boundingBox();
+    const x = box.x+box.width/2, y = box.y+box.height/2;
+    await page.mouse.move(x,y);
+    await page.mouse.down();
+    await page.mouse.move(x,y+dy,{steps:6});
+    if (returnToStart) await page.mouse.move(x,y,{steps:6});
+    await page.mouse.up();
+  };
+  await swipe('buy',60);
+  await expect(count).toHaveText('2');
+  await swipe('sell',-60);
+  await expect(count).toHaveText('2');
+  await swipe('buy',-60,true);
+  await expect(count).toHaveText('2');
+  await swipe('buy',-60);
+  await expect(count).toHaveText('1');
+  await expect(ruler.locator('.options-strike-chip.sell')).toHaveCount(1);
+  await swipe('sell',60);
+  await expect(count).toHaveText('0');
 });
 
 test('swiping a chip up removes it and dragging it sideways moves the strike', async ({page}) => {

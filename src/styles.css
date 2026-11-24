@@ -636,10 +636,6 @@ tr[data-vol-symbol] td:nth-child(3){min-width:138px}
 .options-strike-chip small { font-size:10px; opacity:.8; }
 .options-strike-chip.is-dragging { z-index:2; cursor:grabbing; box-shadow:0 0 0 2px currentColor; }
 .options-strike-chip.is-swiping { cursor:grabbing; }
-.options-strike-delete { position:absolute; top:0; left:36px; z-index:1; display:grid; place-items:center; width:32px; min-height:44px; padding:0; font:inherit; font-size:18px; font-weight:700; color:var(--muted); border:1px solid var(--border); border-radius:7px; background:var(--bg); cursor:pointer; }
-.options-strike-marker.delete-left .options-strike-delete { left:auto; right:36px; }
-.options-strike-delete:hover { color:var(--red); border-color:var(--red); }
-.options-strike-delete:focus-visible { outline:2px solid var(--text); outline-offset:2px; }
 .options-payoff-greeks { margin:8px 0; }
 .options-quick-add { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:6px; }
 .options-quick-add.buy { --leg-color:var(--green); }
