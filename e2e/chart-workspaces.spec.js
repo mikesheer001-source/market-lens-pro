@@ -19,21 +19,28 @@ test('all workspace panels below the chart share existing behavior and keep stat
   await expect(panel(page,'screener').locator('.screener-results tbody tr')).toHaveCount(4);
   await summary(page,'backtest').click();
   await summary(page,'options').click();
+  await expect(page.locator('#price-chart')).toHaveAttribute('data-keep','yes');
   await expect(panel(page,'options').locator('[data-ob="symbol"]')).toBeVisible();
   await panel(page,'options').locator('[data-ob="price"]').fill('450');
   await panel(page,'options').locator('[data-ob="price"]').press('Tab');
   await panel(page,'options').locator('[data-ob="manual"]').click();
-  await expect(panel(page,'options').locator('[data-ob="legs"] tr')).toHaveCount(1);
+  await expect(panel(page,'options').getByLabel('Leg 1 strike',{exact:true})).toHaveValue('450');
   await panel(page,'options').locator('#options-builder').evaluate(el=>el.dataset.keep='yes');
   await panel(page,'backtest').locator('[data-bt="capital"]').fill('23456');
   await panel(page,'backtest').locator('[data-bt="capital"]').press('Tab');
   await panel(page,'screener').locator('[data-option="preset"]').selectOption('oversold');
   await expect(panel(page,'backtest').locator('[data-bt="capital"]')).toHaveValue('23456');
-  await expect(panel(page,'options').locator('[data-ob="legs"] tr')).toHaveCount(1);
+  await expect(panel(page,'options').getByLabel('Leg 1 strike',{exact:true})).toHaveValue('450');
   await expect(panel(page,'options').locator('#options-builder')).toHaveAttribute('data-keep','yes');
   await panel(page,'backtest').getByRole('button',{name:'Run backtest',exact:true}).click();
   await expect(panel(page,'backtest').locator('#equity-chart canvas').first()).toBeVisible();
   await expect(page.locator('.sidebar [data-tab="charts"]')).toHaveClass(/active/);
+  await grip(page,'options').press('ArrowUp');
+  expect((await order(page)).slice(0,3)).toEqual(['screener','options','backtest']);
+  await expect(panel(page,'options')).toHaveAttribute('open','');
+  await expect(panel(page,'options').getByLabel('Leg 1 strike',{exact:true})).toHaveValue('450');
+  await grip(page,'options').press('ArrowDown');
+  expect(await order(page)).toEqual(keys);
   await summary(page,'backtest').click();
   await summary(page,'screener').click();
   await summary(page,'options').click();
@@ -52,7 +59,7 @@ test('all workspace panels below the chart share existing behavior and keep stat
   await summary(page,'options').click();
   await expect(panel(page,'backtest').locator('[data-bt="capital"]')).toHaveValue('23456');
   await expect(panel(page,'backtest').locator('#equity-chart canvas').first()).toBeVisible();
-  await expect(panel(page,'options').locator('[data-ob="legs"] tr')).toHaveCount(1);
+  await expect(panel(page,'options').getByLabel('Leg 1 strike',{exact:true})).toHaveValue('450');
   await expect(panel(page,'options').locator('#options-builder')).toHaveAttribute('data-keep','yes');
   await summary(page,'scripts').click();
   await expect(panel(page,'scripts').locator('#pine-editor')).toBeVisible();
@@ -84,12 +91,38 @@ test('layout survives shared workspace startup replacement and immediate reload'
     await page.locator('.sidebar [data-tab="charts"]').click();
     await summary(page,'watchlists').click();
     await summary(page,'backtest').click();
+    await summary(page,'screener').click();
     await grip(page,'watchlists').press('Home');
     // Click then reload without waiting for the asynchronous public sync.
     await summary(page,'scans').click();
     await page.reload();await waitForMarket(page);
     expect((await order(page))[0]).toBe('watchlists');
-    for(const key of ['watchlists','backtest','scans'])await expect(panel(page,key)).toHaveAttribute('open','');
+    for(const key of ['watchlists','backtest','scans','screener'])await expect(panel(page,key)).toHaveAttribute('open','');
     await expect(panel(page,'alerts')).not.toHaveAttribute('open','');
+    await expect(page.locator('#price-chart canvas').first()).toBeVisible();
+    await expect(panel(page,'screener').locator('.screener-results tbody tr')).toHaveCount(4);
   }finally{await context.close();}
+});
+
+test.describe('touch workspace reordering',()=>{
+  test.use({viewport:{width:390,height:844},hasTouch:true,isMobile:true});
+  test('touch drag moves a collapsed panel and persists its order',async({page})=>{
+    await page.goto('./');
+    await page.locator('.mobile-nav [data-tab="charts"]').click();
+    await grip(page,'backtest').evaluate(el=>el.scrollIntoView({block:'center',behavior:'instant'}));
+    const source=await grip(page,'backtest').boundingBox(),target=await summary(page,'screener').boundingBox();
+    const x=Math.round(source.x+source.width/2),y=Math.round(source.y+source.height/2);
+    const endY=Math.round(target.y+target.height/4);
+    const cdp=await page.context().newCDPSession(page);
+    try{
+      await cdp.send('Input.dispatchTouchEvent',{type:'touchStart',touchPoints:[{x,y}]});
+      for(let step=1;step<=10;step++)await cdp.send('Input.dispatchTouchEvent',{type:'touchMove',touchPoints:[{x,y:Math.round(y+(endY-y)*step/10)}]});
+      await cdp.send('Input.dispatchTouchEvent',{type:'touchEnd',touchPoints:[]});
+    }finally{await cdp.detach();}
+    expect((await order(page)).slice(0,2)).toEqual(['backtest','screener']);
+    await expect(panel(page,'backtest')).not.toHaveAttribute('open','');
+    await page.reload();
+    expect((await order(page)).slice(0,2)).toEqual(['backtest','screener']);
+    expect(await page.evaluate(()=>document.documentElement.scrollWidth)).toBeLessThanOrEqual(391);
+  });
 });

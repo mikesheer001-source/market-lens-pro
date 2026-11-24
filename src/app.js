@@ -652,7 +652,7 @@ async function initApp(){
       S.chartFullscreen=false;S.workspaceSections[key]=true;mountedWorkspaceKeys.add(key);persistWorkspaceLayout();
     }else S.tab=key;
   }
-  const quickScreenerVisible=()=>workspaceActive('screener')&&!marketShown()&&!S.savedScanView;
+  const quickScreenerVisible=()=>S.tab==='screener'&&!marketShown()&&!S.savedScanView;
   function refreshScreenerResults(){
     if(!workspaceActive('screener'))return;
     const current=S.tab==='charts'?$('#chart-workspaces [data-workspace-section="screener"] .workspace-content'):$('#main');
@@ -997,14 +997,6 @@ async function initApp(){
         '<label class="control">Level <input type="number" class="textinput" data-alert-field="threshold" value="'+esc(S.alertDraft.threshold)+'" step="any"/></label>'+
         button('Add alert','alert-create','small primary')+
         '</div><div class="data-list">'+alertRows+'</div>'+end;
-  }
-  function refreshLocalWorkspaceControls(){
-    const container=$('#chart-workspaces');if(!container)return;
-    const template=document.createElement('template');template.innerHTML=workspaceControls(true);
-    for(const next of template.content.children){
-      const existing=container.querySelector('[data-workspace-section="'+next.dataset.workspaceSection+'"] .panel-body');
-      if(existing&&!existing.contains(document.activeElement))existing.replaceChildren(...next.querySelector('.panel-body').childNodes);
-    }
   }
   function preserveChartViewport(){
     try{S.pendingChartRange=chart?.timeScale().getVisibleLogicalRange()||null;}
@@ -2509,9 +2501,9 @@ async function initApp(){
       liveScanPending=pending;
       if(quickScreenerVisible()){
         applyPendingLiveScan();refreshMarketMode();refreshScreenerResults();
-        if(S.tab==='charts')refreshLocalWorkspaceControls();
       }else if((options.restoreTab&&initialMain===$('#main'))||!hasLiveData()||workspaceActive('data')||workspaceActive('screener')){
-        // Hydrate a restored view only if the user has not navigated during startup.
+        // Refresh integrated workspaces and chart from the same live-data snapshot.
+        if(S.tab==='charts'&&chart)preserveChartViewport();
         applyPendingLiveScan();render();
       }
     })();
