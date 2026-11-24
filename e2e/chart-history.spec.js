@@ -55,7 +55,7 @@ test('older intraday requests follow page tokens and deduplicate bars',async ({p
       {bars:[fixture('2025-05-30T13:30:00Z')],next_page_token:'older-page-2'}});
   });
   await openLiveChart(page);
-  await page.locator('[data-option="tf"]').selectOption('15m');
+  await page.locator('[data-timeframe="15m"]').click();
   await expect(page.locator('.chart-data')).toContainText('2 15m bars');
   await page.getByRole('button',{name:'Older bars',exact:true}).click();
   await expect(page.locator('.chart-data')).toContainText('4 15m bars');

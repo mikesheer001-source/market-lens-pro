@@ -156,7 +156,7 @@ async function initApp(){
     symbolMemory:previousSymbolMemory,leaderboard:null,leaderboardSort:'sharpe',leaderboardDescending:true,
     leaderboardValidatedOnly:!!saved.leaderboardValidatedOnly,leaderboardError:'',fitReport:null,fitValidatedReport:null,fitValidatedOnly:!!saved.fitValidatedOnly,fitSort:'sharpe',fitDescending:true,fitStatus:'',fitError:'',
     drawLine:false,
-    chartFullscreen:false,pendingChartRange:null,fullscreenScrollY:0,
+    chartFullscreen:false,pendingChartRange:null,fullscreenScrollY:0,chartHeight:Number.isFinite(saved.chartHeight)?Math.max(250,Math.min(1600,saved.chartHeight)):null,
     chartRecentSymbols:Array.isArray(saved.chartRecentSymbols)?saved.chartRecentSymbols.filter(s=>typeof s==='string').slice(0,6):[],
     chartRecentFrames:Array.isArray(saved.chartRecentFrames)?saved.chartRecentFrames.slice(0,3):[],
     hiddenScreenColumns:Array.isArray(saved.hiddenScreenColumns)?saved.hiddenScreenColumns.filter(i=>Number.isInteger(i)&&i>=2&&i<=13):[],
@@ -185,7 +185,7 @@ async function initApp(){
     tab:S.tab,lastSymbol:S.symbol,lastBacktestSymbol:S.lastBacktestSymbol,
     lastLiveSymbol:S.lastLiveSymbol,lastDemoSymbol:S.lastDemoSymbol,watch:[...S.watch],watchlists:S.watchlists,watchlistId:S.watchlistId,alerts:S.alerts,savedScans:S.savedScans,rules:S.rules,chart:S.chart,bt:S.bt,portfolioMode:S.portfolioMode,bestFitMode:S.bestFitMode,bestFitValidatedOnly:S.bestFitValidatedOnly,btRange:S.btRange,portfolioScope:S.portfolioScope,portfolioWatchlistId:S.portfolioWatchlistId,signalSelection:S.signalSelection,signalsOnly:S.signalsOnly,
     leaderboardValidatedOnly:S.leaderboardValidatedOnly,fitValidatedOnly:S.fitValidatedOnly,apiBaseUrl:S.apiBaseUrl,universeFilter:S.universeFilter,
-    chartRecentSymbols:S.chartRecentSymbols,chartRecentFrames:S.chartRecentFrames,hiddenScreenColumns:S.hiddenScreenColumns,variantBaseline:S.variantBaseline,backtestPineDraft:S.backtestPineDraft,
+    chartHeight:S.chartHeight,chartRecentSymbols:S.chartRecentSymbols,chartRecentFrames:S.chartRecentFrames,hiddenScreenColumns:S.hiddenScreenColumns,variantBaseline:S.variantBaseline,backtestPineDraft:S.backtestPineDraft,
     activeIndicators:S.activeIndicators,chartViews:S.chartViews,backtestSections:S.backtestSections,query:S.query,sort:S.sort,ascending:S.ascending,showOnlyMatches:S.showOnlyMatches,showWatch:S.showWatch,marketShown:market.shown,savedScanId:S.savedScanId,viewingSavedScan:!!S.savedScanView}));}catch{}};
   function receiveSharedSettings(prior,value){
     if(JSON.stringify(prior.savedScans)!==JSON.stringify(value.savedScans)){
@@ -1110,12 +1110,14 @@ async function initApp(){
     S.chart.tf=value;S.result=null;S.sweep=null;
     if(S.tab==='charts')S.chartRecentFrames=[value,...S.chartRecentFrames.filter(tf=>tf!==value)].slice(0,3);
   }
+  const chartFrameScale=[['15m','15m'],['2H','2H'],['D','1D'],['W','1W'],['M','1M']];
   function chartControls(){
     const styles=[['candles','Candles'],['bars','Bars'],['line','Line'],['area','Area']];
-    const frames=timeframes.map(([id])=>[id,id.length===1?'1'+id:id]);
-    const quick=new Set([...new Set([...S.chartRecentFrames.filter(tf=>frames.some(([id])=>id===tf)),'D','W','2H'])].slice(0,3));
-    const shortcuts=frames.filter(([id])=>quick.has(id)).map(([id,label])=>
+    const index=Math.max(0,chartFrameScale.findIndex(([id])=>id===S.chart.tf));
+    const shortcuts=chartFrameScale.map(([id,label])=>
       '<button type="button" data-action="chart-timeframe" data-timeframe="'+id+'" aria-pressed="'+(id===S.chart.tf)+'">'+label+'</button>').join('');
+    const frameScale='<div class="chart-frame-scale"><div class="chart-timeframes" role="group" aria-label="Timeframe shortcuts">'+shortcuts+'</div>'+
+      '<input type="range" min="0" max="4" step="1" value="'+index+'" data-chart-frame-scale aria-label="Timeframe scale" aria-valuetext="'+chartFrameScale[index][1]+'"></div>';
     const fullscreenLabel=S.chartFullscreen?'Exit fullscreen':'Fullscreen';
     const fullscreenIcon=S.chartFullscreen?
       chartIcon('<path d="M4 9h5V4m6 0v5h5m0 6h-5v5m-6 0v-5H4"/>'):
@@ -1123,8 +1125,7 @@ async function initApp(){
     return '<div class="chart-toolbar"><div class="chart-toolbar-symbol">'+
       '<button type="button" class="chart-ticker" data-action="chart-symbol-picker" data-symbol="'+esc(S.symbol)+
       '" aria-label="Change symbol, '+esc(S.symbol)+'" aria-haspopup="dialog">'+esc(S.symbol)+' <span aria-hidden="true">⌄</span></button>'+
-      '<div class="chart-timeframes" role="group" aria-label="Quick timeframes">'+shortcuts+'</div>'+
-      select(frames,S.chart.tf,'data-option="tf" aria-label="All timeframes"')+
+      frameScale+
       '</div><div class="chart-toolbar-actions">'+
       select(styles,S.chart.style,'data-option="style" aria-label="Chart style"')+
       '<button type="button" class="chart-add-indicator" data-action="indicator-picker" aria-haspopup="dialog"><span aria-hidden="true">+</span> New indicator</button>'+
@@ -1233,13 +1234,14 @@ async function initApp(){
     const panel='<div class="panel '+(S.chartFullscreen?'chart-is-fullscreen':'')+
       '" id="chart-lab-panel" data-fullscreen="'+S.chartFullscreen+'">'+chartControls()+scanReviewControls()+
       '<div class="chart-readout" id="readout">'+chartReadout(b.at(-1))+'</div>'+
-      '<div class="chart-stage" id="chart-stage"><div class="chart-area" id="price-chart"></div>'+
+      '<div class="chart-stage" id="chart-stage"><div class="chart-area" id="price-chart"'+(!S.chartFullscreen&&S.chartHeight!=null?' style="height:'+S.chartHeight+'px"':'')+'></div>'+
       chartIndicatorLegend(b)+'</div><div class="chart-ranges" aria-label="Chart range" role="group">'+
       button('1M','range-1m','small')+button('3M','range-3m','small')+button('1Y','range-1y','small')+
       button('All','range-all','small')+button('Fit','range-fit','small')+
       (intradayTf(S.chart.tf)?button('Refresh 15m bars','refresh-intraday','small chart-refresh'):'')+
       '<span id="older-history-control">'+olderHistoryControl()+'</span>'+
-      '<span class="visually-hidden" id="chart-axis-hint" role="status"></span></div>'+
+      '<span class="visually-hidden" id="chart-axis-hint" role="status"></span>'+
+      (!S.chartFullscreen?'<button type="button" id="chart-resize-handle" class="chart-resize-handle" aria-label="Resize chart height" title="Drag up or down to resize chart; double-click to reset">'+chartIcon('<path d="M7 17 17 7M12 17l5-5"/>')+'</button>':'')+'</div>'+
       '<dialog id="chart-indicator-dialog" class="chart-dialog" aria-labelledby="chart-dialog-title"></dialog>'+
       '<dialog id="chart-symbol-dialog" class="chart-dialog" aria-labelledby="chart-symbol-title"></dialog>'+
       '<dialog id="scan-rules-dialog" class="chart-dialog" aria-labelledby="scan-rules-title"></dialog></div>';
@@ -1871,6 +1873,7 @@ async function initApp(){
       if(S.data.has(S.symbol)){
         S.chartRecentSymbols=[S.symbol,...S.chartRecentSymbols.filter(symbol=>symbol!==S.symbol)].slice(0,6);
       }
+      mountChartResize();
       mountPriceChart();
       if(intradayTf(S.chart.tf)&&S.mode==='live'&&S.sources.get(S.symbol)==='ALPACA'&&
         !S.intraday.get(intradayKey(S.symbol))&&!S.intradayStatus.get(intradayKey(S.symbol)))
@@ -1890,6 +1893,49 @@ async function initApp(){
   const colors={background:'#101515',text:'#a8b7b0',grid:'#23302b',up:'#46d69b',down:'#f08480',yellow:'#e9bd68',blue:'#71b8b3',indicator:'#d69c65'};
   function newChart(el,height=535,priceScaleWidth=55){
     return createChart(el,{autoSize:true,height,layout:{background:{type:'solid',color:colors.background},textColor:colors.text,fontFamily:'system-ui, sans-serif',fontSize:11,panes:{enableResize:true,separatorColor:'#46534d',separatorHoverColor:'#7a9385'}},grid:{vertLines:{color:colors.grid},horzLines:{color:colors.grid}},crosshair:{mode:0},trackingMode:{exitMode:TrackingModeExitMode.OnNextTap},rightPriceScale:{borderColor:'#304357',visible:true,autoScale:true,minimumWidth:priceScaleWidth},timeScale:{borderColor:'#304357',rightOffset:10,barSpacing:8},handleScale:chartScaleOptions(),handleScroll:{mouseWheel:true,pressedMouseMove:true,horzTouchDrag:true,vertTouchDrag:false}});
+  }
+  function mountChartResize(){
+    const handle=$('#chart-resize-handle'), area=$('#price-chart');
+    if(!handle||!area)return;
+    let drag=null;
+    const setHeight=value=>{
+      S.chartHeight=Math.round(Math.max(250,Math.min(1600,value)));
+      area.style.height=S.chartHeight+'px';
+      handle.setAttribute('aria-label','Resize chart height ('+S.chartHeight+' pixels)');
+    };
+    handle.addEventListener('pointerdown',event=>{
+      if(event.button!==0||drag)return;
+      drag={pointer:event.pointerId,y:event.clientY,height:area.getBoundingClientRect().height,previous:S.chartHeight};
+      handle.setPointerCapture(event.pointerId);
+      handle.classList.add('is-resizing');
+      event.preventDefault();
+    });
+    handle.addEventListener('pointermove',event=>{
+      if(drag?.pointer!==event.pointerId)return;
+      setHeight(drag.height+event.clientY-drag.y);
+    });
+    const finish=event=>{
+      if(drag?.pointer!==event.pointerId)return;
+      const previous=drag.previous;
+      drag=null;
+      handle.classList.remove('is-resizing');
+      if(event.type==='pointercancel'){
+        S.chartHeight=previous;
+        area.style.height=previous==null?'':previous+'px';
+      }
+      saveSettings();
+    };
+    handle.addEventListener('pointerup',finish);
+    handle.addEventListener('pointercancel',finish);
+    handle.addEventListener('lostpointercapture',finish);
+    const reset=()=>{S.chartHeight=null;area.style.height='';handle.setAttribute('aria-label','Resize chart height');saveSettings();};
+    handle.addEventListener('dblclick',reset);
+    handle.addEventListener('keydown',event=>{
+      if(!['ArrowUp','ArrowDown','Home'].includes(event.key))return;
+      event.preventDefault();
+      if(event.key==='Home')return reset();
+      setHeight(area.getBoundingClientRect().height+(event.key==='ArrowDown'?40:-40));saveSettings();
+    });
   }
   function mountPriceChart(){
     const b=chartBars(),el=$('#price-chart');if(!b.length){const state=S.intradayStatus.get(intradayKey(S.symbol));
@@ -2940,8 +2986,22 @@ async function initApp(){
     }
     if(el.dataset.input==='search'){market.page=0;S.query=el.value;const focus=el.selectionStart;render();const input=$('[data-input="search"]');if(input){input.focus();input.setSelectionRange(focus,focus);}}
   });
+  document.addEventListener('input',ev=>{
+    const el=ev.target;
+    if(!el.hasAttribute('data-chart-frame-scale'))return;
+    const frame=chartFrameScale[Number(el.value)];
+    if(!frame)return;
+    el.setAttribute('aria-valuetext',frame[1]);
+    for(const control of el.closest('.chart-frame-scale').querySelectorAll('[data-timeframe]'))
+      control.setAttribute('aria-pressed',String(control.dataset.timeframe===frame[0]));
+  });
   document.addEventListener('change',async ev=>{
     const el=ev.target;
+    if(el.hasAttribute('data-chart-frame-scale')){
+      const frame=chartFrameScale[Number(el.value)];
+      if(frame&&frame[0]!==S.chart.tf){setTimeframe(frame[0]);render();$('[data-chart-frame-scale]')?.focus({preventScroll:true});}
+      return;
+    }
     if(el.id==='csv-file'){if(el.files?.length)await importFiles(el.files);el.value='';return;}
     if(el.id==='pine-library'){const found=S.scriptLibrary.find(x=>x.id===el.value);if(found){loadPineSource(found.code,found.name,found.id);S.scriptSettings={...(found.settings||{})};persistPineDraft();render();}return;}
     if(el.dataset.pineInput){S.scriptSettings[el.dataset.pineInput]=el.type==='checkbox'?el.checked:Number(el.value);persistPineDraft();return;}

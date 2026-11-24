@@ -77,3 +77,33 @@ test('backtest results precede settings and the trade log and windows can expand
   await page.getByRole('heading',{name:'Validation windows',exact:true}).tap();
   await expect(page.locator('#rolling-window-dates')).toBeVisible();
 });
+
+test('timeframe slider snaps to supported intervals and chart height is resizable',async ({page})=>{
+  await page.setViewportSize({width:390,height:844});
+  await page.goto('./');
+  await page.locator('.mobile-nav [data-tab="charts"]').click();
+  const scale=page.getByRole('slider',{name:'Timeframe scale'});
+  await expect(scale).toBeVisible();
+  await scale.focus();
+  await scale.press('End');
+  await expect(page.locator('[data-timeframe="M"]')).toHaveAttribute('aria-pressed','true');
+  await scale.press('Home');
+  await expect(page.locator('[data-timeframe="15m"]')).toHaveAttribute('aria-pressed','true');
+  await page.locator('[data-timeframe="D"]').click();
+  const chart=page.locator('#price-chart');
+  const grip=page.locator('#chart-resize-handle');
+  await grip.scrollIntoViewIfNeeded();
+  const before=(await chart.boundingBox()).height;
+  const box=await grip.boundingBox();
+  await page.mouse.move(box.x+box.width/2,box.y+box.height/2);
+  await page.mouse.down();
+  await page.mouse.move(box.x+box.width/2,box.y+box.height/2+100,{steps:6});
+  await page.mouse.up();
+  expect((await chart.boundingBox()).height).toBeGreaterThan(before+80);
+  await grip.focus();
+  await grip.press('ArrowUp');
+  expect((await chart.boundingBox()).height).toBeLessThan(before+80);
+  await grip.press('Home');
+  expect(Math.abs((await chart.boundingBox()).height-before)).toBeLessThan(3);
+  expect(await page.evaluate(()=>document.documentElement.scrollWidth)).toBeLessThanOrEqual(391);
+});
