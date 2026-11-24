@@ -1174,10 +1174,12 @@ async function initApp(){
       chartIcon('<path d="M4 9h5V4m6 0v5h5m0 6h-5v5m-6 0v-5H4"/>'):
       chartIcon('<path d="M9 4H4v5m11-5h5v5m0 6v5h-5m-6 0H4v-5"/>');
     return '<div class="chart-toolbar"><div class="chart-toolbar-symbol">'+
+      '<span class="chart-ticker-caption" aria-hidden="true">Active ticker</span>'+
       '<button type="button" class="chart-ticker" data-action="chart-symbol-picker" data-symbol="'+esc(S.symbol)+
-      '" aria-label="Change symbol, '+esc(S.symbol)+'" aria-haspopup="dialog">'+esc(S.symbol)+' <span aria-hidden="true">⌄</span></button>'+
-      frameScale+
-      '</div><div class="chart-toolbar-actions">'+
+      '" aria-label="Change symbol, '+esc(S.symbol)+'" aria-haspopup="dialog"><span class="chart-ticker-name">'+esc(S.symbol)+'</span>'+
+      chartIcon('<path d="m6 9 6 6 6-6"/>')+'</button></div>'+
+      '<div class="chart-toolbar-controls">'+frameScale+
+      '<div class="chart-toolbar-actions">'+
       '<button type="button" class="chart-add-indicator" data-action="indicator-picker" aria-haspopup="dialog"><span aria-hidden="true">+</span> New indicator</button>'+
       '<button type="button" data-action="reset-price-scale" title="Reset price scale" aria-label="Reset price scale">Auto</button>'+
       '<button type="button" class="chart-icon" data-action="'+(S.chartFullscreen?'chart-exit-fullscreen':'chart-fullscreen')+
@@ -1190,7 +1192,7 @@ async function initApp(){
       button('Workspace tools & overlays','chart-workspace-tools','small')+
       button('Clear price levels','clear-lines','small')+button('Export PNG','chart-png','small')+
       button('Backtest this symbol','view-backtest','small chart-mobile-backtest')+'</div></details>'+
-      '<button type="button" class="chart-icon" data-action="chart-settings" aria-label="Chart settings" title="Chart settings" aria-haspopup="dialog">'+chartIcon('<path d="M12 3v2m0 14v2M3 12h2m14 0h2M5.6 5.6l1.4 1.4m10 10 1.4 1.4M18.4 5.6 17 7M7 17l-1.4 1.4"/><circle cx="12" cy="12" r="7"/><circle cx="12" cy="12" r="2.5"/>')+'</button></div></div>';
+      '<button type="button" class="chart-icon" data-action="chart-settings" aria-label="Chart settings" title="Chart settings" aria-haspopup="dialog">'+chartIcon('<path d="M12 3v2m0 14v2M3 12h2m14 0h2M5.6 5.6l1.4 1.4m10 10 1.4 1.4M18.4 5.6 17 7M7 17l-1.4 1.4"/><circle cx="12" cy="12" r="7"/><circle cx="12" cy="12" r="2.5"/>')+'</button></div></div></div>';
   }
   const optionsMedianCache = new Map();
   const refreshOptionsMedian=new Map();

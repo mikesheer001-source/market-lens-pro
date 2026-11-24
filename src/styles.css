@@ -740,3 +740,27 @@ tr[data-vol-symbol] td:nth-child(3){min-width:138px}
 .chart-workspace-note{color:var(--muted);overflow-wrap:anywhere}
 .chart-is-fullscreen .chart-workspace-controls{flex:none;max-height:24vh;overflow:auto}
 @media(max-width:600px){.chart-workspace-row{gap:5px}.chart-workspace-row .btn.small,.chart-workspace-row select,.chart-workspace-row input{min-height:30px}.chart-workspace-settings{max-height:65svh}}
+
+/* MLP-04: the active ticker owns the first header row; tools sit below/right. */
+#chart-lab-panel .chart-toolbar{display:grid;grid-template-columns:minmax(0,1fr);gap:3px;padding:8px 12px 5px}
+#chart-lab-panel .chart-toolbar-symbol{display:flex;flex-direction:column;align-items:flex-start;gap:0;min-width:0}
+.chart-ticker-caption{padding-inline:4px;color:var(--muted);font-size:10px;font-weight:650;letter-spacing:.08em;text-transform:uppercase;line-height:1.2}
+#chart-lab-panel .chart-ticker{display:inline-flex;align-items:center;gap:9px;text-align:left;max-width:100%;min-height:44px;padding:0 4px;font-size:clamp(30px,3vw,40px);font-weight:800;line-height:1.15;letter-spacing:-.035em;overflow:visible}
+.chart-ticker-name{min-width:0;overflow-wrap:anywhere}
+#chart-lab-panel .chart-ticker svg{flex:none;color:var(--muted);width:18px;height:18px}
+#chart-lab-panel .chart-toolbar-controls{display:flex;align-items:center;justify-content:flex-end;flex-wrap:wrap;gap:3px 12px;min-width:0}
+#chart-lab-panel .chart-toolbar-controls .chart-frame-scale{flex:0 1 440px;width:440px;max-width:100%;margin-inline-start:0}
+#chart-lab-panel .chart-toolbar-actions{flex:0 0 auto;justify-content:flex-end;flex-wrap:wrap;max-width:100%;min-width:0}
+#chart-lab-panel .chart-tools{margin-inline-start:0}
+#chart-lab-panel.chart-is-fullscreen .chart-toolbar{padding-top:max(8px,env(safe-area-inset-top))}
+@media(max-width:600px){
+  #chart-lab-panel .chart-toolbar{padding:6px 8px 4px;gap:2px}
+  #chart-lab-panel .chart-ticker{font-size:32px;min-height:42px}
+  #chart-lab-panel .chart-toolbar-controls{gap:1px 8px}
+  #chart-lab-panel .chart-toolbar-controls .chart-frame-scale{flex:0 1 320px;width:320px}
+  #chart-lab-panel .chart-toolbar-actions{gap:2px}
+}
+@media(max-height:480px){
+  #chart-lab-panel.chart-is-fullscreen .chart-ticker{font-size:28px;min-height:34px}
+  #chart-lab-panel.chart-is-fullscreen .chart-ticker-caption{font-size:9px}
+}
