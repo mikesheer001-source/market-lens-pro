@@ -85,7 +85,7 @@ function graph({width, price, high, low, points, expiry, pointAt, focus, marker,
     (expiry?'':'<span class="at">Selected date model</span>')+'</div>';
 }
 
-export function createOptionsBuilder() {
+export function createOptionsBuilder({onPositionsChange=()=>{}}={}) {
   let root, timer, pending, generation = 0;
   let ownerToken = getOptionsDevice(), feed = 'indicative', expirations = [], chain = [], feedVerified = false, nextPoll = 0;
   let message = '', spotSource = '', drag, rollFrom, resize, groupAnchor = null;
@@ -97,6 +97,14 @@ export function createOptionsBuilder() {
   const $ = name => root.querySelector('[data-ob="'+name+'"]');
   const manualExpiry = days => localDate(Date.now()+DAY*days);
   const active = () => root?.isConnected;
+  // Only expose committed position geometry; never expose tokens, quote credentials or model prices.
+  const chartPositions=()=>({symbol:state.symbol,legs:state.legs.map(({strike,side,type})=>
+    ({strike:numeric(strike),side,type}))});
+  let lastChartPositions='';
+  function publishChartPositions(){
+    const snapshot=chartPositions(),key=JSON.stringify(snapshot);
+    if(key!==lastChartPositions){lastChartPositions=key;onPositionsChange(snapshot);}
+  }
   const setMessage = value => {
     message = value;
     if (active()) $('status').textContent = message;
@@ -602,6 +610,7 @@ export function createOptionsBuilder() {
 
   function refreshMarks() {
     if (!active()) return;
+    publishChartPositions();
     const fee = numeric(state.fee);
     const validFee = fee >= 0 && fee != null && fee <= 10000;
     const legs = state.legs.map((position,i) => {
@@ -899,7 +908,7 @@ export function createOptionsBuilder() {
     else setMessage('Use your quote link to load Alpaca prices.');
 
   }
-  return {mount,openApproval() {
+  return {mount,chartPositions,openApproval() {
     const code = optionsApprovalLink();
     if (active() && code !== null) void approveBrowser(code);
   },unmount() {

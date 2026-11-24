@@ -1,3 +1,4 @@
+import {readChartWorkspace,writeChartWorkspace,chartAlertLevels,chartOptionLevels,matchingTradeMarkers} from './chart-workspace.js';
 import {readWorkspaceLayout,writeWorkspaceLayout,moveWorkspace} from './workspace-layout.js';
 import {getOptionsDevice, requestOptions} from './options-api.js';
 import {loadOptionsMedians, medianHorizons} from './options-median.js';
@@ -62,6 +63,7 @@ async function initApp(){
   let syncText='';
   const sharedSettings=({tab,apiBaseUrl,workspaceSections,...rest}={})=>rest;
   const workspaceLayout=readWorkspaceLayout(localStorage);
+  let chartTools=readChartWorkspace(localStorage),refreshWorkspaceOverlays=null;
   writeWorkspaceLayout(localStorage,workspaceLayout);
   const syncEnabled=localStorage.getItem('market-lens-sync-disabled')!=='1';
   const workspace=workspaceSync({
@@ -216,6 +218,7 @@ async function initApp(){
     }
     if(JSON.stringify(prior.alerts)!==JSON.stringify(value.alerts))
       S.alerts=Array.isArray(value.alerts)?value.alerts.slice(0,ALERT_LIMIT):[];
+    refreshWorkspaceOverlays?.();
   }
   function rememberPortfolio(){
     S.portfolioTimestamp=new Date().toISOString();
@@ -599,7 +602,7 @@ async function initApp(){
     hasLiveData()?'ALPACA LIVE · '+String(S.liveFeed||'iex').toUpperCase():'ALPACA · NO DATA';
   const isVisibleSymbol=symbol=>modeSymbol(symbol)&&(S.universeFilter!=='volatility'||VOLATILITY_UNIVERSE.includes(symbol));
   const medianUnmount=[];
-  function destroyCharts(){for(const stop of medianUnmount.splice(0))stop();if(chart){chart.remove();chart=null;}if(equityChart){equityChart.remove();equityChart=null;}if(leaderboardChart){leaderboardChart.remove();leaderboardChart=null;}if(tradeChart){tradeChart.remove();tradeChart=null;}}
+  function destroyCharts(){refreshWorkspaceOverlays=null;for(const stop of medianUnmount.splice(0))stop();if(chart){chart.remove();chart=null;}if(equityChart){equityChart.remove();equityChart=null;}if(leaderboardChart){leaderboardChart.remove();leaderboardChart=null;}if(tradeChart){tradeChart.remove();tradeChart=null;}}
   function shell(){
     const links=keys=>keys.map(key=>'<button class="nav-btn '+(S.tab===key?'active':'')+'" data-tab="'+key+
       '"'+(S.tab===key?' aria-current="page"':'')+'><span class="nav-icon" aria-hidden="true">'+tabIcons[key]+'</span>'+tabNames[key]+'</button>').join('');
@@ -1184,6 +1187,7 @@ async function initApp(){
       '</summary><div class="chart-tools-menu">'+
       button(S.drawLine?'Cancel price line':'Horizontal line','draw-line','small')+
       button(indicatorInstances().some(item=>item.type==='optionsMedian')?'Hide options 50/50':'Options 50/50 levels','options-median-toggle','small')+
+      button('Workspace tools & overlays','chart-workspace-tools','small')+
       button('Clear price levels','clear-lines','small')+button('Export PNG','chart-png','small')+
       button('Backtest this symbol','view-backtest','small chart-mobile-backtest')+'</div></details>'+
       '<button type="button" class="chart-icon" data-action="chart-settings" aria-label="Chart settings" title="Chart settings" aria-haspopup="dialog">'+chartIcon('<path d="M12 3v2m0 14v2M3 12h2m14 0h2M5.6 5.6l1.4 1.4m10 10 1.4 1.4M18.4 5.6 17 7M7 17l-1.4 1.4"/><circle cx="12" cy="12" r="7"/><circle cx="12" cy="12" r="2.5"/>')+'</button></div></div>';
@@ -1270,6 +1274,99 @@ async function initApp(){
     const timer=setInterval(()=>void load(),10_000);
     medianUnmount.push(()=>{active=false;controller?.abort();clearInterval(timer);refreshOptionsMedian.delete(id);});
   }
+  const workspaceToolGroups=[
+    ['Chart controls',[
+      ['watchlist','Watchlist','Star the active symbol, select a list and jump between its symbols.'],
+      ['scan','Screener & saved scans','See the current match, load an archived scan or review matches.'],
+      ['backtest','Backtest & Optimize','Run the current strategy and open its full settings.'],
+      ['alerts','In-app alerts','Add a daily-close alert for the active symbol.'],
+      ['options','Options Builder','Open the builder and see whether its positions match the chart.'],
+      ['scripts','Script Lab','Open the editor without leaving Chart Lab.'],
+      ['data','Data Center','See source and last bar, refresh the curated universe.']
+    ]],
+    ['Chart overlays',[
+      ['trades','Backtest trade markers','Only actual saved backtest fills for this symbol and timeframe.'],
+      ['pine','Pine plots & shapes','Keep the applied scripts; hide or show their output.'],
+      ['alertLevels','Price alert levels','Daily-close thresholds for the active symbol. RSI alerts remain in the alert list.'],
+      ['strikes','Options strike levels','Matching builder contract strikes or user-entered assumptions, not quotes.']
+    ]]
+  ];
+  function openChartWorkspaceTools(){
+    const dialog=$('#chart-workspace-dialog');
+    dialog.innerHTML=dialogHeader('Workspace tools & overlays','chart-workspace-title')+
+      '<div class="chart-workspace-settings">'+workspaceToolGroups.map(([title,items])=>
+        '<fieldset><legend>'+title+'</legend>'+items.map(([key,label,help])=>
+          '<label class="chart-workspace-choice"><input type="checkbox" data-chart-workspace-choice="'+key+'" '+(chartTools[key]?'checked':'')+'><span><strong>'+label+'</strong><small>'+help+'</small></span></label>').join('')+'</fieldset>').join('')+
+      '<p class="section-note">Visibility is saved in this browser. Turning an item off never deletes workspace settings or positions. Options 50/50 remains available in the indicator menu.</p>'+
+      '<button type="button" class="btn primary" data-action="apply-chart-workspace-tools">Apply visibility</button></div>';
+    dialog.showModal();
+  }
+  function optionWorkspaceStatus(){
+    const snapshot=optionsBuilder.chartPositions(),levels=chartOptionLevels(snapshot,S.symbol);
+    if(snapshot.symbol!==S.symbol)return 'Builder: '+snapshot.symbol+' · no strikes for '+S.symbol;
+    return levels.length?levels.length+' strike level'+(levels.length===1?'':'s')+' · positions, not quotes':'No valid strikes for '+S.symbol;
+  }
+  function alertWorkspaceStatus(){
+    const alerts=S.alerts.filter(a=>a.symbol===S.symbol&&a.type!=='signal');
+    return alerts.length+' daily alert'+(alerts.length===1?'':'s')+' · '+alerts.filter(a=>a.unread).length+' unread · checks on scan/refresh';
+  }
+  function chartScanStatus(){
+    const snapshot=S.savedScanView;
+    if(snapshot){
+      const row=snapshot.rows.find(r=>r.symbol===S.symbol);
+      return 'Archived '+snapshot.name+' · '+String(snapshot.savedAt).slice(0,10)+' · '+(row?(row.evalResult.pass?'match':'no match'):'not in saved rows')+' (not live)';
+    }
+    const row=marketShown()?market.rows.get(S.symbol):null,history=S.data.get(S.symbol);
+    const result=row?marketRules(row):history?.length?screenSymbol(history,S.rules):null;
+    return result?'Current rules: '+(result.pass?'match':'no match')+' · '+S.rules.length+' rule'+(S.rules.length===1?'':'s'):'No current scan data';
+  }
+  function workspaceShortcut(key,label){
+    return '<button type="button" class="btn small" data-action="chart-workspace-open" data-workspace-key="'+key+'">'+label+'</button>';
+  }
+  function chartWorkspaceControls(){
+    if(!workspaceToolGroups[0][1].some(([key])=>chartTools[key]))return '';
+    const row=(key,title,body)=>chartTools[key]?'<div class="chart-workspace-row" data-chart-workspace-row="'+key+'"><strong>'+title+'</strong>'+body+'</div>':'';
+    const list=S.watchlists.find(item=>item.id===S.watchlistId);
+    const watchSymbols=(list?.symbols||[]).filter(modeSymbol);
+    const currentResult=S.result&&S.resultSymbol===S.symbol&&S.resultTf===S.chart.tf;
+    const source=S.sources.get(S.symbol),last=chartBars().at(-1);
+    const controls=
+      row('watchlist','Watchlist','<select aria-label="Chart watchlist" data-chart-workspace-input="watchlist">'+
+        S.watchlists.map(item=>'<option value="'+esc(item.id)+'"'+(item.id===S.watchlistId?' selected':'')+'>'+esc(item.name)+'</option>').join('')+'</select>'+
+        '<button type="button" class="btn small" data-action="chart-workspace-star" aria-pressed="'+S.watch.has(S.symbol)+'" '+(!modeSymbol(S.symbol)?'disabled':'')+'>'+(S.watch.has(S.symbol)?'★ Remove':'☆ Add')+' '+esc(S.symbol)+'</button>'+
+        '<select aria-label="Jump to watchlist symbol" data-chart-workspace-input="watch-symbol"><option value="">Jump to symbol</option>'+watchSymbols.map(sym=>'<option value="'+esc(sym)+'">'+esc(sym)+'</option>').join('')+'</select>')+
+      row('scan','Screener','<span class="chart-workspace-note">'+esc(chartTools.scan?chartScanStatus():'')+'</span>'+
+        '<select aria-label="Chart saved scan" data-chart-workspace-input="scan"><option value="">Current rules</option>'+S.savedScans.map(item=>'<option value="'+esc(item.id)+'"'+(S.savedScanView?.id===item.id?' selected':'')+'>'+esc(item.name)+'</option>').join('')+'</select>'+
+        button('Review matches','chart-workspace-review','small')+workspaceShortcut('screener','Screener'))+
+      row('backtest','Backtest','<span class="chart-workspace-note">'+esc(S.bt.strategy)+(currentResult?' · '+S.result.trades.length+' trades':' · no matching result')+'</span>'+
+        '<button type="button" class="btn small" data-action="chart-workspace-run" '+(S.portfolioMode||S.analysisLoading?'disabled':'')+'>Run on chart</button>'+
+        workspaceShortcut('backtest','Settings')+workspaceShortcut('optimize','Optimize')+
+        (S.portfolioMode?'<span class="chart-workspace-note">Portfolio mode: use full Backtest.</span>':'')+
+        (S.backtestError?'<span class="chart-workspace-note" role="alert">'+esc(S.backtestError)+'</span>':''))+
+      row('alerts','Alerts','<span id="chart-workspace-alert-status" class="chart-workspace-note">'+esc(alertWorkspaceStatus())+'</span>'+
+        '<select aria-label="Chart alert condition" data-chart-workspace-input="alert-op"><option value=">">Above</option><option value="<">Below</option></select>'+
+        '<input aria-label="Chart alert price" type="number" min="0.01" step="any" data-chart-workspace-input="alert-price" placeholder="Daily close">'+
+        '<button type="button" class="btn small" data-action="chart-workspace-add-alert" '+(!modeSymbol(S.symbol)?'disabled':'')+'>Add price alert</button>'+workspaceShortcut('alerts','Manage'))+
+      row('options','Options','<span id="chart-workspace-options-status" class="chart-workspace-note">'+esc(optionWorkspaceStatus())+'</span>'+workspaceShortcut('options','Open builder'))+
+      row('scripts','Scripts','<span class="chart-workspace-note">'+S.activeIndicators.length+' applied indicator'+(S.activeIndicators.length===1?'':'s')+'</span>'+workspaceShortcut('scripts','Script Lab'))+
+      row('data','Data','<span class="chart-workspace-note">'+esc(source==='ALPACA'?'Alpaca '+String(S.liveFeed).toUpperCase():source==='IMPORTED'?'Imported':'No data')+' · '+esc(last?dateLabel(last.time):'no bar')+'</span>'+
+        button('Refresh scan','chart-workspace-refresh','small')+workspaceShortcut('data','Data Center'));
+    return controls?'<section class="chart-workspace-controls" aria-label="On-chart workspace controls">'+controls+'</section>':'';
+  }
+  function openChartWorkspace(key){
+    if(S.tab!=='charts'||!Object.hasOwn(S.workspaceSections,key))return;
+    preserveChartViewport();showWorkspace(key);render();
+    const section=$('#chart-workspaces > [data-workspace-section="'+key+'"]');
+    section?.scrollIntoView({block:'start'});section?.querySelector('summary')?.focus({preventScroll:true});
+  }
+  async function runChartBacktest(){
+    if(S.portfolioMode)return;
+    const symbol=S.symbol,tf=S.chart.tf;
+    preserveChartViewport();
+    if(!await ensureAnalysisBars('Backtest'))return;
+    if(S.tab!=='charts'||S.symbol!==symbol||S.chart.tf!==tf||S.portfolioMode)return;
+    S.lastBacktestSymbol=symbol;preserveChartViewport();runBt();render();
+  }
   function chartsView(){
     const b=chartBars(),source=S.sources.get(S.symbol);
     const intro=S.chartFullscreen?'':'<div class="headrow chart-page-heading"><h1>Chart Lab</h1>'+
@@ -1280,7 +1377,7 @@ async function initApp(){
       staleNote(S.symbol)+'</div>':'';
     const panel='<div class="panel '+(S.chartFullscreen?'chart-is-fullscreen':'')+
       '" id="chart-lab-panel" data-fullscreen="'+S.chartFullscreen+'">'+chartControls()+scanReviewControls()+
-      '<div class="chart-readout" id="readout">'+chartReadout(b.at(-1))+'</div>'+
+      '<div class="chart-readout" id="readout">'+chartReadout(b.at(-1))+'</div>'+chartWorkspaceControls()+
       '<div class="chart-stage" id="chart-stage"><div class="chart-area" id="price-chart"'+(!S.chartFullscreen&&S.chartHeight!=null?' style="height:'+S.chartHeight+'px"':'')+'></div>'+
       chartIndicatorLegend(b)+'</div><div class="chart-ranges" aria-label="Chart range" role="group">'+
       button('1M','range-1m','small')+button('3M','range-3m','small')+button('1Y','range-1y','small')+
@@ -1290,6 +1387,7 @@ async function initApp(){
       '<span id="older-history-control">'+olderHistoryControl()+'</span>'+
       '<span class="visually-hidden" id="chart-axis-hint" role="status"></span>'+
       (!S.chartFullscreen?'<button type="button" id="chart-resize-handle" class="chart-resize-handle" aria-label="Resize chart height" title="Drag up or down to resize chart; double-click to reset">'+chartIcon('<path d="M7 17 17 7M12 17l5-5"/>')+'</button>':'')+'</div>'+
+      '<dialog id="chart-workspace-dialog" class="chart-dialog" aria-labelledby="chart-workspace-title"></dialog>'+
       '<dialog id="chart-settings-dialog" class="chart-dialog" aria-labelledby="chart-settings-title"></dialog>'+
        '<dialog id="chart-indicator-dialog" class="chart-dialog" aria-labelledby="chart-dialog-title"></dialog>'+
       '<dialog id="chart-symbol-dialog" class="chart-dialog" aria-labelledby="chart-symbol-title"></dialog>'+
@@ -1896,7 +1994,7 @@ async function initApp(){
       '<div class="panel"><div class="panel-header"><h2>Saved imported symbols</h2><div class="flex">'+button('Clear imported data','clear-imports','small')+'</div></div><div class="panel-body"><div class="data-list">'+(imported.length?imported.map(([symbol,b])=>'<div class="data-item"><div><strong>'+esc(symbol)+'</strong><br/><small>'+b.length+' bars · '+dateLabel(b[0].time)+' to '+dateLabel(b.at(-1).time)+'</small></div><button class="btn small" data-action="choose-symbol" data-symbol="'+esc(symbol)+'">Open chart</button></div>').join(''):'<div class="empty"><strong>No imported data yet.</strong>Import actual historical OHLCV data to use it alongside Alpaca.</div>')+'</div></div></div>'+
       '<div class="panel"><div class="panel-header"><h2>Market data policy</h2></div><div class="panel-body"><p class="section-note">GitHub Pages serves the public frontend only. Alpaca credentials are stored as Cloudflare Worker secrets and are never sent to this browser. Live data requests go through the Worker proxy.</p><p class="section-note">Imported data remains available alongside Alpaca data. Backtesting is research-only and does not submit orders.</p></div></div>';
   }
-  const optionsBuilder=createOptionsBuilder();
+  const optionsBuilder=createOptionsBuilder({onPositionsChange:()=>refreshWorkspaceOverlays?.()});
   window.addEventListener('hashchange',()=>{
     if(optionsApprovalLink()===null)return;
     if(S.tab==='options')optionsBuilder.openApproval();
@@ -2101,6 +2199,28 @@ async function initApp(){
     const base=chart.addSeries(type,{...baseOptions,...style});
     const datapoints=b.map(x=>S.chart.style==='line'||S.chart.style==='area'?{time:x.time,value:x.close}:{time:x.time,open:x.open,high:x.high,low:x.low,close:x.close});
     base.setData(datapoints);
+    let workspaceLines=[],lastWorkspaceLevels='';
+    refreshWorkspaceOverlays=()=>{
+      if(!el.isConnected)return;
+      const alerts=chartTools.alertLevels?chartAlertLevels(S.alerts,S.symbol):[];
+      const strikes=chartTools.strikes?chartOptionLevels(optionsBuilder.chartPositions(),S.symbol):[];
+      const key=JSON.stringify([alerts,strikes]);
+      if(lastWorkspaceLevels!==key){
+        lastWorkspaceLevels=key;
+        for(const line of workspaceLines)base.removePriceLine(line);
+        workspaceLines=[
+          ...alerts.map(level=>base.createPriceLine({price:level.price,title:level.label,color:level.active?'#e9bd68':'#d69c65',lineWidth:1,lineStyle:2,axisLabelVisible:true})),
+          ...strikes.map(level=>base.createPriceLine({price:level.price,title:level.label,color:'#71b8b3',lineWidth:1,lineStyle:3,axisLabelVisible:true}))
+        ];
+        el.dataset.workspaceAlertLevels=String(alerts.length);
+        el.dataset.workspaceStrikeLevels=String(strikes.length);
+      }
+      const status=$('#chart-workspace-options-status');
+      if(status)status.textContent=optionWorkspaceStatus();
+      const alertStatus=$('#chart-workspace-alert-status');
+      if(alertStatus)alertStatus.textContent=alertWorkspaceStatus();
+    };
+    refreshWorkspaceOverlays();
     const instances=indicatorInstances(), levelsByInstance=new Map();
     for(const instance of instances.filter(item=>item.type==='optionsMedian')){
       mountOptionsMedian(base,prices=>{
@@ -2152,11 +2272,13 @@ async function initApp(){
     if(S.chart.log)base.priceScale().applyOptions({mode:PriceScaleMode.Logarithmic});
     for(const p of S.chart.lines[S.symbol]||[])base.createPriceLine({price:p,color:'#e4b766',lineWidth:1,lineStyle:2,axisLabelVisible:true,title:'Level'});
     const pineMarkers=[];
-    if(S.result&&S.resultSymbol===S.symbol&&S.resultTf===S.chart.tf){
-      pineMarkers.push(...tradeFillMarkers(S.result.trades));
-    }
-    const custom=[...S.activeIndicators];
-    if(S.bt.strategy==='pine-custom'&&S.activeStrategy)custom.push({...S.activeStrategy,id:'strategy'});
+    const tradeMarkers=chartTools.trades&&S.result&&S.resultSymbol===S.symbol&&S.resultTf===S.chart.tf?
+      matchingTradeMarkers(tradeFillMarkers(S.result.trades),b):[];
+    pineMarkers.push(...tradeMarkers);
+    el.dataset.workspaceTradeMarkers=String(tradeMarkers.length);
+    const custom=chartTools.pine?[...S.activeIndicators]:[];
+    if(chartTools.pine&&S.bt.strategy==='pine-custom'&&S.activeStrategy)custom.push({...S.activeStrategy,id:'strategy'});
+    let renderedPineScripts=0;
     const pineErrors=[],pineBars=b.slice(-6000);
     for(const item of custom){
       try{
@@ -2178,8 +2300,10 @@ async function initApp(){
         if(!program.overlay&&firstScriptSeries&&scriptMarkers.length)
           createSeriesMarkers(firstScriptSeries,scriptMarkers.sort((a,b)=>stamp(a.time)-stamp(b.time)));
         else pineMarkers.push(...scriptMarkers);
+        if(firstScriptSeries||scriptMarkers.length)renderedPineScripts++;
       }catch(error){pineErrors.push((item.name||'Custom script')+': '+error.message);}
     }
+    el.dataset.workspacePineScripts=String(renderedPineScripts);
     const panes=chart.panes();
     if(panes.length>1)panes[0].setStretchFactor(3);
     const legend=$('#chart-indicator-legend');
@@ -2501,7 +2625,7 @@ async function initApp(){
       liveScanPending=pending;
       if(quickScreenerVisible()){
         applyPendingLiveScan();refreshMarketMode();refreshScreenerResults();
-      }else if((options.restoreTab&&initialMain===$('#main'))||!hasLiveData()||workspaceActive('data')||workspaceActive('screener')){
+      }else if((options.restoreTab&&initialMain===$('#main'))||!hasLiveData()||workspaceActive('data')||workspaceActive('screener')||options.chartRefresh&&S.tab==='charts'){
         // Refresh integrated workspaces and chart from the same live-data snapshot.
         if(S.tab==='charts'&&chart)preserveChartViewport();
         applyPendingLiveScan();render();
@@ -2558,13 +2682,13 @@ async function initApp(){
       showWorkspace('optimize');render();
     }catch(err){S.scriptError=err.message;showWorkspace('scripts');render();}
   }
-  function loadSavedScan(id){
+  function loadSavedScan(id,openPanel=true){
     const found=S.savedScans.find(item=>item.id===id);
     if(!found){notice('Choose a saved scan first.');return;}
     S.rules=found.rules.map(x=>({...x}));S.universeFilter=found.universeFilter;
     S.query=found.query;S.showOnlyMatches=found.showOnlyMatches;S.showWatch=found.showWatch;
     S.sort=found.sort;S.ascending=found.ascending;S.savedScanView=found;S.savedScanId=id;
-    showWorkspace('screener');render();
+    if(openPanel)showWorkspace('screener');else{S.scanReview=null;preserveChartViewport();}render();
   }
   function exportScreenerCsv(){
     const data=screenerRows();
@@ -2580,11 +2704,11 @@ async function initApp(){
     });
     exportFile('market-lens-screener-'+new Date().toISOString().slice(0,10)+'.csv',csvDownload(rows));
   }
-  function addLocalAlert(){
+  function addLocalAlert(draft=S.alertDraft){
     try{
       if(S.alerts.length>=ALERT_LIMIT)throw Error('Maximum '+ALERT_LIMIT+' in-app alerts reached');
       const available=[...S.data.keys()].filter(modeSymbol);
-      const candidate={...S.alertDraft,symbol:available.includes(S.alertDraft.symbol)?S.alertDraft.symbol:available[0]};
+      const candidate={...draft,symbol:available.includes(draft.symbol)?draft.symbol:available[0]};
       const valid=validateAlert(candidate);
       const id='alert-'+Date.now()+'-'+Math.random().toString(36).slice(2,5);
       S.alerts.push({...valid,id,active:false,unread:false});
@@ -2835,6 +2959,28 @@ async function initApp(){
   }
 
   const action={
+    'chart-workspace-tools':openChartWorkspaceTools,
+    'apply-chart-workspace-tools':()=>{
+      const dialog=$('#chart-workspace-dialog');
+      for(const input of dialog.querySelectorAll('[data-chart-workspace-choice]'))chartTools[input.dataset.chartWorkspaceChoice]=input.checked;
+      writeChartWorkspace(localStorage,chartTools);dialog.close();preserveChartViewport();render();
+      $('.chart-tools summary')?.focus({preventScroll:true});
+    },
+    'chart-workspace-open':el=>openChartWorkspace(el.dataset.workspaceKey),
+    'chart-workspace-star':()=>{
+      preserveChartViewport();S.watchlists=watchlistChange(S.watchlists,S.watchlistId,S.symbol);
+      selectWatchlist(S.watchlistId);render();
+    },
+    'chart-workspace-review':()=>openScannedChart(),
+    'chart-workspace-run':()=>void runChartBacktest(),
+    'chart-workspace-add-alert':()=>{
+      const price=$('[data-chart-workspace-input="alert-price"]'),op=$('[data-chart-workspace-input="alert-op"]');
+      if(!price||!Number.isFinite(price.valueAsNumber)||price.valueAsNumber<=0)return notice('Enter a positive daily-close threshold.');
+      preserveChartViewport();addLocalAlert({symbol:S.symbol,metric:'price',op:op.value,threshold:price.valueAsNumber});
+    },
+    'chart-workspace-refresh':()=>{
+      if(liveScanActive)return;preserveChartViewport();clearSavedScanView();void switchToLive({chartRefresh:true,restoreSymbol:S.symbol});
+    },
     'options-median-toggle':()=>{
       const active=indicatorInstances().some(item=>item.type==='optionsMedian');
       applyIndicatorChange('optionsMedian',{...S.chart,optionsMedian:!active,
@@ -3164,7 +3310,14 @@ async function initApp(){
       if(frame&&frame[0]!==S.chart.tf){setTimeframe(frame[0]);render();$('[data-chart-frame-scale]')?.focus({preventScroll:true});}
       return;
     }
-    if(el.closest('#chart-settings-dialog'))return;
+    if(el.closest('#chart-settings-dialog,#chart-workspace-dialog'))return;
+    if(el.dataset.chartWorkspaceInput){
+      const key=el.dataset.chartWorkspaceInput;
+      if(key==='watchlist'){preserveChartViewport();selectWatchlist(el.value);render();}
+      else if(key==='watch-symbol'&&el.value&&modeSymbol(el.value)){restoreSymbolState(el.value);render();}
+      else if(key==='scan'){if(el.value)loadSavedScan(el.value,false);else{preserveChartViewport();S.scanReview=null;clearSavedScanView();render();}}
+      return;
+    }
     if(el.id==='csv-file'){if(el.files?.length)await importFiles(el.files);el.value='';return;}
     if(el.id==='pine-library'){const found=S.scriptLibrary.find(x=>x.id===el.value);if(found){loadPineSource(found.code,found.name,found.id);S.scriptSettings={...(found.settings||{})};persistPineDraft();render();}return;}
     if(el.dataset.pineInput){S.scriptSettings[el.dataset.pineInput]=el.type==='checkbox'?el.checked:Number(el.value);persistPineDraft();return;}

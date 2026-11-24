@@ -723,3 +723,20 @@ tr[data-vol-symbol] td:nth-child(3){min-width:138px}
 .workspace-content>.headrow{margin-top:0}
 .workspace-content>.headrow h1,.workspace-content .options-page-head h1{font-size:18px}
 @media(max-width:600px){.workspace-content{padding:6px}.chart-workspace-section>summary{padding-left:12px}}
+
+/* Opt-in workspace controls sit in the chart frame, never on top of candles. */
+.chart-workspace-settings{display:grid;gap:12px;padding:12px;max-height:70vh;overflow:auto}
+.chart-workspace-settings fieldset{margin:0;min-width:0;border:1px solid var(--border);border-radius:7px;padding:8px 10px}
+.chart-workspace-settings legend{font-weight:700;font-size:13px;padding:0 4px}
+.chart-workspace-choice{display:flex;align-items:flex-start;gap:9px;padding:7px 0;font-size:12px;cursor:pointer}
+.chart-workspace-choice input{accent-color:var(--green);margin-top:3px}
+.chart-workspace-choice small{display:block;color:var(--muted);line-height:1.4;margin-top:2px}
+.chart-workspace-controls{display:grid;gap:3px;padding:4px 8px 6px;background:#151b19;border-bottom:1px solid var(--border);min-width:0}
+.chart-workspace-row{display:flex;flex-wrap:wrap;align-items:center;gap:4px 7px;font-size:11px;min-width:0}
+.chart-workspace-row>strong{min-width:58px;color:var(--text)}
+.chart-workspace-row .btn.small{padding:4px 7px;font-size:11px}
+.chart-workspace-row select,.chart-workspace-row input{background:#101515;border:1px solid var(--border);color:var(--text);border-radius:5px;padding:4px 6px;font:inherit;min-width:0;max-width:100%}
+.chart-workspace-row input{width:92px}
+.chart-workspace-note{color:var(--muted);overflow-wrap:anywhere}
+.chart-is-fullscreen .chart-workspace-controls{flex:none;max-height:24vh;overflow:auto}
+@media(max-width:600px){.chart-workspace-row{gap:5px}.chart-workspace-row .btn.small,.chart-workspace-row select,.chart-workspace-row input{min-height:30px}.chart-workspace-settings{max-height:65svh}}
