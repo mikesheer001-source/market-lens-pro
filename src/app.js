@@ -161,7 +161,7 @@ async function initApp(){
     chartRecentSymbols:Array.isArray(saved.chartRecentSymbols)?saved.chartRecentSymbols.filter(s=>typeof s==='string').slice(0,6):[],
     chartRecentFrames:Array.isArray(saved.chartRecentFrames)?saved.chartRecentFrames.slice(0,3):[],
     hiddenScreenColumns:Array.isArray(saved.hiddenScreenColumns)?saved.hiddenScreenColumns.filter(i=>Number.isInteger(i)&&i>=2&&i<=13):[],
-    backtestSections:saved.backtestSections||{},chartViews:saved.chartViews||{},scanReview:null,
+    backtestSections:saved.backtestSections||{},workspaceSections:saved.workspaceSections||{},chartViews:saved.chartViews||{},scanReview:null,
     variantBaseline:saved.variantBaseline?.options&&typeof saved.variantBaseline.symbol==='string'?saved.variantBaseline:null,
     variantComparison:null,
     scriptCode:typeof draft.code==='string'?draft.code:PINE_EXAMPLES[0].code,
@@ -186,7 +186,7 @@ async function initApp(){
     lastLiveSymbol:S.lastLiveSymbol,watch:[...S.watch],watchlists:S.watchlists,watchlistId:S.watchlistId,alerts:S.alerts,savedScans:S.savedScans,rules:S.rules,chart:S.chart,bt:S.bt,portfolioMode:S.portfolioMode,bestFitMode:S.bestFitMode,bestFitValidatedOnly:S.bestFitValidatedOnly,btRange:S.btRange,portfolioScope:S.portfolioScope,portfolioWatchlistId:S.portfolioWatchlistId,signalSelection:S.signalSelection,signalsOnly:S.signalsOnly,
     leaderboardValidatedOnly:S.leaderboardValidatedOnly,fitValidatedOnly:S.fitValidatedOnly,apiBaseUrl:S.apiBaseUrl,universeFilter:S.universeFilter,
     chartHeight:S.chartHeight,chartRecentSymbols:S.chartRecentSymbols,chartRecentFrames:S.chartRecentFrames,hiddenScreenColumns:S.hiddenScreenColumns,variantBaseline:S.variantBaseline,backtestPineDraft:S.backtestPineDraft,
-    activeIndicators:S.activeIndicators,chartViews:S.chartViews,backtestSections:S.backtestSections,query:S.query,sort:S.sort,ascending:S.ascending,showOnlyMatches:S.showOnlyMatches,showWatch:S.showWatch,marketShown:market.shown,savedScanId:S.savedScanId,viewingSavedScan:!!S.savedScanView}));}catch{}};
+    activeIndicators:S.activeIndicators,chartViews:S.chartViews,backtestSections:S.backtestSections,workspaceSections:S.workspaceSections,query:S.query,sort:S.sort,ascending:S.ascending,showOnlyMatches:S.showOnlyMatches,showWatch:S.showWatch,marketShown:market.shown,savedScanId:S.savedScanId,viewingSavedScan:!!S.savedScanView}));}catch{}};
   function receiveSharedSettings(prior,value){
     if(JSON.stringify(prior.savedScans)!==JSON.stringify(value.savedScans)){
       S.savedScans=Array.isArray(value.savedScans)?value.savedScans.slice(0,SCAN_LIMIT):[];
@@ -952,7 +952,7 @@ async function initApp(){
       (S.signalErrors.length?S.signalErrors.length+' unavailable signals: '+esc(S.signalErrors.slice(0,6).map(e=>e.symbol+': '+e.reason).join('; '))+'.':'No live trades or background monitoring.')+
       '</p>')+'</div><dialog id="screener-dialog" class="chart-dialog" aria-labelledby="screener-dialog-title"></dialog><div id="screener-workspace">'+workspaceControls()+'</div>';
   }
-  function workspaceControls(){
+  function workspaceControls(collapsible=false){
     const current=S.watchlists.find(x=>x.id===S.watchlistId)||S.watchlists[0];
     const listOptions=S.watchlists.map(x=>[x.id,x.name+' ('+x.symbols.length+')']);
     const alertSymbols=[...S.data.keys()].filter(modeSymbol).sort();
@@ -963,26 +963,30 @@ async function initApp(){
         ' <small>'+(a.type==='signal'?'At '+esc(a.lastHitBarDate||''):a.active?'Condition met':'Not triggered')+
         '</small></span>'+button('Remove alert','alert-delete','small').replace('data-action="alert-delete"','data-action="alert-delete" data-alert-id="'+esc(a.id)+'"')+'</div>').join(''):'<p class="section-note">No local alerts. They check only when you scan or refresh while this page is running.</p>';
     const savedChoices=S.savedScans.map(x=>[x.id,x.name+' · '+x.rows.length+' rows']);
-    const loaded=S.savedScanView;
+    const section=(key,title,note)=>collapsible?
+      '<details class="panel backtest-details chart-workspace-section" data-workspace-section="'+key+'"'+
+      (S.workspaceSections[key]?' open':'')+'><summary><h2>'+title+'</h2></summary><div class="panel-body"><p class="section-note">'+note+'</p>':
+      '<div class="panel"><div class="panel-header"><h2>'+title+'</h2><span class="muted">'+note+'</span></div><div class="panel-body">';
+    const end=collapsible?'</div></details>':'</div></div>';
     return ''+
-      '<div class="panel"><div class="panel-header"><h2>Named watchlists</h2><span class="muted">Stars add symbols to the selected list</span></div><div class="panel-body"><div class="workspace-actions">'+
+      section('watchlists','Named watchlists','Stars add symbols to the selected list')+'<div class="workspace-actions">'+
         '<label class="control">Current list '+select(listOptions,S.watchlistId,'data-option="watchlist-select"')+'</label>'+
         '<label class="control">Watchlist name <input class="textinput" data-input="watchlist-name" value="'+esc(S.watchlistDraft)+'" placeholder="e.g. Volatility setups"/></label>'+
         button('Create watchlist','watchlist-create','small')+button('Rename watchlist','watchlist-rename','small')+button('Delete watchlist','watchlist-delete','small')+
-        '</div><p class="section-note">Selected: '+esc(current.name)+' · '+current.symbols.length+' symbols. Use the star in the screener to add or remove a symbol.</p></div></div>'+
-      '<div class="panel"><div class="panel-header"><h2>Saved scans</h2><span class="muted">Rules and a dated snapshot of the filtered table</span></div><div class="panel-body"><div class="workspace-actions">'+
+        '</div><p class="section-note">Selected: '+esc(current.name)+' · '+current.symbols.length+' symbols. Use the star in the screener to add or remove a symbol.</p>'+end+
+      section('scans','Saved scans','Rules and a dated snapshot of the filtered table')+'<div class="workspace-actions">'+
         '<label class="control">Scan name <input class="textinput" data-input="scan-name" value="'+esc(S.scanDraft)+'" placeholder="e.g. VXX oversold"/></label>'+
         button('Save scan','save-scan','primary')+
         '<label class="control">Saved scan '+select([['','Choose saved scan'],...savedChoices],S.savedScanId||'','data-option="saved-scan-select"')+'</label>'+
         button('Load saved scan','load-scan','small')+button('Delete saved scan','delete-scan','small')+'</div>'+
-        '<p class="section-note">Snapshots preserve displayed rows and filter conditions. Historical prices are not automatically refreshed when loaded.</p></div></div>'+
-      '<div class="panel"><div class="panel-header"><h2>In-app alerts</h2><span class="muted">No email · checks on Scan/Refresh</span></div><div class="panel-body"><div class="workspace-actions">'+
+        '<p class="section-note">Snapshots preserve displayed rows and filter conditions. Historical prices are not automatically refreshed when loaded.</p>'+end+
+      section('alerts','In-app alerts','No email · checks on Scan/Refresh')+'<div class="workspace-actions">'+
         '<label class="control">Symbol '+select(alertSymbols.map(sym=>[sym,sym]),alertSymbol,'data-alert-field="symbol"')+'</label>'+
         '<label class="control">Indicator '+select([['price','Daily close'],['rsi','Daily RSI(14)']],S.alertDraft.metric,'data-alert-field="metric"')+'</label>'+
         '<label class="control">Condition '+select([['>','Above'],['<','Below']],S.alertDraft.op,'data-alert-field="op"')+'</label>'+
         '<label class="control">Level <input type="number" class="textinput" data-alert-field="threshold" value="'+esc(S.alertDraft.threshold)+'" step="any"/></label>'+
         button('Add alert','alert-create','small primary')+
-        '</div><div class="data-list">'+alertRows+'</div></div></div>';
+        '</div><div class="data-list">'+alertRows+'</div>'+end;
   }
   function preserveChartViewport(){
     try{S.pendingChartRange=chart?.timeScale().getVisibleLogicalRange()||null;}
@@ -1284,7 +1288,8 @@ async function initApp(){
       (source==='ALPACA'?'Alpaca '+esc(String(S.liveFeed).toUpperCase()):source==='IMPORTED'?'Imported':'No data')+
       ' · '+b.length+' '+esc(S.chart.tf)+' bars</p>';
     return intro+stale+panel+(S.chartFullscreen?'':'<div id="pine-chart-error" role="alert"></div>')+
-      footer+(S.chartFullscreen?'':sourceStrip());
+      footer+(S.chartFullscreen?'':sourceStrip()+
+        '<section id="chart-workspaces" aria-label="Workspaces">'+workspaceControls(true)+'</section>');
   }
   function btOptions(){
     if(S.bt.strategy==='pine-custom'){
@@ -2968,6 +2973,10 @@ async function initApp(){
   document.addEventListener('toggle',ev=>{
     const key=ev.target.dataset?.backtestSection;
     if(key&&ev.target.isConnected&&S.backtestSections[key]!==ev.target.open){S.backtestSections[key]=ev.target.open;saveSettings();}
+    const workspaceKey=ev.target.dataset?.workspaceSection;
+    if(workspaceKey&&ev.target.isConnected&&S.workspaceSections[workspaceKey]!==ev.target.open){
+      S.workspaceSections[workspaceKey]=ev.target.open;saveSettings();
+    }
   },true);
   document.addEventListener('submit',ev=>{
     const form=ev.target;
