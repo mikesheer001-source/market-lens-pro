@@ -22,7 +22,7 @@ import {rollingPositiveText,rollingWindowDates,rollingLeaderboardSummary,ROLLING
 import {VALIDATION_RULE,validationReasons,validationStatus,filterValidatedLeaderboard,
   bestRollingValidatedStrategy} from './validated-strategies.js';
 import {restoreWatchlists,watchlistChange,validateAlert,checkAlerts,makeScanSnapshot,analysisSnapshot,restoreAnalysis,WATCHLIST_LIMIT,SCAN_LIMIT,ALERT_LIMIT} from './workspace.js';
-import { LIVE_UNIVERSE, DEMO_UNIVERSE, VOLATILITY_UNIVERSE, LIVE_EQUITY_COUNT, LIVE_ETF_COUNT, LIVE_VOLATILITY_COUNT, ALPACA_BATCH_SIZE, ALPACA_SCAN_LOOKBACK_DAYS } from './universe.js';
+import { LIVE_UNIVERSE, VOLATILITY_UNIVERSE, LIVE_EQUITY_COUNT, LIVE_ETF_COUNT, LIVE_VOLATILITY_COUNT, ALPACA_BATCH_SIZE, ALPACA_SCAN_LOOKBACK_DAYS } from './universe.js';
 import {DEFAULT_ALPACA_WORKER,inspectLiveHistory,shouldTryDefaultWorker,liveScanUrl,canonicalWorkerBase}
   from './live-history.js';
 import {INDICATOR_ORDER,activeIndicatorReadings,indicatorInputs,indicatorLabel,updateIndicatorSetting,
@@ -30,7 +30,7 @@ import {INDICATOR_ORDER,activeIndicatorReadings,indicatorInputs,indicatorLabel,u
   nextFullscreenState,chartScaleOptions,resetPriceScale,mountPriceAxisTouch,macdSeries,bollingerSeries} from './chart-usability.js';
 async function initApp(){
   const {
-    parseCsv,normalizeBars,alpacaBars,aggregate,ema,sma,rsi,indicators,statsFor,screenSymbol,screenStats,backtest,parameterSweep,sampleData,csvDownload,stamp
+    parseCsv,normalizeBars,alpacaBars,aggregate,ema,sma,rsi,indicators,statsFor,screenSymbol,screenStats,backtest,parameterSweep,csvDownload,stamp
   }=await import('./engine.js');
   const {
     createChart,CandlestickSeries,BarSeries,LineSeries,AreaSeries,HistogramSeries,PriceScaleMode,TrackingModeExitMode,createSeriesMarkers
@@ -132,11 +132,11 @@ async function initApp(){
   try{previousAnalysis=restoreAnalysis(JSON.parse(localStorage.getItem('market-lens-pro-analysis-v1')||'null'));}catch{}
   let previousPortfolio=null;
   try{previousPortfolio=JSON.parse(localStorage.getItem('market-lens-pro-portfolio-v1')||'null');}catch{}
-  const S={tab:startupPrefs.tab,mode:'demo',preferredMode:startupPrefs.mode,
-    lastDemoSymbol:startupPrefs.lastDemoSymbol,lastLiveSymbol:startupPrefs.lastLiveSymbol,
+  const S={tab:startupPrefs.tab,mode:'live',preferredMode:'live',
+    lastLiveSymbol:startupPrefs.lastLiveSymbol,
     lastBacktestSymbol:startupPrefs.lastBacktestSymbol,lastSymbol:startupPrefs.lastSymbol,
-    apiBaseUrl:String(saved.apiBaseUrl||DEFAULT_ALPACA_WORKER),liveFeed:'iex',universeFilter:saved.universeFilter||'all',scan:{status:'idle'},data:new Map(Object.entries(sampleData())),sources:new Map(),symbol:'DEMO-SPY',query:saved.query||'',symbolQuery:'',watch:workspaceLists.watch,watchlists:workspaceLists.watchlists,
-    watchlistId:workspaceLists.watchlistId,watchlistDraft:'',alertDraft:{symbol:'DEMO-SPY',metric:'price',op:'>',threshold:100},
+    apiBaseUrl:String(saved.apiBaseUrl||DEFAULT_ALPACA_WORKER),liveFeed:'iex',universeFilter:saved.universeFilter||'all',scan:{status:'idle'},data:new Map(),sources:new Map(),symbol:startupPrefs.selectedSymbol,query:saved.query||'',symbolQuery:'',watch:workspaceLists.watch,watchlists:workspaceLists.watchlists,
+    watchlistId:workspaceLists.watchlistId,watchlistDraft:'',alertDraft:{symbol:startupPrefs.selectedSymbol,metric:'price',op:'>',threshold:100},
     alerts:Array.isArray(saved.alerts)?saved.alerts.slice(0,ALERT_LIMIT):[],alertHits:[],
     savedScans:Array.isArray(saved.savedScans)?saved.savedScans.slice(0,SCAN_LIMIT):[],
     scanDraft:'',savedScanId:saved.savedScanId||null,
@@ -169,7 +169,6 @@ async function initApp(){
     scriptSettings:draft.settings&&typeof draft.settings==='object'?draft.settings:{},
     scriptParsed:null,scriptError:'',scriptOutput:null,scriptLibrary,activeIndicators:Array.isArray(saved.activeIndicators)?saved.activeIndicators.slice(0,4):[],activeStrategy:null,
     backtestPineDraft:typeof saved.backtestPineDraft?.code==='string'?saved.backtestPineDraft:null};
-  for(const symbol of S.data.keys())S.sources.set(symbol,'SIMULATED');
   if(!symbolMemoryItem(S.symbolMemory,S.symbol)?.backtest&&previousAnalysis?.symbol===S.symbol&&previousAnalysis?.result){
     S.symbolMemory=updateSymbolMemory(S.symbolMemory,S.symbol,{backtest:{
       result:previousAnalysis.result,sweep:previousAnalysis.sweep,options:{...S.bt},
@@ -183,7 +182,7 @@ async function initApp(){
   let chart=null,equityChart=null,leaderboardChart=null,tradeChart=null;
   const saveSettings=()=>{try{saveLocal('settings',JSON.stringify({mode:S.preferredMode==='live'?'live':S.mode,
     tab:S.tab,lastSymbol:S.symbol,lastBacktestSymbol:S.lastBacktestSymbol,
-    lastLiveSymbol:S.lastLiveSymbol,lastDemoSymbol:S.lastDemoSymbol,watch:[...S.watch],watchlists:S.watchlists,watchlistId:S.watchlistId,alerts:S.alerts,savedScans:S.savedScans,rules:S.rules,chart:S.chart,bt:S.bt,portfolioMode:S.portfolioMode,bestFitMode:S.bestFitMode,bestFitValidatedOnly:S.bestFitValidatedOnly,btRange:S.btRange,portfolioScope:S.portfolioScope,portfolioWatchlistId:S.portfolioWatchlistId,signalSelection:S.signalSelection,signalsOnly:S.signalsOnly,
+    lastLiveSymbol:S.lastLiveSymbol,watch:[...S.watch],watchlists:S.watchlists,watchlistId:S.watchlistId,alerts:S.alerts,savedScans:S.savedScans,rules:S.rules,chart:S.chart,bt:S.bt,portfolioMode:S.portfolioMode,bestFitMode:S.bestFitMode,bestFitValidatedOnly:S.bestFitValidatedOnly,btRange:S.btRange,portfolioScope:S.portfolioScope,portfolioWatchlistId:S.portfolioWatchlistId,signalSelection:S.signalSelection,signalsOnly:S.signalsOnly,
     leaderboardValidatedOnly:S.leaderboardValidatedOnly,fitValidatedOnly:S.fitValidatedOnly,apiBaseUrl:S.apiBaseUrl,universeFilter:S.universeFilter,
     chartHeight:S.chartHeight,chartRecentSymbols:S.chartRecentSymbols,chartRecentFrames:S.chartRecentFrames,hiddenScreenColumns:S.hiddenScreenColumns,variantBaseline:S.variantBaseline,backtestPineDraft:S.backtestPineDraft,
     activeIndicators:S.activeIndicators,chartViews:S.chartViews,backtestSections:S.backtestSections,query:S.query,sort:S.sort,ascending:S.ascending,showOnlyMatches:S.showOnlyMatches,showWatch:S.showWatch,marketShown:market.shown,savedScanId:S.savedScanId,viewingSavedScan:!!S.savedScanView}));}catch{}};
@@ -231,7 +230,6 @@ async function initApp(){
   function restoreSymbolState(symbol){
     S.symbol=symbol;S.symbolQuery='';
     if(S.mode==='live'&&S.sources.get(symbol)==='ALPACA')S.lastLiveSymbol=symbol;
-    else if(S.mode==='demo'&&symbol.startsWith('DEMO-'))S.lastDemoSymbol=symbol;
     const savedEntry=symbolMemoryItem(S.symbolMemory,symbol);
     const run=savedEntry?.backtest||null;
     S.leaderboard=savedEntry?.leaderboard||null;
@@ -324,7 +322,7 @@ async function initApp(){
     const list=S.watchlists.find(w=>w.id===id);if(!list)return;
     S.watchlistId=list.id;S.watch=new Set(list.symbols);saveSettings();
   }
-  function modeSymbol(symbol){return S.mode==='live'?S.sources.get(symbol)==='ALPACA':S.sources.get(symbol)!=='ALPACA';}
+  function modeSymbol(symbol){return ['ALPACA','IMPORTED'].includes(S.sources.get(symbol));}
   function persistPineDraft(){
     try{saveLocal('draft',JSON.stringify({code:S.scriptCode,name:S.scriptName,id:S.scriptId,settings:S.scriptSettings}));}
     catch{notice('Unable to save Script Lab draft in localStorage.');}
@@ -399,16 +397,12 @@ async function initApp(){
       const rows=await new Promise((res,rej)=>{req.onsuccess=()=>res(req.result);req.onerror=()=>rej(req.error);});
       for(const item of rows){S.data.set(item.symbol,item.bars);S.sources.set(item.symbol,'IMPORTED');}
       db.close();
-      if(S.preferredMode!=='live'){
-        const preferred=startupPrefs.selectedSymbol;
-        if(preferred&&S.data.has(preferred))restoreSymbolState(preferred);
-        else if(rows.length&&!S.data.has(S.symbol))restoreSymbolState(rows[0].symbol);
-      }
+      if(S.data.has(startupPrefs.selectedSymbol))restoreSymbolState(startupPrefs.selectedSymbol);
       if(rows.length)render();
     }catch{notice('Local database unavailable. Imports still work until this tab closes.');}
   }
   async function storeDataset(symbol,bars){try{const previous=syncEnabled?await databaseRead('symbols'):undefined;const db=await openDb(),tx=db.transaction('symbols','readwrite');tx.objectStore('symbols').put({symbol,bars});await new Promise((res,rej)=>{tx.oncomplete=res;tx.onerror=()=>rej(tx.error);});db.close();workspace.changed('imports',previous);}catch{notice('Import loaded, but this browser could not save it for future visits.');}}
-  async function removeImports(){try{const db=await openDb(),tx=db.transaction('symbols','readwrite');tx.objectStore('symbols').clear();await new Promise((res,rej)=>{tx.oncomplete=res;tx.onerror=()=>rej(tx.error);});db.close();workspace.changed('imports');}catch{}S.data=new Map(Object.entries(sampleData()));S.sources=new Map([...S.data.keys()].map(x=>[x,'SIMULATED']));S.symbol='DEMO-SPY';S.result=null;S.sweep=null;render();}
+  async function removeImports(){try{const db=await openDb(),tx=db.transaction('symbols','readwrite');tx.objectStore('symbols').clear();await new Promise((res,rej)=>{tx.oncomplete=res;tx.onerror=()=>rej(tx.error);});db.close();workspace.changed('imports');}catch{}for(const [symbol,source] of S.sources)if(source==='IMPORTED'){S.sources.delete(symbol);S.data.delete(symbol);}if(!S.data.has(S.symbol))restoreSymbolState(S.data.has(S.lastLiveSymbol)?S.lastLiveSymbol:[...S.data.keys()][0]||S.lastLiveSymbol);S.result=null;S.sweep=null;render();}
   const intradayTf=tf=>tf==='15m'||tf==='2H';
   const intradayKey=symbol=>symbol+'|'+String(S.liveFeed||'iex');
   const barsFor=(symbol,tf)=>{
@@ -570,7 +564,10 @@ async function initApp(){
     return true;
   }
 
-  const status=()=>S.mode==='live'?'ALPACA LIVE · '+String(S.liveFeed||'iex').toUpperCase():S.sources.get(S.symbol)==='SIMULATED'?'SIMULATED SAMPLE':S.sources.get(S.symbol)==='IMPORTED'?'IMPORTED OHLCV':'NO DATA';
+  const hasLiveData=()=>[...S.sources.values()].includes('ALPACA');
+  const status=()=>S.sources.get(S.symbol)==='IMPORTED'?'IMPORTED OHLCV':
+    S.scan.status==='loading'?'CONNECTING TO ALPACA':S.scan.status==='fallback'?(hasLiveData()?'ALPACA · PREVIOUS DATA':'ALPACA UNAVAILABLE'):
+    hasLiveData()?'ALPACA LIVE · '+String(S.liveFeed||'iex').toUpperCase():'ALPACA · NO DATA';
   const isVisibleSymbol=symbol=>modeSymbol(symbol)&&(S.universeFilter!=='volatility'||VOLATILITY_UNIVERSE.includes(symbol));
   const medianUnmount=[];
   function destroyCharts(){for(const stop of medianUnmount.splice(0))stop();if(chart){chart.remove();chart=null;}if(equityChart){equityChart.remove();equityChart=null;}if(leaderboardChart){leaderboardChart.remove();leaderboardChart=null;}if(tradeChart){tradeChart.remove();tradeChart=null;}}
@@ -585,7 +582,7 @@ async function initApp(){
         '<details class="mobile-more"><summary class="nav-btn '+(extra.includes(S.tab)?'active':'')+
         '">More <span aria-hidden="true">⌄</span></summary><div class="mobile-more-links">'+links(extra)+'</div></details></nav>';
     };
-    $('#app').innerHTML='<a href="#main" class="skip-link">Skip to workspace</a><div class="shell"><aside class="sidebar"><div class="brand"><div class="brand-mark" aria-hidden="true">ML</div><div><strong>MARKET LENS</strong><small>PRO WORKSTATION</small></div></div><div><div class="nav-label">Workspace</div>'+nav()+'</div><div class="sidebar-bottom">DATA NOTICE<br/>Changes sync to the public site automatically. Anyone using the site can view and edit shared data.<p>No trades sent.</p></div></aside><div class="workspace"><header class="topbar"><div class="top-left"><strong>Market Lens Pro</strong><span class="workspace-label">/ Independent strategy laboratory</span></div><div class="top-actions"><span class="status"><span class="dot"></span>'+ (S.mode==='live'?'Alpaca data':'Demo data') +'</span><span class="source-badge">'+status()+'</span><div class="mode-switch flex"><button class="btn small '+(S.mode==='demo'?'selected':'')+'" aria-pressed="'+(S.mode==='demo')+'" data-action="mode-demo">Use Demo</button><button class="btn small '+(S.mode==='live'?'selected':'')+'" aria-pressed="'+(S.mode==='live')+'" data-action="mode-live">Use Live</button></div><button class="btn" data-action="import">Import CSV</button></div></header>'+nav(true)+'<main id="main" class="main" tabindex="-1"></main></div></div><input id="csv-file" type="file" accept=".csv,text/csv" multiple hidden/>';
+    $('#app').innerHTML='<a href="#main" class="skip-link">Skip to workspace</a><div class="shell"><aside class="sidebar"><div class="brand"><div class="brand-mark" aria-hidden="true">ML</div><div><strong>MARKET LENS</strong><small>PRO WORKSTATION</small></div></div><div><div class="nav-label">Workspace</div>'+nav()+'</div><div class="sidebar-bottom">DATA NOTICE<br/>Changes sync to the public site automatically. Anyone using the site can view and edit shared data.<p>No trades sent.</p></div></aside><div class="workspace"><header class="topbar"><div class="top-left"><strong>Market Lens Pro</strong><span class="workspace-label">/ Independent strategy laboratory</span></div><div class="top-actions"><span class="status"><span class="dot"></span>Alpaca data</span><span class="source-badge" role="status">'+status()+'</span>'+(!hasLiveData()&&S.scan.status==='fallback'?button('Retry data','mode-live','small'):'')+'<button class="btn" data-action="import">Import CSV</button></div></header>'+nav(true)+'<main id="main" class="main" tabindex="-1"></main></div></div><input id="csv-file" type="file" accept=".csv,text/csv" multiple hidden/>';
   }
   const head=(name,desc,tools='')=>'<div class="headrow"><div><div class="eyebrow">Market Lens / '+name+'</div><h1>'+name+'</h1><p class="subtle">'+desc+'</p></div><div class="flex">'+tools+'</div></div>';
   const button=(label,action,variant='')=>'<button type="button" class="btn '+variant+'" data-action="'+action+'">'+label+'</button>';
@@ -606,8 +603,8 @@ async function initApp(){
       ' · '+(S.intradayStatus.get(intradayKey(S.symbol))?.status==='error'?esc(S.intradayStatus.get(intradayKey(S.symbol)).error):
       S.intradayStatus.get(intradayKey(S.symbol))?.status==='loading'?'Fetching real intraday bars…':
       (S.intraday.get(intradayKey(S.symbol))?.bars.length??0)+' confirmed 15-minute bars')+'</div>':
-      '<div class="info-strip warning">Only genuine timestamped CSV bars are eligible for intraday charts. Daily Demo candles are never expanded into fake 15m or 2H candles.</div>'
-  ):S.sources.get(S.symbol)==='ALPACA'?'<div class="info-strip">Alpaca market data · '+esc(String(S.liveFeed||'IEX').toUpperCase())+' feed · REST refresh on demand. This is not a tick-by-tick WebSocket stream.</div>':S.sources.get(S.symbol)==='SIMULATED'?'<div class="info-strip warning"><strong>Simulated prices.</strong> These are generated examples for testing the interface; no price, return, or trading result represents a real ticker.</div>':(S.data.get(S.symbol)||[]).some(b=>b.approximateOhlc)?'<div class="info-strip warning">The imported CSV has Close-only bars. Open/high/low are approximated. Stop, target, and next-open fills are unreliable until full OHLCV data is imported.</div>':'';
+      '<div class="info-strip warning">Intraday charts require genuine timestamped Alpaca or imported CSV bars.</div>'
+  ):S.sources.get(S.symbol)==='ALPACA'?'<div class="info-strip">Alpaca market data · '+esc(String(S.liveFeed||'IEX').toUpperCase())+' feed · REST refresh on demand. This is not a tick-by-tick WebSocket stream.</div>':(S.data.get(S.symbol)||[]).some(b=>b.approximateOhlc)?'<div class="info-strip warning">The imported CSV has Close-only bars. Open/high/low are approximated. Stop, target, and next-open fills are unreliable until full OHLCV data is imported.</div>':'';
   const market={shown:false,controller:null,checked:0,requested:0,next:0,rows:new Map(),page:0,error:''};
   const marketPageSize=100;
   function readMarketSnapshot(value){
@@ -898,7 +895,7 @@ async function initApp(){
         '" title="'+esc((r.signal?.reason||r.signal?.exitReason||'')+' · '+(r.signal?.source||r.source||'unknown'))+
         '">'+esc(r.signal?.status||'—')+'</span><small class="signal-date">'+esc(r.signal?.barDate||'')+'</small></td></tr>';
     }).join('');
-    const scanStatus=S.scan.status==='loading'?'<div id="scan-status" class="info-strip">Scanning '+(S.mode==='live'?'the Alpaca market universe':'the Demo universe')+'…</div>':S.scan.status==='complete'?'<div id="scan-status" class="info-strip" data-scan-source="'+esc(S.scan.source||'DEMO')+'">'+(S.scan.source==='ALPACA'?'Live':'Demo')+' scan complete · '+S.scan.returned+'/'+S.scan.requested+' symbols loaded · '+S.scan.matched+' '+(S.scan.matched===1?'match':'matches')+(S.scan.missing?.length?' · '+S.scan.missing.length+' symbols returned no bars':'')+(S.scan.cached?' · served from 15-minute cache':'')+'</div>':S.scan.status==='fallback'?'<div id="scan-status" class="info-strip warning" data-scan-source="'+esc(S.scan.source||'DEMO')+'">'+(S.mode==='live'?'Live scan failed; showing the previous scan. ':'Live scan failed; Demo mode restored. ')+esc(S.scan.error||'Unknown error')+'</div>':'';
+    const scanStatus=S.scan.status==='loading'?'<div id="scan-status" class="info-strip">Scanning '+('the Alpaca market universe')+'…</div>':S.scan.status==='complete'?'<div id="scan-status" class="info-strip" data-scan-source="'+esc(S.scan.source||'ALPACA')+'">'+'Live'+' scan complete · '+S.scan.returned+'/'+S.scan.requested+' symbols loaded · '+S.scan.matched+' '+(S.scan.matched===1?'match':'matches')+(S.scan.missing?.length?' · '+S.scan.missing.length+' symbols returned no bars':'')+(S.scan.cached?' · served from 15-minute cache':'')+'</div>':S.scan.status==='fallback'?'<div id="scan-status" class="info-strip warning" data-scan-source="'+esc(S.scan.source||'ALPACA')+'">'+(hasLiveData()?'Live scan failed; showing the previous data. ':'Live data unavailable; retry the scan. ')+esc(S.scan.error||'Unknown error')+'</div>':'';
     const freshness=!full&&S.mode==='live'&&S.scan.status==='complete'?S.freshness:null;
     const stale=freshness?.stale||[];
     const freshnessBadge=freshness?'<div id="scan-freshness" class="freshness-strip '+(freshness.allFresh?'fresh-ok':'fresh-warning')+
@@ -912,20 +909,20 @@ async function initApp(){
     const selectedStrategy=screenerStrategies().find(x=>x.id===S.signalSelection);
     const selectStrategy=select([['none','No strategy selected'],...screenerStrategies().map(x=>[x.id,x.name+(x.kind==='pine'?' · saved Pine':' · preset')])],
       S.signalSelection,'data-option="signal-strategy"');
-    const factSymbol=S.mode==='live'?'VXX':'DEMO-VXX';
-    const factBar=(S.mode==='demo'||S.sources.get('VXX')==='ALPACA')?S.data.get(factSymbol)?.at(-1):null;
-    const factLabel=S.mode==='live'?'ALPACA VXX DAILY CLOSE':'SIMULATED DAILY CLOSE';
+    const factSymbol='VXX';
+    const factBar=(S.sources.get('VXX')==='ALPACA')?S.data.get(factSymbol)?.at(-1):null;
+    const factLabel='ALPACA VXX DAILY CLOSE';
     const fact=factBar?'<div class="market-fact" role="status"><span class="market-fact-label">'+factLabel+'</span><strong>'+esc(factSymbol)+' &nbsp; $'+format(factBar.close)+'</strong><small>Bar date: '+esc(String(factBar.time))+(S.mode==='live'?' · '+esc(String(S.liveFeed).toUpperCase())+' feed · Alpaca daily close, not a last-trade quote':' · simulated, not a market quote')+'</small></div>':S.mode==='live'?'<div class="market-fact warning" role="status">Alpaca VXX daily close unavailable — VXX was not returned by the connected feed.</div>':'';
-    return '<div id="screener-intro">'+head('Screener',full?'U.S. exchange listings · Alpaca daily, weekly and monthly filters.':'Filter '+symbols.length+' '+(S.mode==='live'?'Alpaca instruments':'demo or imported instruments')+' with explicit technical conditions.',marketControls()+button('Open Chart Lab','view-charts','small')+
+    return '<div id="screener-intro">'+head('Screener',full?'U.S. exchange listings · Alpaca daily, weekly and monthly filters.':'Filter '+symbols.length+' '+('Alpaca or imported instruments')+' with explicit technical conditions.',marketControls()+button('Open Chart Lab','view-charts','small')+
         (reviewableMatches(rows).length?button('Review matches','screener-chart','primary'):''))+'</div>'+
       '<div id="screener-facts">'+(full?'':fact)+activeAlertBanner()+activeSnapshotBanner()+'</div>'+
-      '<div id="screener-metrics" class="metrics">'+metric(S.savedScanView?'Saved rows':'Symbols loaded',S.savedScanView?rows.length:all.length,S.savedScanView?'Historical snapshot':S.mode==='live'?'Alpaca universe':'Demo and imported data')+metric('Matching filters',matched,'All visible symbols')+metric('Visible results',rows.length,'Search and match filter')+metric('Active conditions',S.rules.length,'AND logic; all must pass') +'</div><div id="screener-status">'+(full?'<p id="market-scan-status" class="info-strip" role="status">'+esc(marketMessage())+'</p><p class="section-note">Covers active U.S. exchange listings in Alpaca’s directory. Thinly traded tickers may have older or missing bars. Two-hour filters and strategy signals are available in the quick screener.</p>':scanStatus)+freshnessBadge+'</div>'+
-      '<div class="panel"><div class="panel-header"><h2>Screen rules</h2><div class="flex"><label class="control">Preset '+select([['custom','Custom rules'],['trend','Trend pullback'],['original','Original strict W/D/2H'],['oversold','RSI oversold'],['momentum','Momentum'],['volatility','VXX / Volatility'],['all','Show all']],presetKey,'data-option="preset"')+'</label>'+button('+ Add rule','add-rule')+'</div></div><div class="panel-body"><div class="filters">'+(rules||'<span class="muted">No filters — showing all instruments.</span>')+'</div><div class="section-note" style="margin-top:12px">“Original strict” reproduces the weekly EMA200 and weekly/daily/two-hour RSI filter logic. RSI 5D is calculated from daily closes; daily bars cannot reconstruct true two-hour data. The VXX / Volatility preset narrows the universe to VXX, UVXY, SVXY, VIXY, VIXM, VXZ, SVIX, UVIX, SVOL and ZVOL, using daily RSI, 252-session drawdown and % versus daily EMA200. Demo mode uses the clearly labeled synthetic DEMO-VXX proxy.</div></div></div>'+
-      '<div class="panel"><div class="panel-header"><h2>Market results</h2><div class="flex"><span id="screener-refresh">'+(full?'':button(S.scan.status==='loading'?'Scanning…':S.mode==='live'?'Refresh live scan':'Scan demo universe','scan-universe','small primary'))+'</span>'+button('Export screener CSV','export-screener','small')+button('Columns','screener-columns','small')+
+      '<div id="screener-metrics" class="metrics">'+metric(S.savedScanView?'Saved rows':'Symbols loaded',S.savedScanView?rows.length:all.length,S.savedScanView?'Historical snapshot':'Alpaca and imported data')+metric('Matching filters',matched,'All visible symbols')+metric('Visible results',rows.length,'Search and match filter')+metric('Active conditions',S.rules.length,'AND logic; all must pass') +'</div><div id="screener-status">'+(full?'<p id="market-scan-status" class="info-strip" role="status">'+esc(marketMessage())+'</p><p class="section-note">Covers active U.S. exchange listings in Alpaca’s directory. Thinly traded tickers may have older or missing bars. Two-hour filters and strategy signals are available in the quick screener.</p>':scanStatus)+freshnessBadge+'</div>'+
+      '<div class="panel"><div class="panel-header"><h2>Screen rules</h2><div class="flex"><label class="control">Preset '+select([['custom','Custom rules'],['trend','Trend pullback'],['original','Original strict W/D/2H'],['oversold','RSI oversold'],['momentum','Momentum'],['volatility','VXX / Volatility'],['all','Show all']],presetKey,'data-option="preset"')+'</label>'+button('+ Add rule','add-rule')+'</div></div><div class="panel-body"><div class="filters">'+(rules||'<span class="muted">No filters — showing all instruments.</span>')+'</div><div class="section-note" style="margin-top:12px">“Original strict” reproduces the weekly EMA200 and weekly/daily/two-hour RSI filter logic. RSI 5D is calculated from daily closes; daily bars cannot reconstruct true two-hour data. The VXX / Volatility preset narrows the universe to VXX, UVXY, SVXY, VIXY, VIXM, VXZ, SVIX, UVIX, SVOL and ZVOL, using daily RSI, 252-session drawdown and % versus daily EMA200.</div></div></div>'+
+      '<div class="panel"><div class="panel-header"><h2>Market results</h2><div class="flex"><span id="screener-refresh">'+(full?'':button(S.scan.status==='loading'?'Scanning…':'Refresh live scan','scan-universe','small primary'))+'</span>'+button('Export screener CSV','export-screener','small')+button('Columns','screener-columns','small')+
       (full?'':'<label class="control">Strategy '+selectStrategy+'</label>'+
       '<label class="inline-check"><input type="checkbox" data-option="signals-only" '+(S.signalsOnly?'checked':'')+' '+(S.signalSelection==='none'?'disabled':'')+'/>Signals only (LONG)</label>')+
       '<input class="textinput" aria-label="Search symbols" data-input="search" placeholder="Search symbol…" value="'+esc(S.query)+'"/><label class="inline-check"><input type="checkbox" data-option="matches" '+(S.showOnlyMatches?'checked':'')+'/>Matches only</label><label class="inline-check"><input type="checkbox" data-option="watchonly" '+(S.showWatch?'checked':'')+'/>Watchlist</label><label class="control">Sort '+select([['symbol','Symbol'],['price','Price'],['rsi','RSI'],['ret20','20D return'],['ema','Daily % EMA'],['drawdown','Drawdown'],['signal','Strategy signal'],['latest','Latest bar']],S.sort,'data-option="sort"')+'</label>'+button(S.ascending?'↑':'↓','sort-order','small')+'</div></div><div id="screener-results-content"><div class="table-wrap"><table class="data-table screener-results" data-hidden-columns="'+S.hiddenScreenColumns.join(' ')+'"><thead><tr><th scope="col">Symbol</th><th>Close</th><th>RSI D</th><th>RSI W</th><th title="5-period RSI calculated from daily closes; daily OHLC cannot reconstruct true 2-hour bars">RSI 5D</th><th title="Price as percentage difference from 200-period EMA of DAILY closes">% vs D EMA200</th><th>20D return</th><th>DD</th><th>Bars</th><th>Result</th><th>Latest bar</th><th title="Percentage difference from the 200-period EMA of WEEKLY closes; needs 200 real weekly bars">% vs W EMA200</th><th title="Current position based on completed daily bars and next-open fills. EXIT can mean closed this bar or pending exit. Not a live order.">Signal · '+esc(selectedStrategy?.name||'None')+'</th></tr></thead><tbody>'+table+'</tbody></table>'+(rows.length?'':'<div class="empty">No matching symbols. Change a filter or import more price history.</div>')+'</div>'+pagination+'</div>'+
-      (full?'':'<p class="section-note">Signal: LONG = strategy currently holds a long at the latest bar close; EXIT = it closed on that bar or has a close order for next open; FLAT = no long. Signals use the same stop/fee/slippage and next-open rules as Backtest, long-side only. Bars and dates are from '+(S.mode==='live'?'Alpaca '+esc(String(S.liveFeed).toUpperCase()):'clearly labeled Demo/CSV')+'. '+
+      (full?'':'<p class="section-note">Signal: LONG = strategy currently holds a long at the latest bar close; EXIT = it closed on that bar or has a close order for next open; FLAT = no long. Signals use the same stop/fee/slippage and next-open rules as Backtest, long-side only. Bars and dates are from '+('Alpaca '+esc(String(S.liveFeed).toUpperCase())+' or imported CSV')+'. '+
       (S.signalErrors.length?S.signalErrors.length+' unavailable signals: '+esc(S.signalErrors.slice(0,6).map(e=>e.symbol+': '+e.reason).join('; '))+'.':'No live trades or background monitoring.')+
       '</p>')+'</div><dialog id="screener-dialog" class="chart-dialog" aria-labelledby="screener-dialog-title"></dialog>'+workspaceControls();
   }
@@ -1147,8 +1144,8 @@ async function initApp(){
     const panel=$('[data-indicator-row="'+id+'"] .chart-options-median-result');
     if(!panel)return;
     const symbol=S.symbol, token=getOptionsDevice(), worker=S.apiBaseUrl, rate=Number(settings.optionsMedianRate)/100;
-    if(symbol.startsWith('DEMO-')){
-      panel.textContent='Switch to Live and select an optionable ticker.';
+    if(!modeSymbol(symbol)){
+      panel.textContent='Select a loaded optionable ticker.';
       return;
     }
     if(!token){
@@ -1246,7 +1243,7 @@ async function initApp(){
       '<dialog id="chart-symbol-dialog" class="chart-dialog" aria-labelledby="chart-symbol-title"></dialog>'+
       '<dialog id="scan-rules-dialog" class="chart-dialog" aria-labelledby="scan-rules-title"></dialog></div>';
     const footer=S.chartFullscreen?'':'<p class="chart-data">'+esc(S.symbol)+' · '+
-      (source==='SIMULATED'?'Simulated':source==='ALPACA'?'Alpaca '+esc(String(S.liveFeed).toUpperCase()):'Imported')+
+      (source==='ALPACA'?'Alpaca '+esc(String(S.liveFeed).toUpperCase()):source==='IMPORTED'?'Imported':'No data')+
       ' · '+b.length+' '+esc(S.chart.tf)+' bars</p>';
     return intro+stale+panel+(S.chartFullscreen?'':'<div id="pine-chart-error" role="alert"></div>')+
       footer+(S.chartFullscreen?'':sourceStrip());
@@ -1317,8 +1314,7 @@ async function initApp(){
     const selectedCount=result?.selectedCount??selections.length;
     const qualifier=validated?' · '+(qualified===null?'—':qualified)+' of '+
       selectedCount+' selected qualified':'';
-    const sourceName=S.mode==='live'?'Alpaca '+String(S.liveFeed).toUpperCase()+' 1Day bars':
-      'Simulated Demo or imported daily OHLCV';
+    const sourceName='Alpaca '+String(S.liveFeed).toUpperCase()+' or imported daily OHLCV';
     const namedLists=S.watchlists.map(w=>[w.id,w.name+' · '+w.symbols.length+' symbols']);
     const controls='<div class="panel"><div class="panel-header"><h2>'+
       (isBest?'Best-fit portfolio selection · '+(validated?'Validated OOS':'In-sample')+qualifier:
@@ -1842,10 +1838,10 @@ async function initApp(){
         ' · cache revision '+esc(S.scan.history?.revision||'unknown')+
         (S.scan.history?.recovered?' · Outdated saved Worker automatically replaced with the official Worker':'')+
         '. Longer history may make uncached scans and browser processing slower.</div>':'')+
-      '<div class="panel"><div class="panel-header"><h2>Live market scanner · Alpaca</h2><span class="source-badge">Keys stay server-side</span></div><div class="panel-body"><label class="field">Cloudflare Worker API URL<input type="url" data-setting="apiBaseUrl" placeholder="https://market-lens-pro-api.your-subdomain.workers.dev" value="'+esc(S.apiBaseUrl)+'"/></label><div class="flex" style="margin-top:13px">'+button('Test backend','test-live','small')+button('Scan live universe & switch to Live','mode-live','primary')+button('Switch to Demo','mode-demo','small')+'</div><div class="info-strip">The quick live scan covers '+LIVE_UNIVERSE.length+' curated symbols — not a full S&P 500 constituent list: '+LIVE_EQUITY_COUNT+' liquid US equities, '+LIVE_ETF_COUNT+' broad-market ETFs and '+LIVE_VOLATILITY_COUNT+' live volatility tickers. The volatility filter list has '+VOLATILITY_UNIVERSE.length+' entries, including the synthetic DEMO-VXX proxy; Demo mode scans '+DEMO_UNIVERSE.length+' synthetic symbols. Live volatility tickers include VXX, UVXY, SVXY, VIXY, VIXM, VXZ, SVIX, UVIX, SVOL and ZVOL. The Worker requests '+ALPACA_SCAN_LOOKBACK_DAYS+' calendar days (approximately five years) of daily bars in batches of '+ALPACA_BATCH_SIZE+' symbols ('+Math.ceil(LIVE_UNIVERSE.length/ALPACA_BATCH_SIZE)+' batches for the current universe), paginates if necessary, and caches completed scans for 15 minutes. The default feed is IEX; consolidated SIP data requires an eligible Alpaca subscription.</div><p class="section-note">Alpaca credentials remain in encrypted Cloudflare Worker secrets. The browser receives OHLCV only. If the live request fails, the app returns to Demo mode automatically. The market-wide scanner uses daily bars over REST. Chart Lab fetches genuine Alpaca 15Min bars for the selected Live symbol when 15m or 2H is chosen; it never fabricates intraday from daily. No streaming WebSocket.</p><p class="section-note">The setup guide is in <code>docs/ALPACA_SETUP.md</code>. No keys belong in this website, browser storage, or chat.</p></div></div>'+
+      '<div class="panel"><div class="panel-header"><h2>Live market scanner · Alpaca</h2><span class="source-badge">Keys stay server-side</span></div><div class="panel-body"><label class="field">Cloudflare Worker API URL<input type="url" data-setting="apiBaseUrl" placeholder="https://market-lens-pro-api.your-subdomain.workers.dev" value="'+esc(S.apiBaseUrl)+'"/></label><div class="flex" style="margin-top:13px">'+button('Test backend','test-live','small')+button('Refresh live universe','mode-live','primary')+'</div><div class="info-strip">The quick live scan covers '+LIVE_UNIVERSE.length+' curated symbols — not a full S&P 500 constituent list: '+LIVE_EQUITY_COUNT+' liquid US equities, '+LIVE_ETF_COUNT+' broad-market ETFs and '+LIVE_VOLATILITY_COUNT+' live volatility tickers. Live volatility tickers include VXX, UVXY, SVXY, VIXY, VIXM, VXZ, SVIX, UVIX, SVOL and ZVOL. The Worker requests '+ALPACA_SCAN_LOOKBACK_DAYS+' calendar days (approximately five years) of daily bars in batches of '+ALPACA_BATCH_SIZE+' symbols ('+Math.ceil(LIVE_UNIVERSE.length/ALPACA_BATCH_SIZE)+' batches for the current universe), paginates if necessary, and caches completed scans for 15 minutes. The default feed is IEX; consolidated SIP data requires an eligible Alpaca subscription.</div><p class="section-note">Alpaca credentials remain in encrypted Cloudflare Worker secrets. The browser receives OHLCV only. If the live request fails, the app retains previous real data when available and otherwise shows an error. The market-wide scanner uses daily bars over REST. Chart Lab fetches genuine Alpaca 15Min bars for the selected Live symbol when 15m or 2H is chosen; it never fabricates intraday from daily. No streaming WebSocket.</p><p class="section-note">The setup guide is in <code>docs/ALPACA_SETUP.md</code>. No keys belong in this website, browser storage, or chat.</p></div></div>'+
       '<div class="panel"><div class="panel-header"><h2>Import historical data</h2><span class="source-badge">Saved workspace data</span></div><div class="panel-body"><div class="upload" id="dropzone"><strong>Drop one or more CSV files here</strong><p class="subtle">Or tap to browse. Multiple symbols are supported in a single file.</p>'+button('Choose CSV files','import')+'</div><div class="info-strip">Required columns: <code>Date,Open,High,Low,Close</code>. Optional: <code>Symbol,Volume</code>. For daily files, enter ISO dates like 2026-01-05. Chart Lab in Live mode fetches real 15Min bars, aggregates them into 2H OHLCV, and labels the IEX source. Market-wide 2H screener rules still require timestamped intraday inputs. Imported CSV prices should be split-adjusted consistently. Close-only files are permitted but weaken fill accuracy.</div></div></div>'+
-      '<div class="panel"><div class="panel-header"><h2>Saved imported symbols</h2><div class="flex">'+button('Reset to demo data','clear-imports','small')+button('Export sample CSV','export-sample','small')+'</div></div><div class="panel-body"><div class="data-list">'+(imported.length?imported.map(([symbol,b])=>'<div class="data-item"><div><strong>'+esc(symbol)+'</strong><br/><small>'+b.length+' bars · '+dateLabel(b[0].time)+' to '+dateLabel(b.at(-1).time)+'</small></div><button class="btn small" data-action="choose-symbol" data-symbol="'+esc(symbol)+'">Open chart</button></div>').join(''):'<div class="empty"><strong>No imported data yet.</strong>Four clearly labeled synthetic symbols are included to demonstrate the interface.</div>')+'</div></div></div>'+
-      '<div class="panel"><div class="panel-header"><h2>Market data policy</h2></div><div class="panel-body"><p class="section-note">GitHub Pages serves the public frontend only. Alpaca credentials are stored as Cloudflare Worker secrets and are never sent to this browser. Live data requests go through the Worker proxy.</p><p class="section-note">Imported and demo data remain available in Demo mode. Backtesting is research-only and does not submit orders.</p></div></div>';
+      '<div class="panel"><div class="panel-header"><h2>Saved imported symbols</h2><div class="flex">'+button('Clear imported data','clear-imports','small')+'</div></div><div class="panel-body"><div class="data-list">'+(imported.length?imported.map(([symbol,b])=>'<div class="data-item"><div><strong>'+esc(symbol)+'</strong><br/><small>'+b.length+' bars · '+dateLabel(b[0].time)+' to '+dateLabel(b.at(-1).time)+'</small></div><button class="btn small" data-action="choose-symbol" data-symbol="'+esc(symbol)+'">Open chart</button></div>').join(''):'<div class="empty"><strong>No imported data yet.</strong>Import actual historical OHLCV data to use it alongside Alpaca.</div>')+'</div></div></div>'+
+      '<div class="panel"><div class="panel-header"><h2>Market data policy</h2></div><div class="panel-body"><p class="section-note">GitHub Pages serves the public frontend only. Alpaca credentials are stored as Cloudflare Worker secrets and are never sent to this browser. Live data requests go through the Worker proxy.</p><p class="section-note">Imported data remains available alongside Alpaca data. Backtesting is research-only and does not submit orders.</p></div></div>';
   }
   const optionsBuilder=createOptionsBuilder();
   window.addEventListener('hashchange',()=>{
@@ -2224,7 +2220,7 @@ async function initApp(){
       S.result.range=window.range;
       S.result.source=S.sources.get(S.symbol)==='ALPACA'?
         'ALPACA '+String(S.liveFeed).toUpperCase()+' '+S.chart.tf:
-        S.sources.get(S.symbol)==='SIMULATED'?'SIMULATED OHLCV':'IMPORTED CSV OHLCV';
+        'IMPORTED CSV OHLCV';
       S.backtestError='';S.resultSymbol=S.symbol;S.resultTf=S.chart.tf;rememberAnalysis();return true;
     }catch(err){
       S.backtestError=err.message;notice(err.message);return false;
@@ -2238,18 +2234,11 @@ async function initApp(){
     if(!payload.configured)throw new Error('Worker is reachable, but Alpaca secrets have not been configured yet.');
     S.liveFeed=payload.feed||'iex';notice('Alpaca backend is ready · '+String(S.liveFeed).toUpperCase()+' feed.');return payload;
   }
-  function runDemoScan(){
-    const symbols=[...S.data.keys()].filter(symbol=>S.sources.get(symbol)!=='ALPACA'&&isVisibleSymbol(symbol));
-    const matches=symbols.filter(symbol=>screenSymbol(S.data.get(symbol),S.rules).pass);
-    S.scan={status:'complete',source:'DEMO',requested:symbols.length,returned:symbols.length,matched:matches.length,missing:[],cached:false,at:new Date().toISOString()};
-    S.freshness=null;evaluateScreenerSignals(true);
-    evaluateLocalAlerts();S.tab='screener';render();
-    notice('Demo scan complete: '+matches.length+' '+(matches.length===1?'match':'matches')+' across '+symbols.length+' symbols.');
-  }
   async function fetchLiveUniverse(options={}){
     let base=canonicalWorkerBase(S.apiBaseUrl);
     if(!base.startsWith('https://'))throw new Error('Enter the Cloudflare Worker URL in Data Center first.');
     S.scan={status:'loading',source:'ALPACA'};
+    refreshMarketMode();
     if(quickScreenerVisible())refreshScreenerResults();
     const scanStartedAt=performance.now();
     const requestHistory=async (workerBase)=>{
@@ -2296,14 +2285,13 @@ async function initApp(){
     const {base,response,payload,history,recovered,parsed,durationMs}=result;
     if(recovered)S.apiBaseUrl=base;
     const selected=S.symbol;
-    if(S.sources.get(selected)!=='ALPACA')S.lastDemoSymbol=selected;
     for(const [symbol,source] of S.sources)if(source==='ALPACA'&&symbol!==selected){S.sources.delete(symbol);S.data.delete(symbol);}
     const loaded=[];
     for(const [symbol,liveBars] of parsed){S.data.set(symbol,liveBars);S.sources.set(symbol,'ALPACA');loaded.push(symbol);}
     S.mode='live';S.liveFeed=payload.feed||'iex';
     const visible=loaded.filter(isVisibleSymbol);
-    const remembered=S.sources.get(selected)==='ALPACA'?selected:options.restoreSymbol||S.lastBacktestSymbol||S.lastLiveSymbol;
-    const target=remembered&&S.sources.get(remembered)==='ALPACA'?remembered:visible[0]||loaded[0];
+    const remembered=modeSymbol(selected)?selected:options.restoreSymbol||S.lastBacktestSymbol||S.lastLiveSymbol;
+    const target=remembered&&modeSymbol(remembered)?remembered:visible[0]||loaded[0];
     S.preferredMode='live';
     if(target!==selected){
       const timeframe=S.chart.tf;
@@ -2329,24 +2317,20 @@ async function initApp(){
     const pending=liveScanPending;
     liveScanPending=null;
     if(pending.error){
-      if(S.mode!=='live'){
-        S.mode='demo';S.preferredMode=pending.options.restoreTab?'live':'demo';
-      }
-      S.scan={status:'fallback',source:S.mode==='live'?'ALPACA':'DEMO',error:pending.error};
+      S.scan={status:'fallback',source:'ALPACA',error:pending.error};
       saveSettings();
     }else applyLiveUniverse(pending.result,pending.options);
   }
   function refreshMarketMode(){
     const header=$('.topbar .top-actions');
     if(!header)return;
-    const live=S.mode==='live';
-    header.querySelector('.status').lastChild.textContent=live?'Alpaca data':'Demo data';
     header.querySelector('.source-badge').textContent=status();
-    for(const mode of ['demo','live']){
-      const control=header.querySelector('[data-action="mode-'+mode+'"]');
-      control.classList.toggle('selected',S.mode===mode);
-      control.setAttribute('aria-pressed',String(S.mode===mode));
-    }
+    const existing=header.querySelector('[data-action="mode-live"]');
+    if(!hasLiveData()&&S.scan.status==='fallback'&&!existing){
+      const retry=document.createElement('button');
+      retry.type='button';retry.className='btn small live-retry';retry.dataset.action='mode-live';retry.textContent='Retry data';
+      header.querySelector('.source-badge').after(retry);
+    }else if(existing&&(hasLiveData()||S.scan.status!=='fallback'))existing.remove();
   }
   async function switchToLive(options={}){
     if(liveScanActive)return liveScanActive;
@@ -2361,7 +2345,7 @@ async function initApp(){
       liveScanPending=pending;
       if(quickScreenerVisible()){
         applyPendingLiveScan();refreshMarketMode();refreshScreenerResults();
-      }else if(options.restoreTab&&initialMain===$('#main')){
+      }else if((options.restoreTab&&initialMain===$('#main'))||!hasLiveData()||S.tab==='data'){
         // Hydrate a restored view only if the user has not navigated during startup.
         applyPendingLiveScan();render();
       }
@@ -2473,7 +2457,7 @@ async function initApp(){
     if(S.savedScans.length>=SCAN_LIMIT){notice('Maximum '+SCAN_LIMIT+' saved scans reached.');return;}
     const id='scan-'+Date.now();
     const snapshot=makeScanSnapshot(screenerRows(),{
-      id,name,source:S.savedScanView?.source|| (marketShown()||S.mode==='live'?'ALPACA':'DEMO'),rules:S.rules,
+      id,name,source:S.savedScanView?.source||'ALPACA / IMPORTED',rules:S.rules,
       universeFilter:S.universeFilter,query:S.query,showOnlyMatches:S.showOnlyMatches,
       showWatch:S.showWatch,sort:S.sort,ascending:S.ascending
     });
@@ -2621,7 +2605,7 @@ async function initApp(){
   function comparisonSource(){
     return S.sources.get(S.symbol)==='ALPACA'?
       'Alpaca '+String(S.liveFeed).toUpperCase()+' OHLCV':
-      S.sources.get(S.symbol)==='SIMULATED'?'SIMULATED Demo OHLCV':'IMPORTED CSV OHLCV';
+      'IMPORTED CSV OHLCV';
   }
   function comparisonContext(){
     return {bars:bars(),range:S.btRange,symbol:S.symbol,
@@ -2737,9 +2721,8 @@ async function initApp(){
     },
     'pine-clear-plots':()=>{S.activeIndicators=[];S.scriptOutput='Removed all custom indicator plots from Chart Lab.';render();},
     import:()=>$('#csv-file')?.click(),
-    'mode-demo':()=>{liveScanPending=null;market.shown=false;market.controller?.abort();clearSavedScanView();S.mode='demo';S.preferredMode='demo';if(S.sources.get(S.symbol)==='ALPACA')S.symbol=S.lastDemoSymbol&&S.sources.get(S.lastDemoSymbol)!=='ALPACA'?S.lastDemoSymbol:'DEMO-SPY';restoreSymbolState(S.symbol);S.scan={status:'idle'};render();},
     'mode-live':()=>{market.shown=false;market.controller?.abort();clearSavedScanView();return switchToLive({restoreSymbol:S.lastLiveSymbol});},
-    'scan-universe':()=>{if(liveScanActive)return;clearSavedScanView();return S.mode==='live'?switchToLive():runDemoScan();},
+    'scan-universe':()=>{if(liveScanActive)return;clearSavedScanView();return switchToLive();},
     'test-live':()=>testLiveBackend().catch(err=>notice('Backend test failed: '+err.message)),
     'view-charts':()=>{S.tab='charts';render();},
     'refresh-intraday':()=>{if(S.mode==='live')void loadLiveIntraday(S.symbol,true).catch(()=>{});
@@ -2902,7 +2885,6 @@ async function initApp(){
         symbolCount:r.n??1,trainReturn:r.train.returnPct,trainDrawdown:r.train.maxDD,
         trainTrades:r.train.trades,testReturn:r.test.returnPct,testDrawdown:r.test.maxDD,
         testTrades:r.test.trades,testSharpe:r.test.sharpe,testProfitFactor:r.test.profitFactor}))));},
-    'export-sample':()=>{const b=S.data.get('DEMO-SPY');exportFile('SIMULATED-DEMO-SPY.csv',csvDownload(b.map(x=>({Date:x.time,Symbol:'DEMO-SPY',Open:x.open,High:x.high,Low:x.low,Close:x.close,Volume:x.volume}))));},
     'clear-imports':()=>removeImports(),
     'choose-symbol':el=>{restoreSymbolState(el.dataset.symbol);S.tab='charts';render();}
   };
@@ -3093,18 +3075,8 @@ async function initApp(){
   }catch{}
   if(S.signalSelection!=='none')evaluateScreenerSignals(false);
   render();
-  const initialView=$('#main');
   await loadStored();
-  if(startupPrefs.mode==='live'&&S.preferredMode==='live'){
-    // Restore Live by rehydrating the real market scan, never relabel Demo prices.
-    const destination=initialView===$('#main')?startupPrefs.tab:null;
-    await switchToLive({restoreTab:destination,restoreSymbol:destination==='charts'?(startupPrefs.lastSymbol||startupPrefs.selectedSymbol):startupPrefs.selectedSymbol});
-  }else if(initialView===$('#main')){
-    const selected=startupPrefs.tab==='charts'?(startupPrefs.lastSymbol||startupPrefs.selectedSymbol):startupPrefs.selectedSymbol;
-    if(selected&&S.data.has(selected))restoreSymbolState(selected);
-    if(S.tab==='charts'&&saved.chart?.tf)S.chart.tf=saved.chart.tf;
-    render();
-  }
+  await switchToLive({restoreTab:S.tab,restoreSymbol:startupPrefs.selectedSymbol});
   workspaceReady=true;
   if(syncEnabled){
     function refreshSharedWorkspace(){

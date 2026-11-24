@@ -23,21 +23,13 @@ export function nyIntradaySession(value){
   return parts.year+'-'+parts.month+'-'+parts.day;
 }
 export function normalizeStartupPreferences(saved={}){
-  const mode=saved.mode==='live'?'live':'demo';
-  const lastDemoSymbol=typeof saved.lastDemoSymbol==='string'&&saved.lastDemoSymbol.startsWith('DEMO-')?
-    saved.lastDemoSymbol:'DEMO-SPY';
-  const lastLiveSymbol=typeof saved.lastLiveSymbol==='string'&&/^[A-Z0-9.^-]{1,20}$/.test(saved.lastLiveSymbol)?
-    saved.lastLiveSymbol:'VXX';
-  const lastBacktestSymbol=typeof saved.lastBacktestSymbol==='string'&&saved.lastBacktestSymbol?
-    saved.lastBacktestSymbol:null;
-  const lastSymbol=typeof saved.lastSymbol==='string'&&saved.lastSymbol?saved.lastSymbol:null;
-  const tab=['screener','charts','backtest','options','optimize','scripts','data'].includes(saved.tab)?
-    saved.tab:'screener';
-  const liveCandidate=[lastBacktestSymbol,lastSymbol,lastLiveSymbol].find(x=>x&&!x.startsWith('DEMO-'));
-  return {mode,tab,lastDemoSymbol,lastLiveSymbol,lastBacktestSymbol,lastSymbol,
-    selectedSymbol:mode==='live'?(liveCandidate||lastLiveSymbol):
-      (lastBacktestSymbol?.startsWith('DEMO-')?lastBacktestSymbol:
-       lastSymbol?.startsWith('DEMO-')?lastSymbol:lastDemoSymbol)};
+  const valid=value=>typeof value==='string'&&/^[A-Z0-9.^_-]{1,20}$/.test(value)&&!value.startsWith('DEMO-');
+  const lastLiveSymbol=valid(saved.lastLiveSymbol)?saved.lastLiveSymbol:'VXX';
+  const lastBacktestSymbol=valid(saved.lastBacktestSymbol)?saved.lastBacktestSymbol:null;
+  const lastSymbol=valid(saved.lastSymbol)?saved.lastSymbol:null;
+  const tab=['screener','charts','backtest','options','optimize','scripts','data'].includes(saved.tab)?saved.tab:'screener';
+  return {mode:'live',tab,lastLiveSymbol,lastBacktestSymbol,lastSymbol,
+    selectedSymbol:(tab==='backtest'?lastBacktestSymbol:lastSymbol)||lastLiveSymbol};
 }
 export function intradayCacheFresh(entry,{symbol,feed,expected=expectedNyseBarDate(),now=Date.now(),maxAgeMs=300000}={}){
   if(!entry||entry.source!=='ALPACA'||entry.symbol!==symbol||entry.feed!==feed||
