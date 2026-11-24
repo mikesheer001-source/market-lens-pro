@@ -1,4 +1,5 @@
 import {expectedNyseBarDate} from './freshness.js';
+import {isIntraday} from './timeframes.js';
 
 // Use New York's calendar to validate *intraday* bar freshness. An UTC date
 // alone can fall on the wrong trading day for after-hours exchanges.
@@ -41,7 +42,7 @@ export function intradayCacheFresh(entry,{symbol,feed,expected=expectedNyseBarDa
 }
 export function intradayFetchDecision({timeframe,mode,source,symbol,entry,feed='iex',
   expected=expectedNyseBarDate(),now=Date.now(),maxAgeMs=300000}={}){
-  if(timeframe!=='2H'&&timeframe!=='15m')return 'daily';
+  if(!isIntraday(timeframe))return 'daily';
   if(mode!=='live'||source!=='ALPACA')return 'unavailable';
   if(intradayCacheFresh(entry,{symbol,feed,expected,now,maxAgeMs}))return 'cached';
   return 'fetch';

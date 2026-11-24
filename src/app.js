@@ -4,6 +4,7 @@ import {createOptionsBuilder, optionsApprovalLink} from './options-builder.js';
 import {mergeWorkspace, workspaceSync} from './workspace-sync.js';
 import {scanMarket} from './market-scan.js';
 import './styles.css';
+import {CHART_FRAMES,INTRADAY_MINUTES,isIntraday,sourceResolution,resolutionDays,selectedFrames} from './timeframes.js';
 import {compilePine, executePine, sweepPine, PineError} from './pine.js';
 import {PINE_EXAMPLES} from './pine-examples.js';
 import {readableBarDate,normalizeStartupPreferences,intradayCacheFresh,intradayFetchDecision} from './intraday-session.js';
@@ -50,7 +51,7 @@ async function initApp(){
     volatility:[{metric:'rsi',tf:'D',op:'<',value:60},{metric:'drawdown',tf:'D',op:'<',value:-5},{metric:'emaDist',tf:'D',op:'<',value:0}],
     all:[]
   };
-  const defaultSettings={tf:'D',style:'candles',log:false,ema20:true,ema50:false,ema200:true,sma20:false,movingAverages:[],indicatorCopies:[],bollinger:false,volume:true,rsi:true,macd:false,rsiPeriod:14,bollPeriod:20,optionsMedian:false,optionsMedianRate:4,ema20Len:20,ema50Len:50,ema200Len:200,sma20Len:20,volumeHeight:17,macdFast:12,macdSlow:26,macdSignal:9,lines:{}};
+  const defaultSettings={tf:'D',sliderFrames:CHART_FRAMES.map(([id])=>id),style:'candles',log:false,ema20:true,ema50:false,ema200:true,sma20:false,movingAverages:[],indicatorCopies:[],bollinger:false,volume:true,rsi:true,macd:false,rsiPeriod:14,bollPeriod:20,optionsMedian:false,optionsMedianRate:4,ema20Len:20,ema50Len:50,ema200Len:200,sma20Len:20,volumeHeight:17,macdFast:12,macdSlow:26,macdSignal:9,lines:{}};
   const defaultBacktest={strategy:'ema-cross',side:'long',borrowAnnualPct:0,fast:20,slow:100,rsiPeriod:14,buyLevel:30,sellLevel:65,period:20,multiplier:2,capital:10000,allocation:100,feeBps:1,slipBps:2,stopPct:0,targetPct:0};
   const workspaceKeys={
     settings:'market-lens-pro-settings',library:'market-lens-pro-pine-library-v1',
@@ -403,15 +404,19 @@ async function initApp(){
   }
   async function storeDataset(symbol,bars){try{const previous=syncEnabled?await databaseRead('symbols'):undefined;const db=await openDb(),tx=db.transaction('symbols','readwrite');tx.objectStore('symbols').put({symbol,bars});await new Promise((res,rej)=>{tx.oncomplete=res;tx.onerror=()=>rej(tx.error);});db.close();workspace.changed('imports',previous);}catch{notice('Import loaded, but this browser could not save it for future visits.');}}
   async function removeImports(){try{const db=await openDb(),tx=db.transaction('symbols','readwrite');tx.objectStore('symbols').clear();await new Promise((res,rej)=>{tx.oncomplete=res;tx.onerror=()=>rej(tx.error);});db.close();workspace.changed('imports');}catch{}for(const [symbol,source] of S.sources)if(source==='IMPORTED'){S.sources.delete(symbol);S.data.delete(symbol);}if(!S.data.has(S.symbol))restoreSymbolState(S.data.has(S.lastLiveSymbol)?S.lastLiveSymbol:[...S.data.keys()][0]||S.lastLiveSymbol);S.result=null;S.sweep=null;render();}
-  const intradayTf=tf=>tf==='15m'||tf==='2H';
-  const intradayKey=symbol=>symbol+'|'+String(S.liveFeed||'iex');
+  const intradayTf=isIntraday;
+  const intradayKey=(symbol,tf=S.chart.tf)=>symbol+'|'+String(S.liveFeed||'iex')+(sourceResolution(tf)==='15Min'?'':'|'+sourceResolution(tf));
   const barsFor=(symbol,tf)=>{
     const daily=S.data.get(symbol)||[];
     if(!intradayTf(tf))return aggregate(daily,tf);
     const source=S.sources.get(symbol);
-    const raw=source==='ALPACA'?S.intraday.get(intradayKey(symbol))?.bars||[]:
+    const raw=source==='ALPACA'?S.intraday.get(intradayKey(symbol,tf))?.bars||[]:
       daily.filter(b=>typeof b.time==='number');
-    // No daily-to-intraday interpolation: empty is an explicit unavailable state.
+    // Reject known coarser imported bars instead of relabeling them as finer candles.
+    if(source!=='ALPACA'&&['1m','5m'].includes(tf)){
+      const gap=raw.slice(1).reduce((min,b,i)=>Math.min(min,b.time-raw[i].time),Infinity);
+      if(gap>INTRADAY_MINUTES[tf]*60)return [];
+    }
     return aggregate(raw,tf);
   };
   const bars=()=>barsFor(S.symbol,S.chart.tf);
@@ -423,8 +428,9 @@ async function initApp(){
     const raw=intraday?S.intraday.get(intradayKey(S.symbol))?.bars:S.data.get(S.symbol);
     if(!raw?.length)return null;
     const base=S.apiBaseUrl.replace(/\/$/,'');
-    const key=JSON.stringify([base,S.liveFeed,S.symbol,intraday]);
-    return {base,key,raw,intraday,symbol:S.symbol,feed:S.liveFeed};
+    const resolution=intraday?sourceResolution(S.chart.tf):'1Day';
+    const key=JSON.stringify([base,S.liveFeed,S.symbol,resolution]);
+    return {base,key,raw,intraday,resolution,symbol:S.symbol,feed:S.liveFeed};
   }
   function chartBars(){
     const series=liveChartHistory();
@@ -445,7 +451,7 @@ async function initApp(){
   async function loadOlderChart(manual=false){
     const series=liveChartHistory();
     if(!series)return;
-    const {base,key,raw,intraday,symbol,feed}=series;
+    const {base,key,raw,intraday,resolution,symbol,feed}=series;
     const prior=olderHistory.get(key)||{bars:[]};
     if(prior.status==='loading'||prior.status==='done'||(prior.status==='error'&&!manual))return;
     const refreshControl=()=>{
@@ -456,10 +462,10 @@ async function initApp(){
     if(end<historyStart){
       olderHistory.set(key,{...prior,status:'done',message:''});refreshControl();return;
     }
-    const start=Math.max(historyStart,end-(intraday?120:730)*86_400_000);
+    const start=Math.max(historyStart,end-(intraday?resolutionDays(resolution):730)*86_400_000);
     olderHistory.set(key,{...prior,status:'loading',message:''});refreshControl();
     try{
-      const params=new URLSearchParams({symbol,feed,timeframe:intraday?'15Min':'1Day',
+      const params=new URLSearchParams({symbol,feed,timeframe:resolution,
         start:new Date(start).toISOString(),end:new Date(end).toISOString(),limit:'10000'});
       const pages=[];
       for(let page=0;;page++){
@@ -493,16 +499,17 @@ async function initApp(){
       refreshControl();
     }
   }
-  async function loadLiveIntraday(symbol,force=false){
-    if(S.mode!=='live'||S.sources.get(symbol)!=='ALPACA')return null;
-    const key=intradayKey(symbol),feed=S.liveFeed;
+  async function loadLiveIntraday(symbol,force=false,tf=S.chart.tf){
+    if(S.mode!=='live'||S.sources.get(symbol)!=='ALPACA'||!intradayTf(tf))return null;
+    const key=intradayKey(symbol,tf),feed=S.liveFeed,resolution=sourceResolution(tf);
+    const isActive=()=>S.symbol===symbol&&intradayTf(S.chart.tf)&&intradayKey(symbol)===key;
     if(S.intradayPromises.has(key))return S.intradayPromises.get(key);
     const work=(async()=>{
       const current=S.intraday.get(key);
       if(!force&&intradayCacheFresh({...current,symbol,feed},{
         symbol,feed,expected:expectedNyseBarDate(),now:Date.now()}))return current;
       S.intradayStatus.set(key,{status:'loading'});
-      if(S.symbol===symbol&&intradayTf(S.chart.tf)&&['charts','backtest','optimize'].includes(S.tab))render();
+      if(isActive()&&['charts','backtest','optimize'].includes(S.tab))render();
       try{
         if(!force){
           const cached=await readCachedIntraday(key);
@@ -514,25 +521,44 @@ async function initApp(){
         }
         const base=S.apiBaseUrl.replace(/\/$/,'');
         if(!base.startsWith('https://'))throw Error('Configure an HTTPS Worker URL in Data Center.');
-        const response=await fetch(base+'/api/stocks/intraday?symbol='+encodeURIComponent(symbol)+
-          '&feed='+encodeURIComponent(feed),{headers:{Accept:'application/json'}});
-        const payload=await response.json().catch(()=>({}));
-        if(!response.ok)throw Error(payload.detail||payload.error||'Alpaca intraday request failed.');
-        const received=alpacaBars(payload.bars||[],'15Min');
+        let payload,received;
+        if(resolution==='15Min'){
+          const response=await fetch(base+'/api/stocks/intraday?symbol='+encodeURIComponent(symbol)+
+            '&feed='+encodeURIComponent(feed),{headers:{Accept:'application/json'}});
+          payload=await response.json().catch(()=>({}));
+          if(!response.ok)throw Error(payload.detail||payload.error||'Alpaca intraday request failed.');
+          received=alpacaBars(payload.bars||[],resolution);
+        }else{
+          const end=new Date().toISOString(),start=new Date(Date.now()-resolutionDays(resolution)*86400000).toISOString();
+          const params=new URLSearchParams({symbol,feed,timeframe:resolution,start,end,limit:'10000'});
+          const pages=[];
+          for(let n=0;;n++){
+            const response=await fetch(base+'/api/stocks/bars?'+params,{headers:{Accept:'application/json'}});
+            payload=await response.json().catch(()=>({}));
+            if(!response.ok||!Array.isArray(payload.bars))throw Error(payload.detail||payload.error||'Alpaca intraday request failed.');
+            if(payload.timeframe&&payload.timeframe!==resolution)throw Error('Provider returned a different candle interval.');
+            pages.push(...alpacaBars(payload.bars,resolution));
+            if(!payload.next_page_token)break;
+            if(n>=3)throw Error('Intraday history exceeded the page limit.');
+            params.set('page_token',payload.next_page_token);
+          }
+          received=normalizeBars(pages);
+          payload={...payload,start,end};
+        }
         if(!received.length)throw Error('Alpaca '+String(payload.feed||feed).toUpperCase()+
-          ' returned no real 15-minute candles for '+symbol+'.');
+          ' returned no real '+resolution+' candles for '+symbol+'.');
         const record={symbol,bars:received,source:'ALPACA',feed:payload.feed||feed,
-          fetchedAt:Date.now(),start:payload.start,end:payload.end};
+          fetchedAt:Date.now(),resolution,start:payload.start,end:payload.end};
         S.intraday.set(key,record);
         S.intradayStatus.set(key,{status:'ready',bars:received.length,cached:false});
         await persistIntraday(key,record);
         return record;
       }catch(err){
         S.intradayStatus.set(key,{status:'error',error:err.message});
-        if(S.symbol===symbol&&intradayTf(S.chart.tf))notice('Real Alpaca 15-minute bars unavailable: '+err.message);
+        if(isActive())notice('Real Alpaca '+resolution+' bars unavailable: '+err.message);
         throw err;
       }finally{
-        if(S.symbol===symbol&&intradayTf(S.chart.tf)&&['charts','backtest','optimize'].includes(S.tab))render();
+        if(isActive()&&['charts','backtest','optimize'].includes(S.tab))render();
       }
     })();
     S.intradayPromises.set(key,work);
@@ -548,7 +574,7 @@ async function initApp(){
       notice(S.analysisError);render();return false;
     }
     if(decision==='fetch'){
-      S.analysisLoading='Fetching Alpaca 15-minute bars…';
+      S.analysisLoading='Fetching Alpaca '+sourceResolution(S.chart.tf)+' bars…';
       S.analysisError='';render();
       try{await loadLiveIntraday(S.symbol);}
       catch(err){S.analysisError=actionLabel+' could not obtain real intraday bars: '+err.message;
@@ -587,7 +613,7 @@ async function initApp(){
   const head=(name,desc,tools='')=>'<div class="headrow"><div><div class="eyebrow">Market Lens / '+name+'</div><h1>'+name+'</h1><p class="subtle">'+desc+'</p></div><div class="flex">'+tools+'</div></div>';
   const button=(label,action,variant='')=>'<button type="button" class="btn '+variant+'" data-action="'+action+'">'+label+'</button>';
   const select=(items,value,attr)=>'<select '+attr+'>'+items.map(([v,t])=>'<option value="'+esc(v)+'"'+(v===value?' selected':'')+'>'+esc(t)+'</option>').join('')+'</select>';
-  const timeframes=[['D','1 Day · daily OHLCV'],['W','1 Week · daily aggregation'],['M','1 Month · daily aggregation'],['2H','2 Hours · requires 15m OHLCV'],['15m','15 Minutes · requires 15m OHLCV']];
+  const timeframes=CHART_FRAMES.map(([id,label])=>[id,label+(isIntraday(id)?' · genuine intraday OHLCV':' · daily OHLCV')]);
   const symbolSelect=()=>{
     const options=[...S.data.keys()].filter(modeSymbol).sort(),selected=options.includes(S.symbol)?S.symbol:options[0]||'';
     return '<div class="symbol-picker"><label class="control">Find symbol <input type="search" class="symbol-search" data-input="symbol-search" aria-label="Find symbol" placeholder="Search all '+options.length+' loaded tickers" value="'+esc(S.symbolQuery)+'"/></label>'+
@@ -598,11 +624,11 @@ async function initApp(){
   function metric(label,value,foot='',type=''){return '<div class="metric"><label>'+label+'</label><strong class="'+type+'">'+value+'</strong><small>'+foot+'</small></div>';}
   const sourceStrip=()=>intradayTf(S.chart.tf)?(
     S.sources.get(S.symbol)==='ALPACA'?
-      '<div class="info-strip '+(S.intradayStatus.get(intradayKey(S.symbol))?.status==='error'?'warning':'')+'">Real '+esc(S.chart.tf)+' candles · '+esc(String(S.liveFeed).toUpperCase())+' Alpaca 15-minute trade-bar OHLCV'+
-      (S.chart.tf==='2H'?' aggregated by NYSE 09:30–16:00 ET session buckets, including a partial final 30-minute bucket.':' (no aggregation beyond 15 minutes).')+
+      '<div class="info-strip '+(S.intradayStatus.get(intradayKey(S.symbol))?.status==='error'?'warning':'')+'">Real '+esc(S.chart.tf)+' candles · '+esc(String(S.liveFeed).toUpperCase())+' Alpaca '+sourceResolution(S.chart.tf).replace('Min','-minute')+' trade-bar OHLCV'+
+      (S.chart.tf==='2H'?' aggregated by NYSE 09:30–16:00 ET session buckets, including a partial final 30-minute bucket.':INTRADAY_MINUTES[S.chart.tf]>15?' aggregated by NYSE 09:30–16:00 ET session buckets; final bucket may be partial.':' (regular-session candles).')+
       ' · '+(S.intradayStatus.get(intradayKey(S.symbol))?.status==='error'?esc(S.intradayStatus.get(intradayKey(S.symbol)).error):
       S.intradayStatus.get(intradayKey(S.symbol))?.status==='loading'?'Fetching real intraday bars…':
-      (S.intraday.get(intradayKey(S.symbol))?.bars.length??0)+' confirmed 15-minute bars')+'</div>':
+      (S.intraday.get(intradayKey(S.symbol))?.bars.length??0)+' confirmed '+sourceResolution(S.chart.tf).replace('Min','-minute')+' bars')+'</div>':
       '<div class="info-strip warning">Intraday charts require genuine timestamped Alpaca or imported CSV bars.</div>'
   ):S.sources.get(S.symbol)==='ALPACA'?'<div class="info-strip">Alpaca market data · '+esc(String(S.liveFeed||'IEX').toUpperCase())+' feed · REST refresh on demand. This is not a tick-by-tick WebSocket stream.</div>':(S.data.get(S.symbol)||[]).some(b=>b.approximateOhlc)?'<div class="info-strip warning">The imported CSV has Close-only bars. Open/high/low are approximated. Stop, target, and next-open fills are unreliable until full OHLCV data is imported.</div>':'';
   const market={shown:false,controller:null,checked:0,requested:0,next:0,rows:new Map(),page:0,error:''};
@@ -1107,14 +1133,25 @@ async function initApp(){
     S.chart.tf=value;S.result=null;S.sweep=null;
     if(S.tab==='charts')S.chartRecentFrames=[value,...S.chartRecentFrames.filter(tf=>tf!==value)].slice(0,3);
   }
-  const chartFrameScale=[['15m','15m'],['2H','2H'],['D','1D'],['W','1W'],['M','1M']];
+  const chartFrameScale=()=>selectedFrames(S.chart.sliderFrames,S.chart.tf);
+  const chartStyles=[['candles','Candles'],['bars','Bars'],['line','Line'],['area','Area']];
+  function openChartSettings(){
+    const dialog=$('#chart-settings-dialog');
+    dialog.innerHTML=dialogHeader('Chart settings','chart-settings-title')+
+      '<div class="chart-settings-content"><label class="field">Candle / chart style '+select(chartStyles,S.chart.style,'data-option="style" aria-label="Chart style"')+'</label>'+
+      '<h3>Timeframes on slider</h3><div class="chart-frame-options">'+CHART_FRAMES.map(([id,label])=>
+        '<label><input type="checkbox" data-frame-choice="'+id+'" '+(chartFrameScale().some(([v])=>v===id)?'checked':'')+'/> '+label+'</label>').join('')+
+      '</div><p class="section-note">8H uses the regular 6.5-hour US trading session; the last bucket is partial. No simulated candles.</p>'+
+      '<button class="btn primary" data-action="apply-chart-settings">Apply settings</button></div>';
+    dialog.showModal();
+  }
   function chartControls(){
-    const styles=[['candles','Candles'],['bars','Bars'],['line','Line'],['area','Area']];
-    const index=Math.max(0,chartFrameScale.findIndex(([id])=>id===S.chart.tf));
-    const shortcuts=chartFrameScale.map(([id,label])=>
+    const frames=chartFrameScale();
+    const index=Math.max(0,frames.findIndex(([id])=>id===S.chart.tf));
+    const shortcuts=frames.map(([id,label])=>
       '<button type="button" data-action="chart-timeframe" data-timeframe="'+id+'" aria-pressed="'+(id===S.chart.tf)+'">'+label+'</button>').join('');
-    const frameScale='<div class="chart-frame-scale"><div class="chart-timeframes" role="group" aria-label="Timeframe shortcuts">'+shortcuts+'</div>'+
-      '<input type="range" min="0" max="4" step="1" value="'+index+'" data-chart-frame-scale aria-label="Timeframe scale" aria-valuetext="'+chartFrameScale[index][1]+'"></div>';
+    const frameScale='<div class="chart-frame-scale"><div class="chart-timeframes" style="--frame-count:'+frames.length+'" role="group" aria-label="Timeframe shortcuts">'+shortcuts+'</div>'+
+      '<input type="range" min="0" max="'+(frames.length-1)+'" step="1" value="'+index+'" data-chart-frame-scale aria-label="Timeframe scale" aria-valuetext="'+frames[index][1]+'"></div>';
     const fullscreenLabel=S.chartFullscreen?'Exit fullscreen':'Fullscreen';
     const fullscreenIcon=S.chartFullscreen?
       chartIcon('<path d="M4 9h5V4m6 0v5h5m0 6h-5v5m-6 0v-5H4"/>'):
@@ -1124,9 +1161,7 @@ async function initApp(){
       '" aria-label="Change symbol, '+esc(S.symbol)+'" aria-haspopup="dialog">'+esc(S.symbol)+' <span aria-hidden="true">⌄</span></button>'+
       frameScale+
       '</div><div class="chart-toolbar-actions">'+
-      select(styles,S.chart.style,'data-option="style" aria-label="Chart style"')+
       '<button type="button" class="chart-add-indicator" data-action="indicator-picker" aria-haspopup="dialog"><span aria-hidden="true">+</span> New indicator</button>'+
-      select([['false','Linear'],['true','Log']],String(S.chart.log),'data-option="log" aria-label="Price scale"')+
       '<button type="button" data-action="reset-price-scale" title="Reset price scale" aria-label="Reset price scale">Auto</button>'+
       '<button type="button" class="chart-icon" data-action="'+(S.chartFullscreen?'chart-exit-fullscreen':'chart-fullscreen')+
       '" aria-label="'+fullscreenLabel+'" title="'+fullscreenLabel+'">'+fullscreenIcon+'</button>'+
@@ -1136,7 +1171,8 @@ async function initApp(){
       button(S.drawLine?'Cancel price line':'Horizontal line','draw-line','small')+
       button(indicatorInstances().some(item=>item.type==='optionsMedian')?'Hide options 50/50':'Options 50/50 levels','options-median-toggle','small')+
       button('Clear price levels','clear-lines','small')+button('Export PNG','chart-png','small')+
-      button('Backtest this symbol','view-backtest','small chart-mobile-backtest')+'</div></details></div></div>';
+      button('Backtest this symbol','view-backtest','small chart-mobile-backtest')+'</div></details>'+
+      '<button type="button" class="chart-icon" data-action="chart-settings" aria-label="Chart settings" title="Chart settings" aria-haspopup="dialog">'+chartIcon('<path d="M12 3v2m0 14v2M3 12h2m14 0h2M5.6 5.6l1.4 1.4m10 10 1.4 1.4M18.4 5.6 17 7M7 17l-1.4 1.4"/><circle cx="12" cy="12" r="7"/><circle cx="12" cy="12" r="2.5"/>')+'</button></div></div>';
   }
   const optionsMedianCache = new Map();
   const refreshOptionsMedian=new Map();
@@ -1235,11 +1271,13 @@ async function initApp(){
       chartIndicatorLegend(b)+'</div><div class="chart-ranges" aria-label="Chart range" role="group">'+
       button('1M','range-1m','small')+button('3M','range-3m','small')+button('1Y','range-1y','small')+
       button('All','range-all','small')+button('Fit','range-fit','small')+
-      (intradayTf(S.chart.tf)?button('Refresh 15m bars','refresh-intraday','small chart-refresh'):'')+
+      (intradayTf(S.chart.tf)?button('Refresh '+sourceResolution(S.chart.tf).replace('Min','m')+' bars','refresh-intraday','small chart-refresh'):'')+
+       '<button type="button" class="btn small chart-log-toggle" data-action="chart-log-toggle" aria-label="Logarithmic price scale" aria-pressed="'+S.chart.log+'">LOG</button>'+
       '<span id="older-history-control">'+olderHistoryControl()+'</span>'+
       '<span class="visually-hidden" id="chart-axis-hint" role="status"></span>'+
       (!S.chartFullscreen?'<button type="button" id="chart-resize-handle" class="chart-resize-handle" aria-label="Resize chart height" title="Drag up or down to resize chart; double-click to reset">'+chartIcon('<path d="M7 17 17 7M12 17l5-5"/>')+'</button>':'')+'</div>'+
-      '<dialog id="chart-indicator-dialog" class="chart-dialog" aria-labelledby="chart-dialog-title"></dialog>'+
+      '<dialog id="chart-settings-dialog" class="chart-dialog" aria-labelledby="chart-settings-title"></dialog>'+
+       '<dialog id="chart-indicator-dialog" class="chart-dialog" aria-labelledby="chart-dialog-title"></dialog>'+
       '<dialog id="chart-symbol-dialog" class="chart-dialog" aria-labelledby="chart-symbol-title"></dialog>'+
       '<dialog id="scan-rules-dialog" class="chart-dialog" aria-labelledby="scan-rules-title"></dialog></div>';
     const footer=S.chartFullscreen?'':'<p class="chart-data">'+esc(S.symbol)+' · '+
@@ -1838,8 +1876,8 @@ async function initApp(){
         ' · cache revision '+esc(S.scan.history?.revision||'unknown')+
         (S.scan.history?.recovered?' · Outdated saved Worker automatically replaced with the official Worker':'')+
         '. Longer history may make uncached scans and browser processing slower.</div>':'')+
-      '<div class="panel"><div class="panel-header"><h2>Live market scanner · Alpaca</h2><span class="source-badge">Keys stay server-side</span></div><div class="panel-body"><label class="field">Cloudflare Worker API URL<input type="url" data-setting="apiBaseUrl" placeholder="https://market-lens-pro-api.your-subdomain.workers.dev" value="'+esc(S.apiBaseUrl)+'"/></label><div class="flex" style="margin-top:13px">'+button('Test backend','test-live','small')+button('Refresh live universe','mode-live','primary')+'</div><div class="info-strip">The quick live scan covers '+LIVE_UNIVERSE.length+' curated symbols — not a full S&P 500 constituent list: '+LIVE_EQUITY_COUNT+' liquid US equities, '+LIVE_ETF_COUNT+' broad-market ETFs and '+LIVE_VOLATILITY_COUNT+' live volatility tickers. Live volatility tickers include VXX, UVXY, SVXY, VIXY, VIXM, VXZ, SVIX, UVIX, SVOL and ZVOL. The Worker requests '+ALPACA_SCAN_LOOKBACK_DAYS+' calendar days (approximately five years) of daily bars in batches of '+ALPACA_BATCH_SIZE+' symbols ('+Math.ceil(LIVE_UNIVERSE.length/ALPACA_BATCH_SIZE)+' batches for the current universe), paginates if necessary, and caches completed scans for 15 minutes. The default feed is IEX; consolidated SIP data requires an eligible Alpaca subscription.</div><p class="section-note">Alpaca credentials remain in encrypted Cloudflare Worker secrets. The browser receives OHLCV only. If the live request fails, the app retains previous real data when available and otherwise shows an error. The market-wide scanner uses daily bars over REST. Chart Lab fetches genuine Alpaca 15Min bars for the selected Live symbol when 15m or 2H is chosen; it never fabricates intraday from daily. No streaming WebSocket.</p><p class="section-note">The setup guide is in <code>docs/ALPACA_SETUP.md</code>. No keys belong in this website, browser storage, or chat.</p></div></div>'+
-      '<div class="panel"><div class="panel-header"><h2>Import historical data</h2><span class="source-badge">Saved workspace data</span></div><div class="panel-body"><div class="upload" id="dropzone"><strong>Drop one or more CSV files here</strong><p class="subtle">Or tap to browse. Multiple symbols are supported in a single file.</p>'+button('Choose CSV files','import')+'</div><div class="info-strip">Required columns: <code>Date,Open,High,Low,Close</code>. Optional: <code>Symbol,Volume</code>. For daily files, enter ISO dates like 2026-01-05. Chart Lab in Live mode fetches real 15Min bars, aggregates them into 2H OHLCV, and labels the IEX source. Market-wide 2H screener rules still require timestamped intraday inputs. Imported CSV prices should be split-adjusted consistently. Close-only files are permitted but weaken fill accuracy.</div></div></div>'+
+      '<div class="panel"><div class="panel-header"><h2>Live market scanner · Alpaca</h2><span class="source-badge">Keys stay server-side</span></div><div class="panel-body"><label class="field">Cloudflare Worker API URL<input type="url" data-setting="apiBaseUrl" placeholder="https://market-lens-pro-api.your-subdomain.workers.dev" value="'+esc(S.apiBaseUrl)+'"/></label><div class="flex" style="margin-top:13px">'+button('Test backend','test-live','small')+button('Refresh live universe','mode-live','primary')+'</div><div class="info-strip">The quick live scan covers '+LIVE_UNIVERSE.length+' curated symbols — not a full S&P 500 constituent list: '+LIVE_EQUITY_COUNT+' liquid US equities, '+LIVE_ETF_COUNT+' broad-market ETFs and '+LIVE_VOLATILITY_COUNT+' live volatility tickers. Live volatility tickers include VXX, UVXY, SVXY, VIXY, VIXM, VXZ, SVIX, UVIX, SVOL and ZVOL. The Worker requests '+ALPACA_SCAN_LOOKBACK_DAYS+' calendar days (approximately five years) of daily bars in batches of '+ALPACA_BATCH_SIZE+' symbols ('+Math.ceil(LIVE_UNIVERSE.length/ALPACA_BATCH_SIZE)+' batches for the current universe), paginates if necessary, and caches completed scans for 15 minutes. The default feed is IEX; consolidated SIP data requires an eligible Alpaca subscription.</div><p class="section-note">Alpaca credentials remain in encrypted Cloudflare Worker secrets. The browser receives OHLCV only. If the live request fails, the app retains previous real data when available and otherwise shows an error. The market-wide scanner uses daily bars over REST. Chart Lab fetches genuine Alpaca 1Min, 5Min or 15Min bars for intraday intervals; it never fabricates intraday from daily. No streaming WebSocket.</p><p class="section-note">The setup guide is in <code>docs/ALPACA_SETUP.md</code>. No keys belong in this website, browser storage, or chat.</p></div></div>'+
+      '<div class="panel"><div class="panel-header"><h2>Import historical data</h2><span class="source-badge">Saved workspace data</span></div><div class="panel-body"><div class="upload" id="dropzone"><strong>Drop one or more CSV files here</strong><p class="subtle">Or tap to browse. Multiple symbols are supported in a single file.</p>'+button('Choose CSV files','import')+'</div><div class="info-strip">Required columns: <code>Date,Open,High,Low,Close</code>. Optional: <code>Symbol,Volume</code>. For daily files, enter ISO dates like 2026-01-05. Chart Lab fetches real intraday bars, aggregates hourly intervals within regular US trading sessions, and labels the IEX source. Market-wide 2H screener rules still require timestamped intraday inputs. Imported CSV prices should be split-adjusted consistently. Close-only files are permitted but weaken fill accuracy.</div></div></div>'+
       '<div class="panel"><div class="panel-header"><h2>Saved imported symbols</h2><div class="flex">'+button('Clear imported data','clear-imports','small')+'</div></div><div class="panel-body"><div class="data-list">'+(imported.length?imported.map(([symbol,b])=>'<div class="data-item"><div><strong>'+esc(symbol)+'</strong><br/><small>'+b.length+' bars · '+dateLabel(b[0].time)+' to '+dateLabel(b.at(-1).time)+'</small></div><button class="btn small" data-action="choose-symbol" data-symbol="'+esc(symbol)+'">Open chart</button></div>').join(''):'<div class="empty"><strong>No imported data yet.</strong>Import actual historical OHLCV data to use it alongside Alpaca.</div>')+'</div></div></div>'+
       '<div class="panel"><div class="panel-header"><h2>Market data policy</h2></div><div class="panel-body"><p class="section-note">GitHub Pages serves the public frontend only. Alpaca credentials are stored as Cloudflare Worker secrets and are never sent to this browser. Live data requests go through the Worker proxy.</p><p class="section-note">Imported data remains available alongside Alpaca data. Backtesting is research-only and does not submit orders.</p></div></div>';
   }
@@ -1938,6 +1976,7 @@ async function initApp(){
       el.innerHTML='<div class="empty"><strong>'+ (state?.status==='loading'?'Loading real Alpaca intraday bars':state?.status==='error'?'Live intraday unavailable':'No genuine '+esc(S.chart.tf)+' bars available')+
         '</strong>'+esc(state?.error||'Select a daily timeframe or import timestamped intraday OHLCV. We do not simulate market data.')+'</div>';return;}
     chart=newChart(el);
+    chart.timeScale().applyOptions({timeVisible:intradayTf(S.chart.tf),secondsVisible:false});
     mountPriceAxisTouch(el,chart);
     let medianPrices=[];
     const baseOptions={priceLineVisible:false,lastValueVisible:true,
@@ -2124,6 +2163,13 @@ async function initApp(){
       el.addEventListener('mousemove',event=>{if(event.buttons===1)arm();},{passive:true});
       el.addEventListener('touchmove',arm,{passive:true});
     }
+  }
+  function showChartMonths(months){
+    const history=chartBars();if(!history.length)return;
+    const cutoff=new Date(stamp(history.at(-1).time)*1000);
+    cutoff.setUTCMonth(cutoff.getUTCMonth()-months);
+    const first=history.findIndex(b=>stamp(b.time)*1000>=cutoff.getTime());
+    showRange(first<0?history.length:history.length-first);
   }
   function showRange(n){
     if(!chart)return;const total=chartBars().length;
@@ -2736,9 +2782,9 @@ async function initApp(){
       const chosen=S.watchlists.find(x=>x.id===S.watchlistId);
       S.watch=new Set(chosen?.symbols||[]);saveSettings();render();},
     'sort-order':()=>{S.ascending=!S.ascending;render();},
-    'range-1m':()=>showRange(S.chart.tf==='D'?22:5),
-    'range-3m':()=>showRange(S.chart.tf==='D'?66:14),
-    'range-1y':()=>showRange(S.chart.tf==='D'?252:52),
+    'range-1m':()=>showChartMonths(1),
+    'range-3m':()=>showChartMonths(3),
+    'range-1y':()=>showChartMonths(12),
     'range-all':()=>showRange(0),
     'load-older-chart':()=>void loadOlderChart(true),
     'range-fit':()=>showRange(180),
@@ -2765,6 +2811,22 @@ async function initApp(){
       restoreSymbolState(el.dataset.symbol);
       render();
       $('[data-action="chart-symbol-picker"]')?.focus({preventScroll:true});
+    },
+    'chart-settings':()=>openChartSettings(),
+    'apply-chart-settings':()=>{
+      const dialog=$('#chart-settings-dialog');
+      const chosen=[...dialog.querySelectorAll('[data-frame-choice]:checked')].map(el=>el.dataset.frameChoice);
+      if(!chosen.length){notice('Choose at least one timeframe.');return;}
+      const style=dialog.querySelector('[data-option="style"]').value;
+      if(chosen.includes(S.chart.tf))preserveChartViewport();else setTimeframe(chosen.includes('D')?'D':chosen[0]);
+      S.chart.sliderFrames=chosen;S.chart.style=style;dialog.close();render();
+      $('[data-action="chart-settings"]')?.focus({preventScroll:true});
+    },
+    'chart-log-toggle':()=>{
+      preserveChartViewport();
+      S.chart.log=!S.chart.log;
+      const view=S.chartViews[S.symbol+'|'+S.chart.tf];if(view)view.price=null;
+      render();$('[data-action="chart-log-toggle"]')?.focus({preventScroll:true});
     },
     'chart-timeframe':el=>{setTimeframe(el.dataset.timeframe);render();$('[data-timeframe="'+S.chart.tf+'"]')?.focus({preventScroll:true});},
     'indicator-add-average':el=>{
@@ -2971,7 +3033,7 @@ async function initApp(){
   document.addEventListener('input',ev=>{
     const el=ev.target;
     if(!el.hasAttribute('data-chart-frame-scale'))return;
-    const frame=chartFrameScale[Number(el.value)];
+    const frame=chartFrameScale()[Number(el.value)];
     if(!frame)return;
     el.setAttribute('aria-valuetext',frame[1]);
     for(const control of el.closest('.chart-frame-scale').querySelectorAll('[data-timeframe]'))
@@ -2980,10 +3042,11 @@ async function initApp(){
   document.addEventListener('change',async ev=>{
     const el=ev.target;
     if(el.hasAttribute('data-chart-frame-scale')){
-      const frame=chartFrameScale[Number(el.value)];
+      const frame=chartFrameScale()[Number(el.value)];
       if(frame&&frame[0]!==S.chart.tf){setTimeframe(frame[0]);render();$('[data-chart-frame-scale]')?.focus({preventScroll:true});}
       return;
     }
+    if(el.closest('#chart-settings-dialog'))return;
     if(el.id==='csv-file'){if(el.files?.length)await importFiles(el.files);el.value='';return;}
     if(el.id==='pine-library'){const found=S.scriptLibrary.find(x=>x.id===el.value);if(found){loadPineSource(found.code,found.name,found.id);S.scriptSettings={...(found.settings||{})};persistPineDraft();render();}return;}
     if(el.dataset.pineInput){S.scriptSettings[el.dataset.pineInput]=el.type==='checkbox'?el.checked:Number(el.value);persistPineDraft();return;}

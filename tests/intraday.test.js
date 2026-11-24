@@ -75,3 +75,12 @@ test('dedicated intraday endpoint fetches real Alpaca 15Min timeframe without cr
     if(originalCaches===undefined)delete globalThis.caches;else globalThis.caches=originalCaches;
   }
 });
+
+test('additional genuine minute and hourly frames aggregate within the regular US session',()=>{
+  const bars=alpacaBars(ticks,'15Min');
+  const four=aggregate(bars,'4H'),eight=aggregate(bars,'8H');
+  assert.equal(four.length,2);assert.equal(four[0].volume,2600);assert.equal(eight.length,1);assert.equal(eight[0].volume,3500);
+  const mins=alpacaBars([{...ticks[0],t:'2026-11-16T14:31:00Z'},{...ticks[1],t:'2026-11-16T14:32:00Z'}],'1Min');
+  assert.equal(aggregate(mins,'1m').length,2);assert.equal(aggregate(mins,'5m').length,1);
+  for(const tf of ['1m','5m','4H','8H'])assert.equal(aggregate(sampleData()['DEMO-SPY'],tf).length,0);
+});

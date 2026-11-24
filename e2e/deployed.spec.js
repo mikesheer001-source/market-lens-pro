@@ -14,7 +14,9 @@ test('published Pages site renders screener, daily RSI, chart and backtest',asyn
   await page.locator('.sidebar [data-tab="charts"]').click();
   await expect(page.getByRole('heading',{name:'Chart Lab'})).toBeVisible();
   await expect(page.locator('#price-chart canvas').first()).toBeVisible();
-  await expect(page.locator('[data-option="style"]')).toHaveValue('candles');
+  await page.getByRole('button',{name:'Chart settings',exact:true}).click();
+  await expect(page.locator('#chart-settings-dialog [data-option="style"]')).toHaveValue('candles');
+  await page.locator('#chart-settings-dialog').getByRole('button',{name:'Close',exact:true}).click();
 
   await page.locator('.sidebar [data-tab="backtest"]').click();
   await page.locator('[data-action="run-backtest"]').click();

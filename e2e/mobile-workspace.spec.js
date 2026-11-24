@@ -88,7 +88,7 @@ test('timeframe slider snaps to supported intervals and chart height is resizabl
   await scale.press('End');
   await expect(page.locator('[data-timeframe="M"]')).toHaveAttribute('aria-pressed','true');
   await scale.press('Home');
-  await expect(page.locator('[data-timeframe="15m"]')).toHaveAttribute('aria-pressed','true');
+  await expect(page.locator('[data-timeframe="1m"]')).toHaveAttribute('aria-pressed','true');
   await page.locator('[data-timeframe="D"]').click();
   const chart=page.locator('#price-chart');
   const grip=page.locator('#chart-resize-handle');
@@ -111,4 +111,22 @@ test('timeframe slider snaps to supported intervals and chart height is resizabl
   await grip.press('Home');
   expect(Math.abs((await chart.boundingBox()).height-before)).toBeLessThan(3);
   expect(await page.evaluate(()=>document.documentElement.scrollWidth)).toBeLessThanOrEqual(391);
+});
+
+test('chart gear controls visible timeframes, chart style and bottom logarithmic scale',async({page})=>{
+  await page.setViewportSize({width:390,height:844});await page.goto('./');
+  await page.locator('.mobile-nav [data-tab="charts"]').click();
+  const gear=page.getByRole('button',{name:'Chart settings',exact:true});
+  await expect(page.locator('.chart-toolbar [data-option="style"]')).toHaveCount(0);
+  for(const tf of ['1m','5m','4H','8H'])await expect(page.locator('[data-timeframe="'+tf+'"]')).toBeVisible();
+  await gear.click();const dialog=page.locator('#chart-settings-dialog');
+  await dialog.locator('[data-frame-choice="1m"]').uncheck();
+  await dialog.getByLabel('Chart style').selectOption('line');
+  await dialog.getByRole('button',{name:'Apply settings'}).click();
+  await expect(page.locator('[data-timeframe="1m"]')).toHaveCount(0);
+  const log=page.locator('.chart-ranges [data-action="chart-log-toggle"]');
+  await log.click();await expect(log).toHaveAttribute('aria-pressed','true');
+  await page.reload();await expect(log).toHaveAttribute('aria-pressed','true');
+  await gear.click();await expect(dialog.getByLabel('Chart style')).toHaveValue('line');
+  await expect(dialog.locator('[data-frame-choice="1m"]')).not.toBeChecked();
 });

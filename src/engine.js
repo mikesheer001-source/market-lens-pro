@@ -1,3 +1,4 @@
+import {INTRADAY_MINUTES,isIntraday} from './timeframes.js';
 function parseCsv(text, fallback='IMPORT') {
   const rows=[];let row=[],cell='',quoted=false;
   for(let i=0;i<text.length;i++){const c=text[i];if(c==='"'){if(quoted&&text[i+1]==='"'){cell+='"';i++;}else quoted=!quoted;}else if(c===','&&!quoted){row.push(cell.trim());cell='';}else if((c==='\n'||c==='\r')&&!quoted){if(c==='\r'&&text[i+1]==='\n')i++;row.push(cell.trim());if(row.some(Boolean))rows.push(row);row=[];cell='';}else cell+=c;}
@@ -57,10 +58,10 @@ function aggregate(bars,tf) {
     const intraday=typeof b.time==='number'&&!Number.isInteger(b.time/86400);
     const day=intraday?nyParts(b.time).day:String(b.time).slice(0,10);
     let k=day, t=day;
-    if(tf==='2H'||tf==='15m'){
+    if(isIntraday(tf)){
       if(typeof b.time!=='number')continue;
       const n=nyParts(b.time);if(n.minute<570||n.minute>=960)continue;
-      const size=tf==='2H'?120:15;
+      const size=INTRADAY_MINUTES[tf];
       const bucket=Math.floor((n.minute-570)/size);
       k=n.day+'-'+bucket;t=b.time;
     }else if(tf==='W'){

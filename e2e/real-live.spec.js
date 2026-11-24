@@ -152,7 +152,10 @@ test('real Alpaca scan exposes latest-bar freshness and dated computed strategy 
   test.skip(process.env.REAL_ALPACA_TEST!=='1','Run after deployment against real Alpaca IEX Worker');
   test.setTimeout(180000);
   const errors=[];page.on('pageerror',e=>errors.push(e.message));
-  const response=await request.get(WORKER+'/api/stocks/scan?feed=iex',{timeout:120000});
+  // Compare the actual response consumed by the browser, not a separate changing live snapshot.
+  const scanResponse=page.waitForResponse(r=>r.url().includes('/api/stocks/scan?')&&r.ok(),{timeout:150000});
+  await page.goto('./');
+  const response=await scanResponse;
   expect(response.status()).toBe(200);
   const payload=await response.json();
   expect(payload.source).toBe('alpaca');
@@ -163,7 +166,6 @@ test('real Alpaca scan exposes latest-bar freshness and dated computed strategy 
   expect(Array.isArray(payload.freshness.stale)).toBe(true);
   expect(Array.isArray(payload.retry.attempted)).toBe(true);
   const rawVxx=payload.bars.VXX.at(-1).t.slice(0,10);
-  await page.goto('./');
   await expect(page.locator('#scan-status')).toContainText('133/133 symbols loaded',{timeout:150000});
   const barDates=Object.values(payload.bars).map(bars=>bars?.at(-1)?.t?.slice(0,10)).filter(Boolean);
   const counts=new Map();
