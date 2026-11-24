@@ -116,15 +116,15 @@ test('Chart Lab workspaces collapse independently without losing settings or arc
   const watch=workspaces.locator('[data-workspace-section="watchlists"]');
   const scans=workspaces.locator('[data-workspace-section="scans"]');
   const alerts=workspaces.locator('[data-workspace-section="alerts"]');
-  await expect(workspaces.locator('details')).toHaveCount(3);
+  await expect(workspaces.locator(':scope > details')).toHaveCount(9);
   expect(await workspaces.evaluate(el=>Boolean(document.querySelector('#chart-lab-panel').compareDocumentPosition(el)&Node.DOCUMENT_POSITION_FOLLOWING))).toBe(true);
-  await expect(workspaces.locator('details[open]')).toHaveCount(0);
+  await expect(workspaces.locator(':scope > details[open]')).toHaveCount(0);
   await expect(page.locator('#price-chart canvas').first()).toBeVisible();
   await page.locator('#price-chart').evaluate(el=>el.dataset.retained='yes');
   await watch.locator('summary').click();
   await scans.locator('summary').click();
   await alerts.locator('summary').click();
-  await expect(workspaces.locator('details[open]')).toHaveCount(3);
+  await expect(workspaces.locator(':scope > details[open]')).toHaveCount(3);
   await watch.getByLabel('Watchlist name').fill('Chart candidates');
   await scans.getByLabel('Scan name').fill('Chart archive');
   await alerts.locator('[data-alert-field="symbol"]').selectOption('VXX');
@@ -137,7 +137,7 @@ test('Chart Lab workspaces collapse independently without losing settings or arc
   await expect(alerts.getByLabel('Level')).toBeVisible();
   await watch.locator('summary').click();
   await alerts.locator('summary').click();
-  await expect(workspaces.locator('details[open]')).toHaveCount(0);
+  await expect(workspaces.locator(':scope > details[open]')).toHaveCount(0);
   await watch.locator('summary').press('Enter');
   await scans.locator('summary').click();
   await alerts.locator('summary').click();
