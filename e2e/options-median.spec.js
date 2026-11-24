@@ -4,6 +4,34 @@ import {sampleData} from '../src/engine.js';
 import {OPTIONS_DEVICE_KEY} from '../src/options-api.js';
 
 test('Chart Lab loads six-month and one-year options medians and can hide them',async ({page})=>{
+  const errors=[];page.on('pageerror',error=>errors.push(error.message));
+  // Observe actual Canvas drawing calls without replacing the chart renderer.
+  await page.addInitScript(()=>{
+    const probe=window.medianCanvasProbe={texts:[],dots:[],lines:[]};
+    const proto=CanvasRenderingContext2D.prototype;
+    const fillText=proto.fillText,arc=proto.arc,fill=proto.fill,fillRect=proto.fillRect,stroke=proto.stroke;
+    const colors=['#7bdac6','#f0bd77'];
+    proto.fillText=function(text,x,y,...args){
+      if(String(text).startsWith('50/50 · ')||/^\d{4}-\d{2}-\d{2}(?: 20:00 UTC)? · \$/u.test(String(text)))
+        probe.texts.push({text:String(text),x,y});
+      return fillText.call(this,text,x,y,...args);
+    };
+    const arcs=new WeakMap();
+    proto.arc=function(x,y,r,...args){arcs.set(this,{x,y,r});return arc.call(this,x,y,r,...args);};
+    proto.fill=function(...args){
+      const dot=arcs.get(this);
+      if(dot&&dot.r===4.5&&colors.includes(this.fillStyle))probe.dots.push({...dot,color:this.fillStyle});
+      arcs.delete(this);return fill.apply(this,args);
+    };
+    proto.fillRect=function(x,y,w,h){
+      if(colors.includes(this.fillStyle)&&Math.abs(w)>80&&Math.abs(h)<=4)probe.lines.push({x,y,w,h});
+      return fillRect.call(this,x,y,w,h);
+    };
+    proto.stroke=function(...args){
+      if(colors.includes(this.strokeStyle))probe.lines.push({stroke:true});
+      return stroke.apply(this,args);
+    };
+  });
   const now=Date.now();
   const expirations=[180,365].map(days=>new Date(now+days*86_400_000).toISOString().slice(0,10));
   const daily=sampleData()['DEMO-SPY'].slice(500,1750).map(bar=>({
@@ -42,6 +70,15 @@ test('Chart Lab loads six-month and one-year options medians and can hide them',
   await expect(result).toContainText('$103.00');
   await expect(result.locator('.chart-options-median-level').last()).toHaveAttribute('title',new RegExp(expirations[1]));
   await expect(result).toContainText('$108.00');
+  await expect(result.locator('.chart-options-median-level').first()).toContainText('50/50 · '+expirations[0]);
+  await expect(result.locator('.chart-options-median-level').last()).toContainText('50/50 · '+expirations[1]);
+  await expect.poll(()=>page.evaluate(()=>window.medianCanvasProbe.texts.map(x=>x.text))).toEqual(expect.arrayContaining([
+    '50/50 · 6M','50/50 · 1Y',expirations[0]+' · $103.00',expirations[1]+' · $108.00']));
+  const painted=await page.evaluate(()=>window.medianCanvasProbe);
+  const a=painted.dots.filter(x=>x.color==='#7bdac6').at(-1),b=painted.dots.filter(x=>x.color==='#f0bd77').at(-1);
+  expect(a).toBeTruthy();expect(b).toBeTruthy();
+  expect(a.x).toBeLessThan(b.x);expect(a.y).toBeGreaterThan(b.y);
+  expect(painted.lines).toEqual([]);
   expect(requested.sort()).toEqual(expirations);
   await expect(page.locator('#chart-indicator-legend').locator(result)).toBeVisible();
   await expect(page.getByLabel('Rate assumption (%)')).toHaveCount(0);
@@ -66,4 +103,16 @@ test('Chart Lab loads six-month and one-year options medians and can hide them',
   await page.locator('.chart-tools summary').click();
   await page.getByRole('button',{name:'Hide options 50/50'}).click();
   await expect(result).toHaveCount(0);
+  await expect(page.locator('[data-median-show]')).toHaveCount(0);
+  await page.evaluate(()=>{window.medianCanvasProbe.texts.length=0;window.medianCanvasProbe.dots.length=0;window.medianCanvasProbe.lines.length=0;});
+  await page.setViewportSize({width:1100,height:800});
+  await expect(page.locator('#price-chart canvas').first()).toBeVisible();
+  await page.evaluate(()=>new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve))));
+  expect(await page.evaluate(()=>window.medianCanvasProbe)).toEqual({texts:[],dots:[],lines:[]});
+  await page.locator('.chart-tools summary').click();
+  await page.locator('.chart-tools-menu').getByRole('button',{name:'Options 50/50 levels'}).click();
+  await expect(result).toContainText('$103.00');
+  await expect.poll(()=>page.evaluate(()=>window.medianCanvasProbe.dots.length)).toBeGreaterThan(0);
+  await expect(result.getByRole('button',{name:'View dots'})).toBeVisible();
+  expect(errors).toEqual([]);
 });

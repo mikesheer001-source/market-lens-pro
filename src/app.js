@@ -1,3 +1,4 @@
+import {createMedianDotLayer} from './options-median-chart.js';
 import {readChartWorkspace,writeChartWorkspace,chartAlertLevels,chartOptionLevels,matchingTradeMarkers} from './chart-workspace.js';
 import {readWorkspaceLayout,writeWorkspaceLayout,moveWorkspace} from './workspace-layout.js';
 import {getOptionsDevice, requestOptions} from './options-api.js';
@@ -1115,7 +1116,12 @@ async function initApp(){
   function applyIndicatorChange(key,changes){
     $('#chart-indicator-dialog')?.close();
     preserveChartViewport();
+    const hadMedian=indicatorInstances().some(item=>item.type==='optionsMedian');
     S.chart=changes;
+    if(hadMedian&&!indicatorInstances().some(item=>item.type==='optionsMedian')&&S.pendingChartRange){
+      const total=chartBars().length,range=S.pendingChartRange;
+      if(range.to>total+3)S.pendingChartRange={from:Math.max(0,total-Math.min(180,Math.max(30,range.to-range.from))),to:total+3};
+    }
     render();
     const target=(S.chart[key]||indicatorCopies().some(item=>item.id===key)||movingAverages(S.chart).some(average=>average.id===key))?'[data-action="indicator-settings"][data-indicator-key="'+key+'"]':'[data-action="indicator-picker"]';
     $(target)?.focus({preventScroll:true});
@@ -1196,7 +1202,7 @@ async function initApp(){
   }
   const optionsMedianCache = new Map();
   const refreshOptionsMedian=new Map();
-  function mountOptionsMedian(base,getLevels,{id,settings}){
+  function mountOptionsMedian(dotLayer,{id,settings}){
     const panel=$('[data-indicator-row="'+id+'"] .chart-options-median-result');
     if(!panel)return;
     const symbol=S.symbol, token=getOptionsDevice(), worker=S.apiBaseUrl, rate=Number(settings.optionsMedianRate)/100;
@@ -1208,10 +1214,11 @@ async function initApp(){
       panel.textContent='Open your existing Options Builder quote link on this browser to enable Alpaca quotes.';
       return;
     }
-    let controller, active=true, lines=[], retryAt=0, nextAt=0, expanded='';
+    let controller, active=true, hasLevels=false, retryAt=0, nextAt=0, expanded='';
     const key=JSON.stringify([symbol,rate,worker]);
     const clock=new Intl.DateTimeFormat('en-US',{month:'short',day:'numeric',hour:'numeric',minute:'2-digit',timeZone:'America/New_York',timeZoneName:'short'});
     panel.addEventListener('click',event=>{
+      if(event.target.closest('[data-median-show]')){event.stopPropagation();dotLayer.show();return;}
       const button=event.target.closest('[data-median-detail]');
       if(!button)return;
       event.stopPropagation();
@@ -1223,11 +1230,9 @@ async function initApp(){
     });
     const paint=({levels,message})=>{
       if(!active)return;
-      for(const line of lines)base.removePriceLine(line);
-      const valid=levels.filter(item=>Number.isFinite(item.price));
-      getLevels(valid.map(({price})=>price));
-      lines=valid.map(item=>base.createPriceLine({price:item.price,title:item.label+' 50/50'+(item.confidence==='lower'?' (low conf.)':''),
-        color:item.color,lineWidth:item.confidence==='lower'?1:2,lineStyle:item.confidence==='lower'?1:2,axisLabelVisible:true}));
+      const valid=levels.filter(item=>Number.isFinite(item.price)&&item.expiry);
+      hasLevels=valid.length>0;
+      dotLayer.set(id,valid);
       panel.innerHTML=message?esc(message):medianHorizons.map(({label,color})=>{
         const row=levels.find(item=>item.label===label);
         const hasPrice=Number.isFinite(row?.price), low=row?.confidence==='lower';
@@ -1236,9 +1241,10 @@ async function initApp(){
           low&&row.sensitivity?'Bid/ask crossing bounds: $'+format(row.sensitivity[0])+'–$'+format(row.sensitivity[1])+' (not a statistical confidence interval)':'',
           hasPrice?'Risk-neutral approximation, not a real-world price forecast.':''].filter(Boolean).join(' · ');
         return '<button type="button" class="chart-options-median-level" data-median-detail="'+label+'" aria-expanded="'+(expanded===label)+'" style="--level-color:'+color+'" title="'+esc(details)+'"><strong>'+
-          label+'</strong> '+(hasPrice?'≈ $'+format(row.price)+(low?' · Low conf.':''):'Unavailable')+' <span aria-hidden="true">ⓘ</span></button>'+
+          label+'</strong> '+(hasPrice?'50/50 · '+esc(row.expiry)+' · ≈ $'+format(row.price)+(low?' · Low conf.':''):'Unavailable')+' <span aria-hidden="true">ⓘ</span></button>'+
           '<span class="chart-options-median-explanation" data-median-explanation="'+label+'"'+(expanded===label?'':' hidden')+'>'+esc(details)+'</span>';
-      }).join('');
+      }).join('')+(hasLevels?'<button type="button" class="chart-options-median-view" data-median-show title="Show the exact expiry dots on the time axis">View dots</button>'+
+        (intradayTf(S.chart.tf)?'<span class="chart-median-note" title="Future weekday slots are not minute candles; 20:00 UTC is the calculation time convention.">Future: daily slots</span>':'') :'');
     };
     const load=async (force=false)=>{
       if(!active||controller||(!force&&document.hidden))return;
@@ -1252,7 +1258,7 @@ async function initApp(){
       if(!force&&Date.now()<nextAt)return;
       controller=new AbortController();
       const {signal}=controller;
-      if(!lines.length)panel.textContent='Loading option chains…';
+      if(!hasLevels)panel.textContent='Loading option chains…';
       try{
         const request=(path,params,signal)=>requestOptions(path,params,signal,{worker,token});
         const result=await loadOptionsMedians({request,symbol,rate,signal});
@@ -2188,14 +2194,7 @@ async function initApp(){
     chart=newChart(el);
     chart.timeScale().applyOptions({timeVisible:intradayTf(S.chart.tf),secondsVisible:false});
     mountPriceAxisTouch(el,chart);
-    let medianPrices=[];
-    const baseOptions={priceLineVisible:false,lastValueVisible:true,
-      autoscaleInfoProvider:original=>{
-        const result=original();
-        if(!result?.priceRange||!medianPrices.length)return result;
-        return {...result,priceRange:{minValue:Math.min(result.priceRange.minValue,...medianPrices),
-          maxValue:Math.max(result.priceRange.maxValue,...medianPrices)}};
-      }};
+    const baseOptions={priceLineVisible:false,lastValueVisible:true};
     const type=S.chart.style==='line'?LineSeries:S.chart.style==='area'?AreaSeries:S.chart.style==='bars'?BarSeries:CandlestickSeries;
     const style=S.chart.style==='candles'?{upColor:colors.up,downColor:colors.down,borderVisible:false,wickUpColor:colors.up,wickDownColor:colors.down}:S.chart.style==='bars'?{upColor:colors.up,downColor:colors.down}:{color:colors.blue,lineColor:colors.blue,topColor:'#278cb263',bottomColor:'#278cb200',lineWidth:2};
     const base=chart.addSeries(type,{...baseOptions,...style});
@@ -2223,13 +2222,19 @@ async function initApp(){
       if(alertStatus)alertStatus.textContent=alertWorkspaceStatus();
     };
     refreshWorkspaceOverlays();
-    const instances=indicatorInstances(), levelsByInstance=new Map();
-    for(const instance of instances.filter(item=>item.type==='optionsMedian')){
-      mountOptionsMedian(base,prices=>{
-        levelsByInstance.set(instance.id,prices);
-        medianPrices=[...levelsByInstance.values()].flat();
-        base.applyOptions({autoscaleInfoProvider:baseOptions.autoscaleInfoProvider});
-      },instance);
+    const instances=indicatorInstances();
+    const medianInstances=instances.filter(item=>item.type==='optionsMedian');
+    if(medianInstances.length){
+      const initialView=S.chartViews[S.symbol+'|'+S.chart.tf]?.range;
+      const lastTime=b.at(-1).time,tf=S.chart.tf;
+      const dotLayer=createMedianDotLayer({chart,base,lineSeries:LineSeries,lastTime,tf,onInitialView:()=>{
+        if(initialView&&stamp(initialView.to)>stamp(lastTime)){
+          try{chart.timeScale().setVisibleRange(initialView);return true;}catch{}
+        }
+        return false;
+      }});
+      medianUnmount.push(()=>dotLayer.dispose());
+      for(const instance of medianInstances)mountOptionsMedian(dotLayer,instance);
     }
     const c=b.map(x=>x.close),indicatorData=new Map(),indicatorPanes=new Map();
     for(const {id,type,length,color} of movingAverages(S.chart)){

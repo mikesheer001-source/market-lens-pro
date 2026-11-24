@@ -764,3 +764,5 @@ tr[data-vol-symbol] td:nth-child(3){min-width:138px}
   #chart-lab-panel.chart-is-fullscreen .chart-ticker{font-size:28px;min-height:34px}
   #chart-lab-panel.chart-is-fullscreen .chart-ticker-caption{font-size:9px}
 }
+.chart-options-median-view{border:1px solid #3a4940;border-radius:4px;background:#19221e;color:var(--text);font:inherit;padding:3px 6px;pointer-events:auto;cursor:pointer}
+.chart-options-median-view:hover,.chart-options-median-view:focus-visible{color:var(--green);border-color:var(--green)}
