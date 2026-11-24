@@ -608,15 +608,19 @@ tr[data-vol-symbol] td:nth-child(3){min-width:138px}
 .options-month button[aria-pressed=true], .options-view-switch button[aria-pressed=true] {
   color:var(--green); background:color-mix(in srgb,var(--green) 14%,var(--bg)); border-color:var(--green);
 }
-.options-ruler-head { display:flex; justify-content:space-between; align-items:center; gap:8px; margin:12px 0 8px; }
+.options-ruler-head { display:grid; gap:3px; margin:12px 0 9px; }
 .options-ruler-head p { margin:3px 0 0; color:var(--muted); font-size:12px; }
-.options-ruler { padding:8px 0 4px; }
+.options-ruler { padding:5px 0; min-width:0; }
 .options-ruler-empty { color:var(--muted); font-size:13px; padding:14px 8px; }
 .options-strike-scale { position:relative; border:1px solid var(--border); border-radius:9px; background:var(--bg); }
-.options-strike-lanes { position:relative; height:calc(var(--ruler-lanes) * 43px + 8px); }
+.options-strike-lanes { position:relative; height:calc(var(--ruler-lanes) * 50px + 10px); }
+.options-strike-marker { position:absolute; left:clamp(36px,var(--strike-x),calc(100% - 36px)); width:0; height:44px; }
+.options-strike-lanes.buy .options-strike-marker { bottom:calc(var(--strike-lane) * 50px + 5px); }
+.options-strike-lanes.sell .options-strike-marker { top:calc(var(--strike-lane) * 50px + 5px); }
+.options-strike-marker:has(.is-dragging) { z-index:3; }
 .options-strike-chip {
-  position:absolute; top:calc(var(--strike-lane) * 43px + 6px); left:var(--strike-x); transform:translateX(-50%);
-  z-index:1; display:grid; gap:1px; min-width:55px; min-height:38px; padding:3px 7px; white-space:nowrap;
+  position:absolute; top:0; left:0; transform:translateX(-50%);
+  z-index:1; display:grid; gap:1px; width:66px; min-height:44px; padding:3px 4px; white-space:nowrap;
   touch-action:none; user-select:none; cursor:grab; font:inherit; font-size:12px; font-weight:700;
   color:var(--green); border:1px solid currentColor; border-radius:8px; background:color-mix(in srgb,var(--green) 14%,var(--bg));
 }
@@ -624,10 +628,17 @@ tr[data-vol-symbol] td:nth-child(3){min-width:138px}
 .options-strike-chip small { font-size:10px; opacity:.8; }
 .options-strike-chip.is-dragging { z-index:2; cursor:grabbing; box-shadow:0 0 0 2px currentColor; }
 .options-strike-chip.is-swiping { cursor:grabbing; }
-.options-strike-delete { position:absolute; top:calc(var(--strike-lane) * 43px + 4px); left:var(--strike-x); transform:translateX(34px); z-index:1; display:grid; place-items:center; width:44px; min-height:44px; padding:0; font:inherit; font-size:18px; font-weight:700; color:var(--muted); border:1px solid var(--border); border-radius:8px; background:var(--bg); cursor:pointer; }
+.options-strike-delete { position:absolute; top:0; left:36px; z-index:1; display:grid; place-items:center; width:32px; min-height:44px; padding:0; font:inherit; font-size:18px; font-weight:700; color:var(--muted); border:1px solid var(--border); border-radius:7px; background:var(--bg); cursor:pointer; }
+.options-strike-marker.delete-left .options-strike-delete { left:auto; right:36px; }
+.options-strike-delete:hover { color:var(--red); border-color:var(--red); }
 .options-strike-delete:focus-visible { outline:2px solid var(--text); outline-offset:2px; }
 .options-payoff-greeks { margin:8px 0; }
-.options-quick-add { flex-wrap:wrap; }
+.options-quick-add { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:6px; }
+.options-quick-add.buy { --leg-color:var(--green); }
+.options-quick-add.sell { --leg-color:var(--red); }
+.options-quick-add .btn.small { min-width:0; min-height:44px; padding:7px 5px; border-radius:8px; font-size:12px; color:var(--leg-color); border-color:color-mix(in srgb,var(--leg-color) 42%,var(--border)); background:color-mix(in srgb,var(--leg-color) 9%,var(--bg)); }
+.options-quick-add .btn.small:hover { border-color:var(--leg-color); background:color-mix(in srgb,var(--leg-color) 18%,var(--bg)); transform:none; }
+.options-quick-add .btn.small:focus-visible { outline:2px solid var(--leg-color); outline-offset:2px; }
 .options-strike-chip:focus-visible, .options-month button:focus-visible, .options-view-switch button:focus-visible {
   outline:2px solid var(--text); outline-offset:2px;
 }
@@ -651,7 +662,7 @@ tr[data-vol-symbol] td:nth-child(3){min-width:138px}
   .options-workbench > .panel-body { padding:11px; }
   .options-month button { min-width:42px; min-height:42px; }
   .options-tick-minor { display:none; }
-  .options-strike-chip { min-width:48px; padding-inline:4px; }
+  .options-strike-chip { padding-inline:3px; }
   .options-metrics { grid-template-columns:repeat(2,minmax(0,1fr)); }
   .options-metrics strong { font-size:14px; }
 }

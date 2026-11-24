@@ -132,6 +132,27 @@ test('sell legs are created from the quick buttons and flip the net entry to a c
   await expect(builder.locator('[data-ob=metrics]')).toContainText('$700.00 credit');
 });
 
+test('buy and sell controls and legs sit on opposite sides of the strike axis on mobile', async ({page}) => {
+  await page.setViewportSize({width:390,height:844});
+  const builder = await gotoBuilderWithGreeks(page);
+  const buy = builder.getByRole('button',{name:'+ Buy Call',exact:true});
+  const sell = builder.getByRole('button',{name:'+ Sell Put',exact:true});
+  const axis = builder.locator('.options-strike-axis');
+  await buy.click();
+  await sell.click();
+  const buyMarker = builder.locator('[data-strike-leg="0"]');
+  const sellMarker = builder.locator('[data-strike-leg="1"]');
+  const a = await axis.boundingBox(), b = await buyMarker.boundingBox(), s = await sellMarker.boundingBox();
+  expect(b.y+b.height).toBeLessThanOrEqual(a.y);
+  expect(s.y).toBeGreaterThanOrEqual(a.y+a.height);
+  expect((await buy.boundingBox()).y).toBeLessThan(b.y);
+  expect((await sell.boundingBox()).y).toBeGreaterThan(s.y);
+  await builder.locator('[data-flip="0"]').click();
+  await expect(builder.locator('.options-strike-lanes.sell [data-strike-leg="0"]')).toBeVisible();
+  await expect(builder.locator('.options-strike-lanes.buy [data-strike-leg]')).toHaveCount(0);
+  expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(391);
+});
+
 test('the × next to a ruler chip removes only that leg', async ({page}) => {
   const builder = await gotoBuilderWithGreeks(page);
   await builder.getByRole('button',{name:'+ Buy Call',exact:true}).click();

@@ -316,26 +316,30 @@ export function createOptionsBuilder() {
     const {low,high} = domain;
     const spot = numeric(state.price);
     const visible = state.legs.map((leg,i)=>({leg,i})).filter(({leg}) => numeric(leg.strike) > 0);
-    const lanes = [];
-    const narrow = ruler.clientWidth < 540;
-    const markers = visible.map(({leg,i}) => {
+    const lanes = {buy:[],sell:[]};
+    const markers = {buy:[],sell:[]};
+    const width = Math.max(1,ruler.clientWidth);
+    for (const {leg,i} of visible) {
+      const side = leg.side==='sell'?'sell':'buy';
       const x = positionPct(Number(leg.strike),domain);
-      let lane = lanes.findIndex(used => used.every(value => Math.abs(value-x) >= (narrow ? 27 : 15)));
-      if (lane < 0) lane = lanes.push([])-1;
-      lanes[lane].push(x);
-      return '<button type="button" class="options-strike-chip '+leg.side+'" data-strike-leg="'+i+'" style="--strike-x:'+x+
-        '%;--strike-lane:'+lane+'" aria-label="Move leg '+(i+1)+' strike, '+esc(strikeLabel(leg))+'">'+
-        '<span data-flip="'+i+'">'+(leg.side==='buy'?'B':'S')+' · </span><span>'+esc(strikeLabel(leg))+'</span><small>'+esc(leg.expiry?.slice(5) ?? '')+'</small></button>'+
-        '<button type="button" class="options-strike-delete" data-remove-chip="'+i+'" style="--strike-x:'+x+
-        '%;--strike-lane:'+lane+'" aria-label="Remove leg '+(i+1)+'">×</button>';
-    }).join('');
+      const center = clamp(x*width/100,Math.min(36,width/2),Math.max(width-36,width/2));
+      const occupied = lanes[side];
+      let lane = occupied.findIndex(used => used.every(value => Math.abs(value-center) >= 116));
+      if (lane < 0) lane = occupied.push([])-1;
+      occupied[lane].push(center);
+      markers[side].push('<div class="options-strike-marker '+(x>70?'delete-left':'')+'" style="--strike-x:'+x+'%;--strike-lane:'+lane+'">'+
+        '<button type="button" class="options-strike-chip '+side+'" data-strike-leg="'+i+'" aria-label="Move leg '+(i+1)+' strike, '+esc(strikeLabel(leg))+'">'+
+        '<span data-flip="'+i+'">'+(side==='buy'?'B':'S')+' · </span><span>'+esc(strikeLabel(leg))+'</span><small>'+esc(leg.expiry?.slice(5) ?? '')+'</small></button>'+
+        '<button type="button" class="options-strike-delete" data-remove-chip="'+i+'" aria-label="Remove leg '+(i+1)+'">×</button></div>');
+    }
     const ticks = Array.from({length:7},(_,i) => low+(high-low)*i/6).map((value,i) =>
       '<span class="options-tick'+(i%2?' options-tick-minor':'')+'" style="--strike-x:'+positionPct(value,domain)+'%">'+
       esc(shortPrice.format(value))+'</span>').join('');
-    ruler.innerHTML = '<div class="options-strike-scale" style="--ruler-lanes:'+Math.max(1,lanes.length)+'">'+
-      '<div class="options-strike-lanes">'+markers+'</div><div class="options-strike-axis">'+ticks+
+    ruler.innerHTML = '<div class="options-strike-scale">'+
+      '<div class="options-strike-lanes buy" style="--ruler-lanes:'+lanes.buy.length+'">'+markers.buy.join('')+'</div>'+
+      '<div class="options-strike-axis">'+ticks+
       (spot > 0 ? '<span class="options-strike-spot" style="--strike-x:'+positionPct(spot,domain)+'%" title="'+esc('Underlying '+dollars(spot))+'"></span>' : '')+
-      '</div></div>';
+      '</div><div class="options-strike-lanes sell" style="--ruler-lanes:'+lanes.sell.length+'">'+markers.sell.join('')+'</div></div>';
     if (focusIndex != null) ruler.querySelector('[data-strike-leg="'+focusIndex+'"]')?.focus({preventScroll:true});
   }
 
@@ -411,7 +415,9 @@ export function createOptionsBuilder() {
     if (!row || row===drag.row) return;
     drag.row = row;
     drag.preview = changedLeg(leg,row);
-    marker.style.setProperty('--strike-x',positionPct(row.strike,domain)+'%');
+    const x = positionPct(row.strike,domain);
+    marker.parentElement.style.setProperty('--strike-x',x+'%');
+    marker.parentElement.classList.toggle('delete-left',x>70);
     marker.children[0].textContent = (leg.side==='buy'?'B':'S')+' · ';
     marker.children[1].textContent = strikeLabel(drag.preview);
     refreshMarks();
@@ -754,12 +760,12 @@ export function createOptionsBuilder() {
       Object.keys(PRESETS).map(name=>option(name,name,state.preset===name)).join('')+'</select></label>'+
       '<button type="button" class="btn" data-ob="preset-apply">Apply preset</button></div>'+
       '<div class="options-expirations"><h2>Expiration</h2><div class="options-date-strip" data-ob="expiry-strip" role="group" aria-label="Available expirations"></div></div>'+
-      '<div class="options-ruler-head"><div><h2>Strikes</h2><p>Drag sideways to move a strike. Swipe up or down to remove a leg. Tap B or S to flip buy/sell. Use arrow keys for fine adjustments.</p></div>'+
-      '<div class="flex options-quick-add"><button type="button" class="btn small" data-quick-type="call" data-quick-side="buy">+ Buy Call</button>'+
-      '<button type="button" class="btn small" data-quick-type="call" data-quick-side="sell">+ Sell Call</button>'+
-      '<button type="button" class="btn small" data-quick-type="put" data-quick-side="buy">+ Buy Put</button>'+
+      '<div class="options-ruler-head"><h2>Strikes</h2><p>Drag to move · Swipe up/down or × to remove · Tap B/S to flip · Arrow keys to fine-tune</p></div>'+
+      '<div class="options-quick-add buy" role="group" aria-label="Add buy legs"><button type="button" class="btn small" data-quick-type="call" data-quick-side="buy">+ Buy Call</button>'+
+      '<button type="button" class="btn small" data-quick-type="put" data-quick-side="buy">+ Buy Put</button></div>'+
+      '<div data-ob="ruler" class="options-ruler" role="group" aria-label="Strike ruler"></div>'+
+      '<div class="options-quick-add sell" role="group" aria-label="Add sell legs"><button type="button" class="btn small" data-quick-type="call" data-quick-side="sell">+ Sell Call</button>'+
       '<button type="button" class="btn small" data-quick-type="put" data-quick-side="sell">+ Sell Put</button></div></div>'+
-      '<div data-ob="ruler" class="options-ruler" role="group" aria-label="Strike ruler"></div></div>'+
       '<div class="panel-body options-payoff">'+
       '<div class="options-payoff-head"><h2>Payoff</h2><div class="options-view-switch" role="group" aria-label="Payoff view">'+
       ['graph','table'].map(view => '<button type="button" data-scenario-view="'+view+'" aria-pressed="'+(state.view===view)+'">'+
