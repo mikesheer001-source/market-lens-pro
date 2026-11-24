@@ -29,8 +29,8 @@ function parseCsv(text, fallback='IMPORT') {
 function stamp(t){return typeof t==='number'?t:Math.floor(Date.parse(t+'T00:00:00Z')/1000);}
 
 function normalizeBars(bars){
-  const map=new Map();for(const b of bars){if(!b||!Number.isFinite(b.close)||b.close<=0||!Number.isFinite(stamp(b.time)))continue;map.set(stamp(b.time),b);}
-  return [...map.values()].sort((a,b)=>stamp(a.time)-stamp(b.time));
+  const map=new Map();for(const b of bars){if(!b||!Number.isFinite(b.close)||b.close<=0)continue;const t=stamp(b.time);if(!Number.isFinite(t))continue;map.set(t,b);}
+  return [...map.entries()].sort((a,b)=>a[0]-b[0]).map(([,b])=>b);
 }
 
 function alpacaBars(items,timeframe='1Day') {
@@ -43,10 +43,11 @@ function alpacaBars(items,timeframe='1Day') {
   return normalizeBars(bars);
 }
 
+const nyFormatter=new Intl.DateTimeFormat('en-CA',{timeZone:'America/New_York',year:'numeric',month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit',hourCycle:'h23'});
+
 function nyParts(t) {
   const d=new Date(stamp(t)*1000);
-  const f=new Intl.DateTimeFormat('en-CA',{timeZone:'America/New_York',year:'numeric',month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit',hourCycle:'h23'});
-  const p=Object.fromEntries(f.formatToParts(d).map(x=>[x.type,x.value]));
+  const p=Object.fromEntries(nyFormatter.formatToParts(d).map(x=>[x.type,x.value]));
   return {day:p.year+'-'+p.month+'-'+p.day,minute:Number(p.hour)*60+Number(p.minute)};
 }
 
@@ -139,6 +140,26 @@ function screenStats(get,rules) {
     if(!ok)fails.push(value==null?'Insufficient '+(rule.tf||'D')+' data for '+rule.metric:rule.metric+' '+rule.op+' '+rule.value+' not met');
   }
   return {pass:fails.length===0,fails,checks,stats:get('D')};
+}
+
+// Memo for the screen pass shared by screenerView() and screenerRows().
+// Mechanism: a version counter bumped on ANY data mutation (loadStored,
+// CSV import, live-scan completion, demo edits). Rules changes invalidate
+// via the rules key. Full-market mode is excluded: it uses marketRules,
+// not screenSymbol, so it never goes through this memo.
+function createScreenMemo(screenFn) {
+  let version=0, rulesKey='', cache=new Map();
+  return {
+    get version(){return version;},
+    bump(){version++;cache.clear();},
+    screen(symbol,history,rules){
+      const key=JSON.stringify(rules);
+      if(key!==rulesKey){rulesKey=key;cache.clear();}
+      let hit=cache.get(symbol);
+      if(hit===undefined){hit=screenFn(history,rules);cache.set(symbol,hit);}
+      return hit;
+    }
+  };
 }
 
 function signalSets(bars,o={}){
@@ -272,4 +293,4 @@ function csvDownload(rows){
   return [cols.join(','),...rows.map(row=>cols.map(k=>q(row[k])).join(','))].join('\r\n');
 }
 
-export { parseCsv, stamp, normalizeBars, alpacaBars, nyParts, aggregate, sma, ema, rsi, atr, indicators, statsFor, valueFor, screenSymbol, screenStats, signalSets, backtest, parameterSweep, sampleData, csvDownload };
+export { parseCsv, stamp, normalizeBars, alpacaBars, nyParts, aggregate, sma, ema, rsi, atr, indicators, statsFor, valueFor, screenSymbol, screenStats, createScreenMemo, signalSets, backtest, parameterSweep, sampleData, csvDownload };
