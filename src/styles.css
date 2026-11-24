@@ -702,3 +702,8 @@ tr[data-vol-symbol] td:nth-child(3){min-width:138px}
 .chart-log-toggle[aria-pressed=true]{color:var(--green);background:#26332c}
 .chart-ranges .chart-log-toggle{margin-inline-start:auto;font-weight:800}
 @media(max-width:425px){.chart-frame-scale{flex:1 1 240px}.chart-frame-scale .chart-timeframes button{font-size:9px}.chart-toolbar-symbol{flex:1 1 100%}}
+
+/* Movable strategy anchor, independent of the actual underlying quote. */
+.options-group-handle{position:absolute;left:var(--strike-x);top:0;transform:translateX(-50%);z-index:4;display:flex;align-items:center;gap:3px;min-height:30px;padding:3px 6px;border:1px solid var(--gold);border-radius:5px;background:var(--surface);color:var(--gold);font-size:11px;font-weight:700;white-space:nowrap;touch-action:none;user-select:none;cursor:grab}
+.options-group-handle.is-dragging{cursor:grabbing;box-shadow:0 0 0 2px var(--gold)}
+.options-group-handle::before{content:"";position:absolute;left:50%;top:-6px;bottom:-6px;width:1px;background:var(--gold);pointer-events:none;z-index:-1}

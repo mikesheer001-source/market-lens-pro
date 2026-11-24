@@ -1,6 +1,6 @@
 import {MAX_LEGS, PRESETS, boxRate, expirationTime, expiryPnl, expiryStats, initialDebit,
   netGreeks, quoteEstimates, scenarioPnl} from './options-payoff.js';
-import {nearestStrike, strikeDomain, strikeTargets} from './options-strike-ruler.js';
+import {nearestStrike, strikeDomain, strikeTargets, groupStrikeTargets} from './options-strike-ruler.js';
 import {OPTIONS_DEVICE_KEY, getOptionsDevice, optionsApiUrl, requestOptions} from './options-api.js';
 
 const DAY = 86_400_000;
@@ -88,7 +88,7 @@ function graph({width, price, high, low, points, expiry, pointAt, focus, marker,
 export function createOptionsBuilder() {
   let root, timer, pending, generation = 0;
   let ownerToken = getOptionsDevice(), feed = 'indicative', expirations = [], chain = [], feedVerified = false, nextPoll = 0;
-  let message = '', spotSource = '', drag, rollFrom, resize;
+  let message = '', spotSource = '', drag, rollFrom, resize, groupAnchor = null;
   const chains = new Map();
   const state = {
     symbol:'SPY', price:'', width:'0.15', expiry:'', legs:[], fee:'0', package:'', preset:'',
@@ -299,8 +299,14 @@ export function createOptionsBuilder() {
       if (chip.left < bounds.left || chip.right > bounds.right) strip.scrollLeft += chip.left - bounds.left;
     }
   }
+  function strategyAnchor() {
+    const strikes=state.legs.map(leg=>numeric(leg.strike)).filter(value=>value>0);
+    return groupAnchor ?? (numeric(state.price)>0?numeric(state.price):strikes.length?strikes.reduce((sum,n)=>sum+n,0)/strikes.length:null);
+  }
   function rulerDomain() {
-    return strikeDomain(numeric(state.price),state.legs.map(leg => numeric(leg.strike)).filter(value => value > 0),chain);
+    const strikes=state.legs.map(leg=>numeric(leg.strike)).filter(value=>value>0);
+    const anchor=strategyAnchor();if(anchor>0)strikes.push(anchor);
+    return strikeDomain(numeric(state.price),strikes,chain);
   }
   const positionPct = (strike,{low,high}) => 7 + 86 * clamp((strike-low)/(high-low),0,1);
 
@@ -314,7 +320,7 @@ export function createOptionsBuilder() {
       return;
     }
     const {low,high} = domain;
-    const spot = numeric(state.price);
+    const spot = numeric(state.price), anchor = strategyAnchor();
     const visible = state.legs.map((leg,i)=>({leg,i})).filter(({leg}) => numeric(leg.strike) > 0);
     const lanes = {buy:[],sell:[]};
     const markers = {buy:[],sell:[]};
@@ -338,6 +344,7 @@ export function createOptionsBuilder() {
       '<div class="options-strike-lanes buy" style="--ruler-lanes:'+lanes.buy.length+'">'+markers.buy.join('')+'</div>'+
       '<div class="options-strike-axis">'+ticks+
       (spot > 0 ? '<span class="options-strike-spot" style="--strike-x:'+positionPct(spot,domain)+'%" title="'+esc('Underlying '+dollars(spot))+'"></span>' : '')+
+      (anchor>0&&visible.length===state.legs.length&&visible.length?'<button type="button" class="options-group-handle" data-shift-group style="--strike-x:'+positionPct(anchor,domain)+'%" aria-label="Move all option strikes" title="Drag to shift all legs together; arrow keys also work"><span aria-hidden="true">↔</span> <span data-group-value>'+esc(shortPrice.format(anchor))+'</span></button>':'')+
       '</div><div class="options-strike-lanes sell" style="--ruler-lanes:'+lanes.sell.length+'">'+markers.sell.join('')+'</div></div>';
     if (focusIndex != null) ruler.querySelector('[data-strike-leg="'+focusIndex+'"]')?.focus({preventScroll:true});
   }
@@ -352,6 +359,7 @@ export function createOptionsBuilder() {
     const leg = state.legs[i];
     if (!leg) return;
     state.legs.splice(i,1);
+    if(!state.legs.length)groupAnchor=null;
     setMessage('Removed leg '+(i+1)+' ('+strikeLabel(leg)+').');
     updatePositions();
   }
@@ -362,9 +370,29 @@ export function createOptionsBuilder() {
     setMessage('Leg '+(i+1)+' is now '+(leg.side==='buy'?'buy':'sell')+'.');
     updatePositions();
   }
+  function contractsFor(leg) {
+    return chains.get(leg.expiry) || (chain[0]?.expiry===leg.expiry?chain:[]);
+  }
   function targetsFor(leg,domain) {
-    const contracts = chains.get(leg.expiry) || (chain[0]?.expiry === leg.expiry ? chain : []);
-    return strikeTargets(leg,contracts,domain);
+    return strikeTargets(leg,contractsFor(leg),domain);
+  }
+  function groupTargets(domain,anchor) {
+    return groupStrikeTargets(state.legs,contractsFor,domain,anchor);
+  }
+  function groupPreview(target,legs=state.legs) {
+    return legs.map((leg,i)=>changedLeg(leg,target.rows[i]));
+  }
+  function commitGroup(target,restoreFocus=false) {
+    if(target?.delta){
+      const repriced=state.legs.some(leg=>leg.symbol);
+      cancel();
+      state.legs=groupPreview(target);
+      groupAnchor=target.strike;
+      if(repriced)state.package=$('package').value='';
+      setMessage('Shifted all '+state.legs.length+' legs by '+(target.delta>0?'+':'')+dollars(target.delta)+'. Spacing preserved. '+(repriced?'Listed premiums refreshed from loaded quotes.':'Manual premiums retain your assumptions.'));
+    }else setMessage('No shared strike shift available. Load a wider chain if needed.');
+    updatePositions();
+    if(restoreFocus)$('ruler').querySelector('[data-shift-group]')?.focus({preventScroll:true});
   }
   function changedLeg(leg,row) {
     if (row.strike === Number(leg.strike)) return leg;
@@ -383,6 +411,14 @@ export function createOptionsBuilder() {
   }
   function startDrag(event) {
     if (event.target.closest('[data-flip]')) return;
+    const group=event.target.closest('[data-shift-group]');
+    if(group&&!drag&&(event.pointerType!=='mouse'||event.button===0)){
+      const domain=rulerDomain(),anchor=strategyAnchor();
+      drag={kind:'group',pointer:event.pointerId,domain,anchor,targets:groupTargets(domain,anchor),
+        legs:state.legs.slice(),marker:group,startX:event.clientX,startY:event.clientY,width:$('ruler').getBoundingClientRect().width};
+      $('ruler').setPointerCapture(event.pointerId);
+      group.classList.add('is-dragging');event.preventDefault();return;
+    }
     const marker = event.target.closest('[data-strike-leg]');
     if (!marker || drag || event.button !== 0) return;
     const i = Number(marker.dataset.strikeLeg);
@@ -398,6 +434,21 @@ export function createOptionsBuilder() {
     if (!drag || event.pointerId !== drag.pointer) return;
     const {startX,startY,width,leg,domain,targets,marker} = drag;
     const dx = event.clientX-startX, dy = event.clientY-startY;
+    if(drag.kind==='group'){
+      if(!drag.intent&&Math.max(Math.abs(dx),Math.abs(dy))>=5)drag.intent=Math.abs(dy)>Math.abs(dx)*1.5?'vertical':'horizontal';
+      if(!drag.intent)return;
+      const shift=drag.intent==='vertical'?-dy:dx;
+      const target=nearestStrike(targets,drag.anchor+shift/Math.max(1,width*.86)*(domain.high-domain.low));
+      if(!target||target===drag.target)return;
+      drag.target=target;drag.groupPreview=groupPreview(target,drag.legs);
+      marker.style.setProperty('--strike-x',positionPct(target.strike,domain)+'%');
+      marker.querySelector('[data-group-value]').textContent=shortPrice.format(target.strike);
+      drag.groupPreview.forEach((leg,i)=>{
+        const chip=$('ruler').querySelector('[data-strike-leg="'+i+'"]');
+        if(chip){chip.parentElement.style.setProperty('--strike-x',positionPct(Number(leg.strike),domain)+'%');chip.children[1].textContent=strikeLabel(leg);}
+      });
+      refreshMarks();return;
+    }
     // A vertical gesture may remove a leg only by moving away from the axis.
     if (!drag.intent && Math.max(Math.abs(dx),Math.abs(dy)) >= 8)
       drag.intent = Math.abs(dy)>Math.abs(dx)*1.5 ? 'vertical' : 'horizontal';
@@ -424,6 +475,11 @@ export function createOptionsBuilder() {
   }
   function endDrag(event) {
     if (!drag || event.pointerId !== drag.pointer) return;
+    if(drag.kind==='group'){
+      const {target,intent}=drag;drag=null;
+      if(event.type==='pointerup'&&intent)return commitGroup(target);
+      renderRuler();refreshMarks();return;
+    }
     const {i,row,intent,leg,startX,startY,targets} = drag;
     const dx = event.clientX-startX, dy = event.clientY-startY;
     const outward = leg.side==='buy' ? -dy : dy;
@@ -439,6 +495,13 @@ export function createOptionsBuilder() {
     }
   }
   function keyboardStrike(event) {
+    if(event.target.closest('[data-shift-group]')&&['ArrowLeft','ArrowRight','ArrowUp','ArrowDown'].includes(event.key)){
+      event.preventDefault();const anchor=strategyAnchor(),targets=groupTargets(rulerDomain(),anchor);
+      const lower=['ArrowLeft','ArrowDown'].includes(event.key);
+      const row=lower?targets.findLast(t=>t.strike<anchor):targets.find(t=>t.strike>anchor);
+      if(row)commitGroup(row,true);else setMessage('No further shared strike shift available in the loaded chain.');
+      return;
+    }
     const marker = event.target.closest('[data-strike-leg]');
     if (!marker || !['ArrowLeft','ArrowRight'].includes(event.key)) return;
     event.preventDefault();
@@ -522,6 +585,7 @@ export function createOptionsBuilder() {
     const middle = plausible.find(({i}) => definition.every(([,type,offset,,later]) =>
       (later ? farChain : group).some(row => row.strike===strikes[i+offset] && row.type===type &&
         (!group[0] || row.root === group[0].root))));
+    groupAnchor=null;
     state.legs = definition.map(([side,type,offset,quantity=1,later]) => {
       if (middle) {
         const row = (later ? farChain : group).find(row => row.strike===strikes[middle.i+offset] &&
@@ -541,7 +605,7 @@ export function createOptionsBuilder() {
     const fee = numeric(state.fee);
     const validFee = fee >= 0 && fee != null && fee <= 10000;
     const legs = state.legs.map((position,i) => {
-      const leg = drag?.i === i && drag.preview ? drag.preview : position;
+      const leg = drag?.groupPreview?.[i] ?? (drag?.i === i && drag.preview ? drag.preview : position);
       return {...leg,strike:numeric(leg.strike),quantity:numeric(leg.quantity),entry:numeric(leg.entry),expiresAt:expirationTime(leg)};
     });
     const price = numeric(state.price);
@@ -567,7 +631,7 @@ export function createOptionsBuilder() {
       !Number.isInteger(leg.quantity) || leg.quantity < 1 || leg.quantity > 10000 || !Number.isFinite(leg.expiresAt)))
       return showEmpty('Enter a valid strike, expiration, and quantity for every leg.');
     if (!validFee) return showEmpty('Enter a valid fee per contract.');
-    const entryPackage = drag?.preview?.symbol && drag.preview !== drag.leg ? '' : state.package;
+    const entryPackage = (drag?.preview?.symbol && drag.preview !== drag.leg)||(drag?.target?.delta&&state.legs.some(leg=>leg.symbol)) ? '' : state.package;
     const pkg = numeric(entryPackage);
     if (entryPackage !== '' && (pkg == null || Math.abs(pkg)>1e9)) return showEmpty('Enter a valid signed package price.');
     if (pkg == null && legs.some(leg => leg.entry == null || leg.entry < 0 || leg.entry > 1e6))
@@ -678,6 +742,7 @@ export function createOptionsBuilder() {
       updatePositions();
     }
     if (ob==='clear') {
+      groupAnchor=null;
       state.legs = [];
       state.package = $('package').value = '';
       updatePositions();
@@ -711,6 +776,7 @@ export function createOptionsBuilder() {
         return setMessage('Enter a valid U.S. ticker.');
       }
       state.symbol = next;
+      groupAnchor=null;
       state.price = $('price').value = '';
       $('spot-source').textContent = spotSource = '';
       state.expiry = '';
@@ -735,6 +801,7 @@ export function createOptionsBuilder() {
     if (['price','fee','package','width','iv','rate','dividend','shift','preset'].includes(ob) && state[ob] !== el.value) {
       state[ob] = el.value;
       if (ob==='price') {
+        groupAnchor=null;
         $('spot-source').textContent = spotSource = 'Manual reference';
         renderRuler();
       }
@@ -764,7 +831,7 @@ export function createOptionsBuilder() {
       Object.keys(PRESETS).map(name=>option(name,name,state.preset===name)).join('')+'</select></label>'+
       '<button type="button" class="btn" data-ob="preset-apply">Apply preset</button></div>'+
       '<div class="options-expirations"><h2>Expiration</h2><div class="options-date-strip" data-ob="expiry-strip" role="group" aria-label="Available expirations"></div></div>'+
-      '<div class="options-ruler-head"><h2>Strikes</h2><p>Drag sideways to move · Swipe buys up or sells down to remove · Tap B/S to flip · Arrow keys to fine-tune</p></div>'+
+      '<div class="options-ruler-head"><h2>Strikes</h2><p>Drag the gold price handle to shift all legs · Drag individual legs sideways · Swipe buys up or sells down to remove · Tap B/S to flip</p></div>'+
       '<div class="options-quick-add buy" role="group" aria-label="Add buy legs"><button type="button" class="btn small" data-quick-type="call" data-quick-side="buy">+ Buy Call</button>'+
       '<button type="button" class="btn small" data-quick-type="put" data-quick-side="buy">+ Buy Put</button></div>'+
       '<div data-ob="ruler" class="options-ruler" role="group" aria-label="Strike ruler"></div>'+

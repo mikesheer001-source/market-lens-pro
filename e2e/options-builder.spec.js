@@ -252,3 +252,23 @@ test('moves a strike with touch on a narrow screen', async ({browser,baseURL}) =
     await page.close();
   }
 });
+
+test('dragging the group price handle shifts all manual legs together without changing actual spot',async({page})=>{
+  await page.goto('./');
+  await page.getByRole('navigation',{name:'Primary navigation'}).getByRole('button',{name:'Options Builder'}).click();
+  const b=page.locator('#options-builder');
+  await b.getByLabel('Underlying reference price').fill('100');
+  await b.getByLabel('Strategy preset').selectOption('Bull call debit spread');
+  await b.getByRole('button',{name:'Apply preset'}).click();
+  const a=b.getByLabel('Leg 1 strike',{exact:true}),c=b.getByLabel('Leg 2 strike',{exact:true});
+  const before=[Number(await a.inputValue()),Number(await c.inputValue())];
+  const handle=b.getByRole('button',{name:'Move all option strikes'});
+  await handle.scrollIntoViewIfNeeded();
+  const box=await handle.boundingBox(),x=box.x+box.width/2,y=box.y+box.height/2;
+  await page.mouse.move(x,y);await page.mouse.down();await page.mouse.move(x+50,y,{steps:8});await page.mouse.up();
+  await expect.poll(async()=>Number(await a.inputValue())).toBeGreaterThan(before[0]);
+  expect(Number(await c.inputValue())-Number(await a.inputValue())).toBeCloseTo(before[1]-before[0],6);
+  await expect(b.getByLabel('Underlying reference price')).toHaveValue('100');
+  const shifted=Number(await a.inputValue());await handle.focus();await handle.press('ArrowLeft');
+  await expect.poll(async()=>Number(await a.inputValue())).toBeLessThan(shifted);
+});
