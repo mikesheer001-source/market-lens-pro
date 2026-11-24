@@ -24,7 +24,7 @@ test('mobile review follows the visible match order, explains rules and restores
   await expect(page.getByRole('button',{name:'Previous',exact:true})).toBeDisabled();
   await page.getByRole('button',{name:'Rules',exact:true}).click();
   const rules=page.getByRole('dialog',{name:symbols[0]+' scan rules',exact:true});
-  const actual=screenSymbol(sampleData()[symbols[0]],[{tf:'D',metric:'rsi',op:'<',value:100}]).checks[0].value;
+  const actual=screenSymbol(sampleData()['DEMO-'+symbols[0]],[{tf:'D',metric:'rsi',op:'<',value:100}]).checks[0].value;
   await expect(rules).toContainText(actual.toLocaleString('en-US',{maximumFractionDigits:2})+' < 100');
   await rules.getByRole('button',{name:'Close',exact:true}).click();
   await page.getByRole('button',{name:'Next match',exact:true}).click();

@@ -92,14 +92,19 @@ test('timeframe slider snaps to supported intervals and chart height is resizabl
   await page.locator('[data-timeframe="D"]').click();
   const chart=page.locator('#price-chart');
   const grip=page.locator('#chart-resize-handle');
-  await grip.scrollIntoViewIfNeeded();
+  // Leave room below the grip for a genuine mobile drag inside the viewport.
+  await grip.evaluate(el=>el.scrollIntoView({block:'center',behavior:'instant'}));
   const before=(await chart.boundingBox()).height;
   const box=await grip.boundingBox();
-  await page.mouse.move(box.x+box.width/2,box.y+box.height/2);
-  await page.mouse.down();
-  await page.mouse.move(box.x+box.width/2,box.y+box.height/2+100,{steps:6});
-  await page.mouse.up();
-  expect((await chart.boundingBox()).height).toBeGreaterThan(before+80);
+  const x=Math.round(box.x+box.width/2),y=Math.round(box.y+box.height/2);
+  const cdp=await page.context().newCDPSession(page);
+  try{
+    await cdp.send('Input.dispatchTouchEvent',{type:'touchStart',touchPoints:[{x,y}]});
+    for(let dy=10;dy<=100;dy+=10)
+      await cdp.send('Input.dispatchTouchEvent',{type:'touchMove',touchPoints:[{x,y:y+dy}]});
+    await cdp.send('Input.dispatchTouchEvent',{type:'touchEnd',touchPoints:[]});
+  }finally{await cdp.detach();}
+  await expect.poll(async()=>(await chart.boundingBox()).height).toBeGreaterThan(before+80);
   await grip.focus();
   await grip.press('ArrowUp');
   expect((await chart.boundingBox()).height).toBeLessThan(before+80);

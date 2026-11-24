@@ -92,7 +92,11 @@ test('local price and RSI alerts are evaluated on each scan and persist until di
   await page.locator('[data-alert-field="op"]').selectOption('>');
   await page.locator('[data-alert-field="threshold"]').fill('0');
   await page.locator('[data-action="alert-create"]').click();
+  await expect(page.locator('.toast')).toContainText('Alert added');
+  const response=page.waitForResponse('**/api/stocks/scan?**');
   await page.locator('[data-action="scan-universe"]').click();
+  await response;
+  await expect(page.locator('#scan-status')).toContainText('Live scan complete');
   await expect(page.locator('.alert-banner')).toContainText('VXX');
   await expect(page.locator('.alert-banner')).toContainText('1 in-app alert triggered');
   await page.reload();

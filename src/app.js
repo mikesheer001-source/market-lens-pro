@@ -502,7 +502,7 @@ async function initApp(){
       if(!force&&intradayCacheFresh({...current,symbol,feed},{
         symbol,feed,expected:expectedNyseBarDate(),now:Date.now()}))return current;
       S.intradayStatus.set(key,{status:'loading'});
-      if(S.symbol===symbol&&['charts','backtest','optimize'].includes(S.tab))render();
+      if(S.symbol===symbol&&intradayTf(S.chart.tf)&&['charts','backtest','optimize'].includes(S.tab))render();
       try{
         if(!force){
           const cached=await readCachedIntraday(key);
@@ -532,7 +532,7 @@ async function initApp(){
         notice('Real Alpaca 15-minute bars unavailable: '+err.message);
         throw err;
       }finally{
-        if(S.symbol===symbol&&['charts','backtest','optimize'].includes(S.tab))render();
+        if(S.symbol===symbol&&intradayTf(S.chart.tf)&&['charts','backtest','optimize'].includes(S.tab))render();
       }
     })();
     S.intradayPromises.set(key,work);
@@ -1900,7 +1900,7 @@ async function initApp(){
       handle.setAttribute('aria-label','Resize chart height ('+S.chartHeight+' pixels)');
     };
     handle.addEventListener('pointerdown',event=>{
-      if(event.button!==0||drag)return;
+      if((event.pointerType==='mouse'&&event.button!==0)||drag)return;
       drag={pointer:event.pointerId,y:event.clientY,height:area.getBoundingClientRect().height,previous:S.chartHeight};
       handle.setPointerCapture(event.pointerId);
       handle.classList.add('is-resizing');

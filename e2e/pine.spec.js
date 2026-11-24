@@ -9,7 +9,7 @@ test('Script Lab compiles a custom indicator, renders a chart pane, and saves sc
   await page.locator('[data-action="pine-example"][data-example="rsi-indicator"]').click();
   await expect(page.locator('#pine-editor')).toContainText('indicator("RSI oscillator"');
   await page.locator('[data-action="pine-check"]').click();
-  await expect(page.getByRole('status')).toContainText('Pine syntax OK');
+  await expect(page.locator('#main').getByRole('status')).toContainText('Pine syntax OK');
   await expect(page.locator('[data-pine-input="length"]')).toHaveValue('14');
   await page.locator('[data-pine-input="length"]').fill('9');
   await page.locator('[data-pine-input="length"]').blur();
