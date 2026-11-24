@@ -707,3 +707,19 @@ tr[data-vol-symbol] td:nth-child(3){min-width:138px}
 .options-group-handle{position:absolute;left:var(--strike-x);top:0;transform:translateX(-50%);z-index:4;display:flex;align-items:center;gap:3px;min-height:30px;padding:3px 6px;border:1px solid var(--gold);border-radius:5px;background:var(--surface);color:var(--gold);font-size:11px;font-weight:700;white-space:nowrap;touch-action:none;user-select:none;cursor:grab}
 .options-group-handle.is-dragging{cursor:grabbing;box-shadow:0 0 0 2px var(--gold)}
 .options-group-handle::before{content:"";position:absolute;left:50%;top:-6px;bottom:-6px;width:1px;background:var(--gold);pointer-events:none;z-index:-1}
+
+/* Chart Lab workspaces: a single ordered, keyboard- and touch-accessible stack. */
+#chart-workspaces{display:flex;flex-direction:column;gap:10px;margin-top:16px;min-width:0}
+#chart-workspaces>.chart-workspace-section{margin:0;min-width:0;overflow:visible}
+.chart-workspace-section>summary{position:relative;min-height:48px;padding-right:64px;box-sizing:border-box}
+.chart-workspace-section>summary h2{vertical-align:middle}
+.workspace-drag-handle{position:absolute;right:7px;top:3px;width:42px;height:42px;display:grid;place-items:center;touch-action:none;cursor:grab;color:var(--muted);background:transparent;border:1px solid transparent;border-radius:6px;font:22px/1 system-ui}
+.workspace-drag-handle:hover,.workspace-drag-handle:focus-visible{border-color:var(--border);color:var(--text)}
+.workspace-dragging>.workspace-drag-handle,.workspace-dragging .workspace-drag-handle{cursor:grabbing}
+.workspace-dragging{opacity:.72}
+.chart-workspace-section[data-workspace-drop="before"]{outline:2px solid #71b8b3;outline-offset:2px;box-shadow:0 -4px 0 #71b8b3}
+.chart-workspace-section[data-workspace-drop="after"]{outline:2px solid #71b8b3;outline-offset:2px;box-shadow:0 4px 0 #71b8b3}
+.workspace-content{padding:12px;min-width:0}
+.workspace-content>.headrow{margin-top:0}
+.workspace-content>.headrow h1,.workspace-content .options-page-head h1{font-size:18px}
+@media(max-width:600px){.workspace-content{padding:6px}.chart-workspace-section>summary{padding-left:12px}}

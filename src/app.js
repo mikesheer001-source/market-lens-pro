@@ -1,3 +1,4 @@
+import {readWorkspaceLayout,writeWorkspaceLayout,moveWorkspace} from './workspace-layout.js';
 import {getOptionsDevice, requestOptions} from './options-api.js';
 import {loadOptionsMedians, medianHorizons} from './options-median.js';
 import {createOptionsBuilder, optionsApprovalLink} from './options-builder.js';
@@ -59,7 +60,9 @@ async function initApp(){
     signals:'market-lens-pro-signal-history-v1',analysis:'market-lens-pro-analysis-v1',portfolio:'market-lens-pro-portfolio-v1'
   };
   let syncText='';
-  const sharedSettings=({tab,apiBaseUrl,...rest}={})=>rest;
+  const sharedSettings=({tab,apiBaseUrl,workspaceSections,...rest}={})=>rest;
+  const workspaceLayout=readWorkspaceLayout(localStorage);
+  writeWorkspaceLayout(localStorage,workspaceLayout);
   const syncEnabled=localStorage.getItem('market-lens-sync-disabled')!=='1';
   const workspace=workspaceSync({
     endpoint:DEFAULT_ALPACA_WORKER+'/api/shared-workspace',enabled:syncEnabled,names:[...Object.keys(workspaceKeys),'imports','market'],
@@ -161,7 +164,7 @@ async function initApp(){
     chartRecentSymbols:Array.isArray(saved.chartRecentSymbols)?saved.chartRecentSymbols.filter(s=>typeof s==='string').slice(0,6):[],
     chartRecentFrames:Array.isArray(saved.chartRecentFrames)?saved.chartRecentFrames.slice(0,3):[],
     hiddenScreenColumns:Array.isArray(saved.hiddenScreenColumns)?saved.hiddenScreenColumns.filter(i=>Number.isInteger(i)&&i>=2&&i<=13):[],
-    backtestSections:saved.backtestSections||{},workspaceSections:saved.workspaceSections||{},chartViews:saved.chartViews||{},scanReview:null,
+    backtestSections:saved.backtestSections||{},workspaceSections:workspaceLayout.open,chartViews:saved.chartViews||{},scanReview:null,
     variantBaseline:saved.variantBaseline?.options&&typeof saved.variantBaseline.symbol==='string'?saved.variantBaseline:null,
     variantComparison:null,
     scriptCode:typeof draft.code==='string'?draft.code:PINE_EXAMPLES[0].code,
@@ -186,7 +189,7 @@ async function initApp(){
     lastLiveSymbol:S.lastLiveSymbol,watch:[...S.watch],watchlists:S.watchlists,watchlistId:S.watchlistId,alerts:S.alerts,savedScans:S.savedScans,rules:S.rules,chart:S.chart,bt:S.bt,portfolioMode:S.portfolioMode,bestFitMode:S.bestFitMode,bestFitValidatedOnly:S.bestFitValidatedOnly,btRange:S.btRange,portfolioScope:S.portfolioScope,portfolioWatchlistId:S.portfolioWatchlistId,signalSelection:S.signalSelection,signalsOnly:S.signalsOnly,
     leaderboardValidatedOnly:S.leaderboardValidatedOnly,fitValidatedOnly:S.fitValidatedOnly,apiBaseUrl:S.apiBaseUrl,universeFilter:S.universeFilter,
     chartHeight:S.chartHeight,chartRecentSymbols:S.chartRecentSymbols,chartRecentFrames:S.chartRecentFrames,hiddenScreenColumns:S.hiddenScreenColumns,variantBaseline:S.variantBaseline,backtestPineDraft:S.backtestPineDraft,
-    activeIndicators:S.activeIndicators,chartViews:S.chartViews,backtestSections:S.backtestSections,workspaceSections:S.workspaceSections,query:S.query,sort:S.sort,ascending:S.ascending,showOnlyMatches:S.showOnlyMatches,showWatch:S.showWatch,marketShown:market.shown,savedScanId:S.savedScanId,viewingSavedScan:!!S.savedScanView}));}catch{}};
+    activeIndicators:S.activeIndicators,chartViews:S.chartViews,backtestSections:S.backtestSections,query:S.query,sort:S.sort,ascending:S.ascending,showOnlyMatches:S.showOnlyMatches,showWatch:S.showWatch,marketShown:market.shown,savedScanId:S.savedScanId,viewingSavedScan:!!S.savedScanView}));}catch{}};
   function receiveSharedSettings(prior,value){
     if(JSON.stringify(prior.savedScans)!==JSON.stringify(value.savedScans)){
       S.savedScans=Array.isArray(value.savedScans)?value.savedScans.slice(0,SCAN_LIMIT):[];
@@ -641,14 +644,22 @@ async function initApp(){
     return true;
   }
   let liveScanPending, liveScanActive, deferredScreenerFocus;
-  const quickScreenerVisible=()=>S.tab==='screener'&&!marketShown()&&!S.savedScanView;
+  const mountedWorkspaceKeys=new Set();
+  const workspaceActive=key=>S.tab===key||S.tab==='charts'&&mountedWorkspaceKeys.has(key);
+  const persistWorkspaceLayout=()=>writeWorkspaceLayout(localStorage,workspaceLayout);
+  function showWorkspace(key){
+    if(S.tab==='charts'&&key!=='charts'&&Object.hasOwn(S.workspaceSections,key)){
+      S.chartFullscreen=false;S.workspaceSections[key]=true;mountedWorkspaceKeys.add(key);persistWorkspaceLayout();
+    }else S.tab=key;
+  }
+  const quickScreenerVisible=()=>workspaceActive('screener')&&!marketShown()&&!S.savedScanView;
   function refreshScreenerResults(){
-    if(S.tab!=='screener')return;
-    const current=$('#main');
+    if(!workspaceActive('screener'))return;
+    const current=S.tab==='charts'?$('#chart-workspaces [data-workspace-section="screener"] .workspace-content'):$('#main');
     if(!current?.querySelector('.screener-results'))return;
     const active=document.activeElement;
     const template=document.createElement('template');
-    template.innerHTML=screenerView();
+    template.innerHTML=screenerView(S.tab!=='charts');
     let deferred=false;
     for(const id of ['screener-intro','screener-facts','screener-metrics','screener-status',
       'screener-results-content','screener-refresh','screener-workspace']){
@@ -798,7 +809,7 @@ async function initApp(){
     if(dialog?.open)dialog.close();
     const full=marketShown()||S.savedScanView?.rows.some(row=>row.symbol===target&&row.source==='ALPACA');
     if(full&&!await loadMarketChart(target))return;
-    S.scanReview={rows,mode:S.mode,market:full,snapshot:S.savedScanView?.savedAt,scrollY:window.scrollY,
+    S.scanReview={rows,mode:S.mode,embedded:S.tab==='charts',market:full,snapshot:S.savedScanView?.savedAt,scrollY:window.scrollY,
       scrollLeft:$('.screener-results')?.parentElement.scrollLeft||0};
     restoreSymbolState(target);S.tab='charts';render();
     window.scrollTo(0,0);
@@ -826,7 +837,7 @@ async function initApp(){
   }
   function returnToScreener(){
     const review=S.scanReview?.mode===S.mode?S.scanReview:null;
-    S.scanReview=null;S.chartFullscreen=false;S.tab='screener';render();
+    S.scanReview=null;S.chartFullscreen=false;if(review?.embedded)showWorkspace('screener');else S.tab='screener';render();
     if(review){
       $('.screener-results').parentElement.scrollLeft=review.scrollLeft;
       window.scrollTo(0,review.scrollY);
@@ -896,7 +907,7 @@ async function initApp(){
     if(matchMedia('(max-width: 800px)').matches)openScreenerDialog(row.dataset.symbol);
     else openScannedChart(row.dataset.symbol);
   }
-  function screenerView(){
+  function screenerView(includeWorkspace=true){
     const full=marketShown();
     const symbols=full?marketVisible():[...S.data.keys()].filter(isVisibleSymbol);
     const all=full?symbols.map(marketRules):symbols.map(symbol=>screenSymbol(S.data.get(symbol),S.rules));
@@ -950,7 +961,7 @@ async function initApp(){
       '<input class="textinput" aria-label="Search symbols" data-input="search" placeholder="Search symbol…" value="'+esc(S.query)+'"/><label class="inline-check"><input type="checkbox" data-option="matches" '+(S.showOnlyMatches?'checked':'')+'/>Matches only</label><label class="inline-check"><input type="checkbox" data-option="watchonly" '+(S.showWatch?'checked':'')+'/>Watchlist</label><label class="control">Sort '+select([['symbol','Symbol'],['price','Price'],['rsi','RSI'],['ret20','20D return'],['ema','Daily % EMA'],['drawdown','Drawdown'],['signal','Strategy signal'],['latest','Latest bar']],S.sort,'data-option="sort"')+'</label>'+button(S.ascending?'↑':'↓','sort-order','small')+'</div></div><div id="screener-results-content"><div class="table-wrap"><table class="data-table screener-results" data-hidden-columns="'+S.hiddenScreenColumns.join(' ')+'"><thead><tr><th scope="col">Symbol</th><th>Close</th><th>RSI D</th><th>RSI W</th><th title="5-period RSI calculated from daily closes; daily OHLC cannot reconstruct true 2-hour bars">RSI 5D</th><th title="Price as percentage difference from 200-period EMA of DAILY closes">% vs D EMA200</th><th>20D return</th><th>DD</th><th>Bars</th><th>Result</th><th>Latest bar</th><th title="Percentage difference from the 200-period EMA of WEEKLY closes; needs 200 real weekly bars">% vs W EMA200</th><th title="Current position based on completed daily bars and next-open fills. EXIT can mean closed this bar or pending exit. Not a live order.">Signal · '+esc(selectedStrategy?.name||'None')+'</th></tr></thead><tbody>'+table+'</tbody></table>'+(rows.length?'':'<div class="empty">No matching symbols. Change a filter or import more price history.</div>')+'</div>'+pagination+'</div>'+
       (full?'':'<p class="section-note">Signal: LONG = strategy currently holds a long at the latest bar close; EXIT = it closed on that bar or has a close order for next open; FLAT = no long. Signals use the same stop/fee/slippage and next-open rules as Backtest, long-side only. Bars and dates are from '+('Alpaca '+esc(String(S.liveFeed).toUpperCase())+' or imported CSV')+'. '+
       (S.signalErrors.length?S.signalErrors.length+' unavailable signals: '+esc(S.signalErrors.slice(0,6).map(e=>e.symbol+': '+e.reason).join('; '))+'.':'No live trades or background monitoring.')+
-      '</p>')+'</div><dialog id="screener-dialog" class="chart-dialog" aria-labelledby="screener-dialog-title"></dialog><div id="screener-workspace">'+workspaceControls()+'</div>';
+      '</p>')+'</div><dialog id="screener-dialog" class="chart-dialog" aria-labelledby="screener-dialog-title"></dialog>'+(includeWorkspace?'<div id="screener-workspace">'+workspaceControls()+'</div>':'');
   }
   function workspaceControls(collapsible=false){
     const current=S.watchlists.find(x=>x.id===S.watchlistId)||S.watchlists[0];
@@ -964,8 +975,7 @@ async function initApp(){
         '</small></span>'+button('Remove alert','alert-delete','small').replace('data-action="alert-delete"','data-action="alert-delete" data-alert-id="'+esc(a.id)+'"')+'</div>').join(''):'<p class="section-note">No local alerts. They check only when you scan or refresh while this page is running.</p>';
     const savedChoices=S.savedScans.map(x=>[x.id,x.name+' · '+x.rows.length+' rows']);
     const section=(key,title,note)=>collapsible?
-      '<details class="panel backtest-details chart-workspace-section" data-workspace-section="'+key+'"'+
-      (S.workspaceSections[key]?' open':'')+'><summary><h2>'+title+'</h2></summary><div class="panel-body"><p class="section-note">'+note+'</p>':
+      workspaceStart(key,title)+'<div class="panel-body"><p class="section-note">'+note+'</p>':
       '<div class="panel"><div class="panel-header"><h2>'+title+'</h2><span class="muted">'+note+'</span></div><div class="panel-body">';
     const end=collapsible?'</div></details>':'</div></div>';
     return ''+
@@ -987,6 +997,14 @@ async function initApp(){
         '<label class="control">Level <input type="number" class="textinput" data-alert-field="threshold" value="'+esc(S.alertDraft.threshold)+'" step="any"/></label>'+
         button('Add alert','alert-create','small primary')+
         '</div><div class="data-list">'+alertRows+'</div>'+end;
+  }
+  function refreshLocalWorkspaceControls(){
+    const container=$('#chart-workspaces');if(!container)return;
+    const template=document.createElement('template');template.innerHTML=workspaceControls(true);
+    for(const next of template.content.children){
+      const existing=container.querySelector('[data-workspace-section="'+next.dataset.workspaceSection+'"] .panel-body');
+      if(existing&&!existing.contains(document.activeElement))existing.replaceChildren(...next.querySelector('.panel-body').childNodes);
+    }
   }
   function preserveChartViewport(){
     try{S.pendingChartRange=chart?.timeScale().getVisibleLogicalRange()||null;}
@@ -1289,7 +1307,7 @@ async function initApp(){
       ' · '+b.length+' '+esc(S.chart.tf)+' bars</p>';
     return intro+stale+panel+(S.chartFullscreen?'':'<div id="pine-chart-error" role="alert"></div>')+
       footer+(S.chartFullscreen?'':sourceStrip()+
-        '<section id="chart-workspaces" aria-label="Workspaces">'+workspaceControls(true)+'</section>');
+        '<section id="chart-workspaces" aria-label="Workspaces"></section>');
   }
   function btOptions(){
     if(S.bt.strategy==='pine-custom'){
@@ -1774,7 +1792,7 @@ async function initApp(){
   async function compareVariant(){
     const setup=variantSetup(),baseline=S.variantBaseline,key=variantKey(setup);
     if(!canCompareVariant(setup)||!await ensureAnalysisBars('Compare variants'))return;
-    if(S.tab!=='backtest'||S.portfolioMode||baseline!==S.variantBaseline||key!==variantKey(variantSetup()))return;
+    if(!workspaceActive('backtest')||S.portfolioMode||baseline!==S.variantBaseline||key!==variantKey(variantSetup()))return;
     S.variantComparison=null;
     try{
       const window=selectedBacktestWindow();
@@ -1892,41 +1910,136 @@ async function initApp(){
     if(S.tab==='options')optionsBuilder.openApproval();
     else{S.tab='options';render();}
   });
+  const views={screener:screenerView,charts:chartsView,backtest:backtestView,optimize:optimizeView,scripts:scriptView,data:dataView};
+  const workspaceTitles={...tabNames,watchlists:'Named watchlists',scans:'Saved scans',alerts:'In-app alerts'};
+  let retainedOptionsHost=null;
+  function workspaceStart(key,title){
+    return '<details class="panel backtest-details chart-workspace-section" data-workspace-section="'+key+'"'+
+      (S.workspaceSections[key]?' open':'')+'><summary><h2>'+esc(title)+'</h2>'+
+      '<button type="button" class="workspace-drag-handle" data-workspace-drag="'+key+'" aria-label="Move '+esc(title)+' panel" title="Drag to reorder, or use Up and Down arrow keys">⠿</button></summary>';
+  }
+  function mountOptionsIn(parent){
+    if(!retainedOptionsHost){
+      retainedOptionsHost=document.createElement('section');retainedOptionsHost.id='options-builder';
+      parent.append(retainedOptionsHost);optionsBuilder.mount(retainedOptionsHost,S.apiBaseUrl);
+    }else parent.append(retainedOptionsHost);
+  }
+  function mountBacktestCharts(){
+    if(!equityChart&&(S.portfolioMode?activePortfolioResult()?.curve?.length:S.result?.curve?.length))mountEquity();
+    if(!S.portfolioMode){
+      if(!tradeChart&&S.result?.curve?.length)mountBacktestPriceChart();
+      if(!leaderboardChart&&S.leaderboard?.symbol===S.symbol)mountLeaderboardChart();
+    }
+  }
+  function mountWorkspaceContent(section){
+    const key=section.dataset.workspaceSection,body=section.querySelector(':scope > .workspace-content');
+    if(!body)return;
+    if(!body.dataset.mounted){
+      mountedWorkspaceKeys.add(key);body.dataset.mounted='true';
+      if(key==='options')mountOptionsIn(body);
+      else body.innerHTML=key==='screener'?screenerView(false):views[key]();
+    }
+    if(key==='backtest'&&section.open)mountBacktestCharts();
+  }
+  function populateChartWorkspaces(){
+    const container=$('#chart-workspaces');if(!container)return;
+    const template=document.createElement('template');template.innerHTML=workspaceControls(true);
+    const existing=new Map([...template.content.children].map(el=>[el.dataset.workspaceSection,el]));
+    for(const key of workspaceLayout.order){
+      if(existing.has(key))container.append(existing.get(key));
+      else{
+        const fragment=document.createElement('template');
+        fragment.innerHTML=workspaceStart(key,workspaceTitles[key])+'<div class="workspace-content"></div></details>';
+        const section=fragment.content.firstElementChild;container.append(section);
+        if(section.open||mountedWorkspaceKeys.has(key))mountWorkspaceContent(section);
+      }
+    }
+  }
+  function setWorkspaceOpen(section,open){
+    const key=section.dataset.workspaceSection;
+    if(!Object.hasOwn(S.workspaceSections,key))return;
+    section.open=open;S.workspaceSections[key]=open;persistWorkspaceLayout();
+    if(open)mountWorkspaceContent(section);
+  }
+  function reorderWorkspace(source,target,after){
+    const next=moveWorkspace(workspaceLayout.order,source,target,after);
+    if(next.every((key,i)=>key===workspaceLayout.order[i]))return;
+    workspaceLayout.order=next;persistWorkspaceLayout();
+    const container=$('#chart-workspaces');
+    const moved=container.querySelector('[data-workspace-section="'+source+'"]');
+    const following=next[next.indexOf(source)+1];
+    const anchor=following?container.querySelector('[data-workspace-section="'+following+'"]'):null;
+    if(container.moveBefore)container.moveBefore(moved,anchor);else container.insertBefore(moved,anchor);
+    moved.querySelector(':scope > summary > .workspace-drag-handle')?.focus({preventScroll:true});
+  }
+  let workspaceDrag=null;
+  function clearWorkspaceDrag(){
+    if(!workspaceDrag)return;
+    workspaceDrag.handle.closest('details')?.classList.remove('workspace-dragging');
+    $('#chart-workspaces')?.querySelectorAll('[data-workspace-drop]').forEach(el=>delete el.dataset.workspaceDrop);
+    workspaceDrag=null;
+  }
+  document.addEventListener('pointerdown',ev=>{
+    const handle=ev.target.closest('[data-workspace-drag]');
+    if(!handle||ev.button!==0)return;
+    ev.preventDefault();clearWorkspaceDrag();
+    workspaceDrag={handle,key:handle.dataset.workspaceDrag,pointer:ev.pointerId,startY:ev.clientY,target:null,after:false,started:false};
+    handle.setPointerCapture(ev.pointerId);
+  });
+  document.addEventListener('pointermove',ev=>{
+    const drag=workspaceDrag;if(!drag||drag.pointer!==ev.pointerId)return;
+    if(!drag.started&&Math.abs(ev.clientY-drag.startY)<5)return;
+    drag.started=true;drag.handle.closest('details').classList.add('workspace-dragging');
+    const container=$('#chart-workspaces');if(!container)return;
+    const sections=[...container.children].filter(el=>el.dataset.workspaceSection!==drag.key);
+    let target=sections.find(el=>ev.clientY<=el.getBoundingClientRect().bottom)||sections.at(-1);
+    if(!target)return;
+    container.querySelectorAll('[data-workspace-drop]').forEach(el=>delete el.dataset.workspaceDrop);
+    const rect=target.getBoundingClientRect();
+    drag.target=target.dataset.workspaceSection;drag.after=ev.clientY>rect.top+rect.height/2;
+    target.dataset.workspaceDrop=drag.after?'after':'before';
+    if(ev.clientY<65)window.scrollBy(0,-25);else if(ev.clientY>innerHeight-65)window.scrollBy(0,25);
+  });
+  document.addEventListener('pointerup',ev=>{
+    const drag=workspaceDrag;if(!drag||drag.pointer!==ev.pointerId)return;
+    clearWorkspaceDrag();
+    if(drag.started&&drag.target)reorderWorkspace(drag.key,drag.target,drag.after);
+  });
+  document.addEventListener('pointercancel',clearWorkspaceDrag);
+  document.addEventListener('keydown',ev=>{
+    const handle=ev.target.closest('[data-workspace-drag]');
+    if(!handle||!['ArrowUp','ArrowDown','Home','End'].includes(ev.key))return;
+    ev.preventDefault();
+    const key=handle.dataset.workspaceDrag,index=workspaceLayout.order.indexOf(key);
+    const next=ev.key==='Home'?0:ev.key==='End'?workspaceLayout.order.length-1:index+(ev.key==='ArrowUp'?-1:1);
+    const target=workspaceLayout.order[next];if(target)reorderWorkspace(key,target,next>index);
+  });
   function render(){
+    clearWorkspaceDrag();
     if(liveScanPending&&quickScreenerVisible())applyPendingLiveScan();
-    const optionsHost=$('#options-builder');
-    if(S.tab!=='options' && optionsHost)optionsBuilder.unmount();
+    const keepOptions=S.tab==='options'||S.tab==='charts'&&(S.workspaceSections.options||mountedWorkspaceKeys.has('options'));
+    if(retainedOptionsHost){
+      if(keepOptions)retainedOptionsHost.remove();
+      else{optionsBuilder.unmount();retainedOptionsHost=null;mountedWorkspaceKeys.delete('options');}
+    }
     refreshLeaderboardIfRangeChanged();
     destroyCharts();shell();
     document.body.classList.toggle('chart-fullscreen-active',S.chartFullscreen&&S.tab==='charts');
     document.body.classList.toggle('chart-page-active',S.tab==='charts');
-    const views={screener:screenerView,charts:chartsView,backtest:backtestView,optimize:optimizeView,scripts:scriptView,data:dataView};
     const main=$('#main');
-    if(S.tab==='options'){
-      const host=optionsHost || document.createElement('section');
-      host.id='options-builder';
-      main.append(host);
-      if(!optionsHost)optionsBuilder.mount(host,S.apiBaseUrl);
-    }else main.innerHTML=views[S.tab]();
+    if(S.tab==='options')mountOptionsIn(main);
+    else main.innerHTML=views[S.tab]();
     if(S.tab==='charts'){
       if(S.data.has(S.symbol)){
         S.chartRecentSymbols=[S.symbol,...S.chartRecentSymbols.filter(symbol=>symbol!==S.symbol)].slice(0,6);
       }
-      mountChartResize();
-      mountPriceChart();
-      if(intradayTf(S.chart.tf)&&S.mode==='live'&&S.sources.get(S.symbol)==='ALPACA'&&
-        !S.intraday.get(intradayKey(S.symbol))&&!S.intradayStatus.get(intradayKey(S.symbol)))
-        void Promise.resolve().then(()=>loadLiveIntraday(S.symbol)).catch(()=>{});
+      mountChartResize();mountPriceChart();populateChartWorkspaces();
     }
-    if(['backtest','optimize'].includes(S.tab)&&intradayTf(S.chart.tf)&&S.mode==='live'&&
+    if(['charts','backtest','optimize'].includes(S.tab)&&intradayTf(S.chart.tf)&&S.mode==='live'&&
       S.sources.get(S.symbol)==='ALPACA'&&!S.intraday.get(intradayKey(S.symbol))&&
       !S.intradayStatus.get(intradayKey(S.symbol)))
       void Promise.resolve().then(()=>loadLiveIntraday(S.symbol)).catch(()=>{});
-    if(S.tab==='backtest'&&(S.portfolioMode?activePortfolioResult()?.curve?.length:S.result?.curve?.length))mountEquity();
-    if(S.tab==='backtest'&&!S.portfolioMode){
-      if(S.result?.curve?.length)mountBacktestPriceChart();
-      if(S.leaderboard?.symbol===S.symbol)mountLeaderboardChart();
-    }
+    if(S.tab==='backtest')mountBacktestCharts();
     saveSettings();
   }
   const colors={background:'#101515',text:'#a8b7b0',grid:'#23302b',up:'#46d69b',down:'#f08480',yellow:'#e9bd68',blue:'#71b8b3',indicator:'#d69c65'};
@@ -2239,7 +2352,7 @@ async function initApp(){
       for(const [s,b] of Object.entries(parsed.groups)){const mix=normalizeBars([...(S.sources.get(s)==='IMPORTED'?S.data.get(s):[]||[]),...b]);S.data.set(s,mix);S.sources.set(s,'IMPORTED');await storeDataset(s,mix);S.symbol=s;total+=b.length;symbols++;}}
       catch(err){notice('Cannot read '+file.name+': '+err.message);}
     }
-    if(symbols){S.tab='data';S.result=null;S.sweep=null;render();notice('Loaded '+total+' bars across '+symbols+' symbol file sets. '+skipped+' invalid rows skipped.');}
+    if(symbols){showWorkspace('data');S.result=null;S.sweep=null;render();notice('Loaded '+total+' bars across '+symbols+' symbol file sets. '+skipped+' invalid rows skipped.');}
   }
   function exportFile(name,contents,mime='text/csv'){
     const obj=new Blob([contents],{type:mime}),url=URL.createObjectURL(obj),link=document.createElement('a');link.href=url;link.download=name;document.body.append(link);link.click();link.remove();setTimeout(()=>URL.revokeObjectURL(url),1000);
@@ -2396,7 +2509,8 @@ async function initApp(){
       liveScanPending=pending;
       if(quickScreenerVisible()){
         applyPendingLiveScan();refreshMarketMode();refreshScreenerResults();
-      }else if((options.restoreTab&&initialMain===$('#main'))||!hasLiveData()||S.tab==='data'){
+        if(S.tab==='charts')refreshLocalWorkspaceControls();
+      }else if((options.restoreTab&&initialMain===$('#main'))||!hasLiveData()||workspaceActive('data')||workspaceActive('screener')){
         // Hydrate a restored view only if the user has not navigated during startup.
         applyPendingLiveScan();render();
       }
@@ -2406,7 +2520,7 @@ async function initApp(){
   }
   function loadPineSource(code,name,id=null){
     S.scriptCode=code;S.scriptName=name;S.scriptId=id;S.scriptSettings={};S.scriptOutput=null;
-    parseCurrentPine();persistPineDraft();S.tab='scripts';render();
+    parseCurrentPine();persistPineDraft();showWorkspace('scripts');render();
   }
   function savePine(asCopy=false){
     const name=String(S.scriptName||'').trim();
@@ -2433,24 +2547,24 @@ async function initApp(){
         S.backtestPineDraft={code:S.scriptCode,settings:{...S.scriptSettings},name:program.title};
         S.bt.strategy='pine-custom';
         S.portfolioMode=false;
-        S.tab='backtest';
+        showWorkspace('backtest');
         S.lastBacktestSymbol=S.symbol;
         S.result=null;S.sweep=null;
         if(!await ensureAnalysisBars('Backtest'))return;
-        if(S.tab==='backtest')runBt();
+        if(workspaceActive('backtest'))runBt();
       }
       persistPineDraft();render();
-    }catch(err){S.scriptError=err.message;S.scriptOutput=null;S.tab='scripts';render();}
+    }catch(err){S.scriptError=err.message;S.scriptOutput=null;showWorkspace('scripts');render();}
   }
-  function sweepCurrentPine(){
+  function sweepCurrentPine(fromScript=false){
     try{
-      const script=S.tab==='scripts'?{code:S.scriptCode,settings:S.scriptSettings}:backtestScript();
+      const script=(fromScript||S.tab==='scripts')?{code:S.scriptCode,settings:S.scriptSettings}:backtestScript();
       const program=compilePine(script.code);
       if(program.mode!=='strategy')throw new PineError(1,'A parameter sweep needs a strategy() script');
       const rows=sweepPine(program,bars(),backtest,{...S.bt,side:'script',timeframe:S.chart.tf},script.settings);
       S.sweep=rows;S.bt.strategy='pine-custom';rememberAnalysis();S.scriptError='';S.scriptOutput='Tested '+rows.length+' Pine input variations with 70/30 train and holdout periods.';
-      S.tab='optimize';render();
-    }catch(err){S.scriptError=err.message;S.tab='scripts';render();}
+      showWorkspace('optimize');render();
+    }catch(err){S.scriptError=err.message;showWorkspace('scripts');render();}
   }
   function loadSavedScan(id){
     const found=S.savedScans.find(item=>item.id===id);
@@ -2458,7 +2572,7 @@ async function initApp(){
     S.rules=found.rules.map(x=>({...x}));S.universeFilter=found.universeFilter;
     S.query=found.query;S.showOnlyMatches=found.showOnlyMatches;S.showWatch=found.showWatch;
     S.sort=found.sort;S.ascending=found.ascending;S.savedScanView=found;S.savedScanId=id;
-    S.tab='screener';render();
+    showWorkspace('screener');render();
   }
   function exportScreenerCsv(){
     const data=screenerRows();
@@ -2536,8 +2650,8 @@ async function initApp(){
       });
       S.portfolioResult.mode='portfolio';
       S.portfolioResult.range=actualPortfolioRange(S.portfolioResult.curve,window);
-      S.portfolioError='';rememberPortfolio();S.tab='backtest';render();
-    }catch(error){S.portfolioError=String(error.message||error);S.tab='backtest';render();notice(S.portfolioError);}
+      S.portfolioError='';rememberPortfolio();showWorkspace('backtest');render();
+    }catch(error){S.portfolioError=String(error.message||error);showWorkspace('backtest');render();notice(S.portfolioError);}
   }
   let bestFitRunSerial=0,bestFitAttempted=S.portfolioResult?.mode==='best-fit';
   async function runBestFitCurrent(){
@@ -2548,8 +2662,8 @@ async function initApp(){
       symbols=portfolioSelection();
       window=validateBacktestRange(S.btRange);
       if(!symbols.length)throw Error('No symbols selected. Choose scan matches or a populated watchlist.');
-    }catch(error){S.portfolioError=String(error.message||error);S.tab='backtest';render();return;}
-    S.portfolioError='';S.portfolioLoading=true;S.tab='backtest';render();
+    }catch(error){S.portfolioError=String(error.message||error);showWorkspace('backtest');render();return;}
+    S.portfolioError='';S.portfolioLoading=true;showWorkspace('backtest');render();
     // Yield to render progress; an edited date or toggle supersedes an obsolete run.
     await new Promise(resolve=>setTimeout(resolve,0));
     if(runId!==bestFitRunSerial)return;
@@ -2564,14 +2678,14 @@ async function initApp(){
       if(runId!==bestFitRunSerial)return;
       S.portfolioResult=result;S.portfolioError='';rememberPortfolio();
     }catch(error){if(runId===bestFitRunSerial){S.portfolioError=String(error.message||error);notice(S.portfolioError);}}
-    finally{if(runId===bestFitRunSerial){S.portfolioLoading=false;S.tab='backtest';render();}}
+    finally{if(runId===bestFitRunSerial){S.portfolioLoading=false;showWorkspace('backtest');render();}}
   }
   function runPortfolioOptimization(){
     try{
       const symbols=portfolioSelection(),{option,signals,inputs}=portfolioStrategyContext();
       S.portfolioSweep=runPortfolioSweep(S.data,symbols,option,backtest,signals,{pineInputs:inputs,sources:S.sources});
-      S.portfolioError='';rememberPortfolio();S.tab='optimize';render();
-    }catch(error){S.portfolioError=error.message;S.tab='optimize';render();notice(error.message);}
+      S.portfolioError='';rememberPortfolio();showWorkspace('optimize');render();
+    }catch(error){S.portfolioError=error.message;showWorkspace('optimize');render();notice(error.message);}
   }
 
 
@@ -2595,7 +2709,7 @@ async function initApp(){
         const options={restoreTab:'backtest',restoreSymbol:S.mode==='live'?S.symbol:S.lastLiveSymbol};
         const result=await fetchLiveUniverse(options);
         if(runId!==fitRunSerial)return;
-        if(S.tab!=='backtest'){
+        if(!workspaceActive('backtest')){
           liveScanPending={result,options};
           S.fitStatus='';
           return;
@@ -2604,7 +2718,7 @@ async function initApp(){
       }
       if(runId!==fitRunSerial)return;
       S.fitStatus='Ranking '+LIVE_UNIVERSE.length+' symbols by training Sharpe…';
-      if(S.tab==='backtest')render();
+      if(workspaceActive('backtest'))render();
       await new Promise(resolve=>setTimeout(resolve,0));
       const histories=new Map(LIVE_UNIVERSE.filter(sym=>S.sources.get(sym)==='ALPACA')
         .map(sym=>[sym,S.data.get(sym)]));
@@ -2615,7 +2729,7 @@ async function initApp(){
           'ALPACA '+String(S.liveFeed).toUpperCase()+' 1Day':'NO ALPACA BARS'};
       S.fitReport=fitAcrossUniverse({...common,strategyScript:script});
       S.fitSort='sharpe';S.fitDescending=true;
-      S.fitStatus='Evaluating preset and Pine strategies for validated OOS fit…';if(S.tab==='backtest')render();
+      S.fitStatus='Evaluating preset and Pine strategies for validated OOS fit…';if(workspaceActive('backtest'))render();
       const validated=await fitValidatedAcrossUniverse({...common,
         savedScripts:S.scriptLibrary,builtInExamples:PINE_EXAMPLES,
         isCancelled:()=>runId!==fitRunSerial,
@@ -2627,10 +2741,10 @@ async function initApp(){
           if(el)el.textContent=S.fitStatus;
         }});
       if(runId!==fitRunSerial)return;
-      S.fitValidatedReport=validated;S.fitStatus='';S.fitError='';if(S.tab==='backtest')render();
+      S.fitValidatedReport=validated;S.fitStatus='';S.fitError='';if(workspaceActive('backtest'))render();
     }catch(err){
       if(runId!==fitRunSerial)return;
-      S.fitStatus='';S.fitError=String(err.message||err);if(S.tab==='backtest')render();
+      S.fitStatus='';S.fitError=String(err.message||err);if(workspaceActive('backtest'))render();
     }
   }
   function loadUniverseFitBest(){
@@ -2649,7 +2763,7 @@ async function initApp(){
       S.scriptCode=script.code;S.scriptSettings={...(script.settings||{})};
       parseCurrentPine();persistPineDraft();
     }
-    S.lastBacktestSymbol=best.symbol;S.tab='backtest';
+    S.lastBacktestSymbol=best.symbol;showWorkspace('backtest');
     if(runBt())render();
   }
 
@@ -2675,7 +2789,7 @@ async function initApp(){
   // Rebuild before rendering, or show a conspicuous warning WITHOUT stale rows.
   let leaderboardRefreshAttempt='';
   function refreshLeaderboardIfRangeChanged(){
-    if(S.tab!=='backtest'||S.portfolioMode||S.leaderboard?.symbol!==S.symbol)return;
+    if(!workspaceActive('backtest')||S.portfolioMode||S.leaderboard?.symbol!==S.symbol)return;
     const context=comparisonContext(),status=leaderboardRangeStatus(S.leaderboard,context);
     if(status.matches&&S.leaderboard?.rollingWindowCount===ROLLING_WINDOW_COUNT&&
       S.leaderboard?.rows.every(row=>!row.strategy||row.rolling))return;
@@ -2707,7 +2821,7 @@ async function initApp(){
     }
     S.result={metrics:choice.metrics,curve:choice.curve,trades:choice.trades,
       source:lb.source,range:lb.range||null};
-    S.resultSymbol=lb.symbol;S.resultTf=lb.timeframe;S.sweep=null;S.tab='backtest';
+    S.resultSymbol=lb.symbol;S.resultTf=lb.timeframe;S.sweep=null;showWorkspace('backtest');
     rememberAnalysis();render();
   }
   function mountLeaderboardChart(){
@@ -2760,7 +2874,7 @@ async function initApp(){
     'pine-check':()=>{parseCurrentPine();S.scriptOutput=S.scriptError?null:'Pine syntax OK — '+S.scriptParsed.mode+' script with '+S.scriptParsed.inputs.length+' inputs.';render();},
     'pine-example':el=>{const ex=PINE_EXAMPLES.find(x=>x.id===el.dataset.example);if(ex)loadPineSource(ex.code,ex.label);},
     'pine-run':()=>executeCurrentPine(),
-    'pine-sweep':()=>sweepCurrentPine(),
+    'pine-sweep':()=>sweepCurrentPine(true),
     'pine-save':()=>savePine(false),
     'pine-copy':()=>savePine(true),
     'pine-rename':()=>{const item=S.scriptLibrary.find(x=>x.id===S.scriptId);if(!item){notice('Load a saved script to rename it.');return;}item.name=S.scriptName;persistPineLibrary();persistPineDraft();S.scriptOutput='Renamed saved script to '+S.scriptName;render();},
@@ -2778,8 +2892,8 @@ async function initApp(){
     'view-charts':()=>{S.tab='charts';render();},
     'refresh-intraday':()=>{if(S.mode==='live')void loadLiveIntraday(S.symbol,true).catch(()=>{});
       else notice('Only Alpaca Live mode can refresh real intraday bars.');},
-    'view-backtest':()=>{S.tab='backtest';S.lastBacktestSymbol=S.symbol;render();},
-    'view-optimize':()=>{S.tab='optimize';render();},
+    'view-backtest':()=>{showWorkspace('backtest');S.lastBacktestSymbol=S.symbol;render();},
+    'view-optimize':()=>{showWorkspace('optimize');render();},
     'add-rule':()=>{clearSavedScanView();S.universeFilter='all';S.rules.push({metric:'rsi',tf:'D',op:'<',value:50});S.scan={status:'idle'};render();},
     'remove-rule':el=>{clearSavedScanView();S.rules.splice(Number(el.dataset.index),1);render();},
     'watch':el=>{const sym=el.dataset.symbol;
@@ -2882,7 +2996,7 @@ async function initApp(){
       const symbol=S.symbol,tf=S.chart.tf;
       S.lastBacktestSymbol=symbol;saveSettings();
       if(!await ensureAnalysisBars('Backtest'))return;
-      if(S.tab!=='backtest'||S.portfolioMode||symbol!==S.symbol||tf!==S.chart.tf)return;
+      if(!workspaceActive('backtest')||S.portfolioMode||symbol!==S.symbol||tf!==S.chart.tf)return;
       runBt();
       // Always show an inline, plain-language date-window error on failure.
       render();
@@ -2943,7 +3057,7 @@ async function initApp(){
         }else Object.assign(S.bt,params);
         runPortfolioCurrent();return;
       }
-      const params=S.sweep[Number(el.dataset.index)].params;if(S.bt.strategy==='pine-custom'){S.scriptSettings={...S.scriptSettings,...params};if(S.activeStrategy)S.activeStrategy.settings={...S.activeStrategy.settings,...params};persistPineDraft();}else Object.assign(S.bt,params);if(runBt()){S.tab='backtest';render();}},
+      const params=S.sweep[Number(el.dataset.index)].params;if(S.bt.strategy==='pine-custom'){S.scriptSettings={...S.scriptSettings,...params};if(S.activeStrategy)S.activeStrategy.settings={...S.activeStrategy.settings,...params};persistPineDraft();}else Object.assign(S.bt,params);if(runBt()){showWorkspace('backtest');render();}},
     'export-trades':()=>{if(!S.result){notice('Run a backtest before exporting.');return;}exportFile(S.symbol+'-trades.csv',csvDownload(S.result.trades.map(t=>({symbol:S.symbol,strategy:S.bt.strategy,...t}))));},
     'export-sweep':()=>{const sweep=S.portfolioMode?S.portfolioSweep:S.sweep;
       if(!sweep){notice('Run a parameter sweep first.');return;}
@@ -2956,9 +3070,12 @@ async function initApp(){
     'choose-symbol':el=>{restoreSymbolState(el.dataset.symbol);S.tab='charts';render();}
   };
   document.addEventListener('click',ev=>{
+    if(ev.target.closest('[data-workspace-drag]')){ev.preventDefault();return;}
+    const summary=ev.target.closest('#chart-workspaces > details > summary');
+    if(summary){ev.preventDefault();setWorkspaceOpen(summary.parentElement,!summary.parentElement.open);return;}
     const btn=ev.target.closest('[data-tab],[data-action]');if(btn){
       if(btn.dataset.tab){
-        if(btn.dataset.tab==='screener'&&S.tab!=='screener'&&S.scanReview){returnToScreener();return;}
+        if(btn.dataset.tab==='screener'&&S.tab!=='screener'&&S.scanReview){S.scanReview.embedded=false;returnToScreener();return;}
         chartSelection++;
         S.tab=btn.dataset.tab;
         render();return;
@@ -2975,7 +3092,7 @@ async function initApp(){
     if(key&&ev.target.isConnected&&S.backtestSections[key]!==ev.target.open){S.backtestSections[key]=ev.target.open;saveSettings();}
     const workspaceKey=ev.target.dataset?.workspaceSection;
     if(workspaceKey&&ev.target.isConnected&&S.workspaceSections[workspaceKey]!==ev.target.open){
-      S.workspaceSections[workspaceKey]=ev.target.open;saveSettings();
+      setWorkspaceOpen(ev.target,ev.target.open);
     }
   },true);
   document.addEventListener('submit',ev=>{
@@ -3030,7 +3147,7 @@ async function initApp(){
     }
     if(el.dataset.input==='symbol-search'){
       S.symbolQuery=el.value;
-      const dropdown=$('[data-option="symbol"]');
+      const dropdown=el.closest('.symbol-picker')?.querySelector('[data-option="symbol"]');
       if(dropdown){
         const options=[...S.data.keys()].filter(modeSymbol).filter(s=>s.toLowerCase().includes(el.value.trim().toLowerCase())||s===S.symbol).sort();
         dropdown.innerHTML=options.map(s=>'<option value="'+esc(s)+'"'+(s===S.symbol?' selected':'')+'>'+esc(s)+'</option>').join('');
@@ -3114,7 +3231,7 @@ async function initApp(){
       if(opt==='preset'){if(val==='custom')return;clearSavedScanView();S.rules=(preset[val]||[]).map(x=>({...x}));S.universeFilter=val==='volatility'?'volatility':'all';S.scan={status:'idle'};}
       else if(opt==='symbol'){
         restoreSymbolState(val);
-        if(['backtest','optimize'].includes(S.tab))S.lastBacktestSymbol=val;
+        if(['backtest','optimize'].includes(S.tab)||el.closest('[data-workspace-section="backtest"],[data-workspace-section="optimize"]'))S.lastBacktestSymbol=val;
       }
       else if(opt==='tf')setTimeframe(val);
       else if(opt==='style')S.chart.style=val;
@@ -3134,7 +3251,7 @@ async function initApp(){
     if(el.dataset.bt){
       const key=el.dataset.bt;
       S.bt[key]=el.type==='number'?Number(el.value):el.value;S.result=null;S.sweep=null;saveSettings();
-      if(key==='strategy'&&S.tab==='backtest'){S.backtestError='';render();return;}
+      if(key==='strategy'&&workspaceActive('backtest')){S.backtestError='';render();return;}
       const detail=$('#variant-result');if(detail)detail.innerHTML=variantResultView();
       return;
     }
