@@ -613,10 +613,10 @@ tr[data-vol-symbol] td:nth-child(3){min-width:138px}
 .options-ruler { padding:5px 0; min-width:0; }
 .options-ruler-empty { color:var(--muted); font-size:13px; padding:14px 8px; }
 .options-strike-scale { position:relative; border:1px solid var(--border); border-radius:9px; background:var(--bg); }
-.options-strike-lanes { position:relative; height:calc(var(--ruler-lanes) * 50px + 10px); }
+.options-strike-lanes { position:relative; height:calc(var(--ruler-lanes) * 54px + 16px); }
 .options-strike-marker { position:absolute; left:clamp(36px,var(--strike-x),calc(100% - 36px)); width:0; height:44px; }
-.options-strike-lanes.buy .options-strike-marker { bottom:calc(var(--strike-lane) * 50px + 5px); }
-.options-strike-lanes.sell .options-strike-marker { top:calc(var(--strike-lane) * 50px + 5px); }
+.options-strike-lanes.buy .options-strike-marker { bottom:calc(var(--strike-lane) * 54px + 8px); }
+.options-strike-lanes.sell .options-strike-marker { top:calc(var(--strike-lane) * 54px + 8px); }
 .options-strike-marker:has(.is-dragging) { z-index:3; }
 .options-strike-chip {
   position:absolute; top:0; left:0; transform:translateX(-50%);
@@ -625,6 +625,14 @@ tr[data-vol-symbol] td:nth-child(3){min-width:138px}
   color:var(--green); border:1px solid currentColor; border-radius:8px; background:color-mix(in srgb,var(--green) 14%,var(--bg));
 }
 .options-strike-chip.sell { color:var(--red); background:color-mix(in srgb,var(--red) 14%,var(--bg)); }
+/* Speech-bubble pointers face the strike ruler, following their draggable chip. */
+.options-strike-chip::after {
+  content:""; position:absolute; left:50%; width:0; height:0; transform:translateX(-50%);
+  border-inline:6px solid transparent; pointer-events:none;
+}
+.options-strike-chip.buy::after { top:100%; border-top:7px solid currentColor; }
+.options-strike-chip.sell::after { bottom:100%; border-bottom:7px solid currentColor; }
+
 .options-strike-chip small { font-size:10px; opacity:.8; }
 .options-strike-chip.is-dragging { z-index:2; cursor:grabbing; box-shadow:0 0 0 2px currentColor; }
 .options-strike-chip.is-swiping { cursor:grabbing; }
