@@ -1,4 +1,4 @@
-import {test,expect} from '@playwright/test';
+import {test,expect} from './market-fixture.js';
 import {chooseSymbol} from './chart-symbol.js';
 import {sampleData} from '../src/engine.js';
 import {LIVE_UNIVERSE} from '../src/universe.js';
@@ -23,7 +23,6 @@ test('Round 14: 132 fresh Nov 16 bars and VXZ Nov 13 appear in Screener, Data Ce
     status:200,contentType:'application/json',body:JSON.stringify(body)
   }));
   await page.goto('./');
-  await page.locator('[data-action="mode-live"]').first().click();
   await expect(page.locator('#scan-status')).toContainText('133/133 symbols loaded',{timeout:60000});
   await expect(page.locator('#scan-freshness')).toContainText('Stale daily bars · reference latest-bar session 2026-11-16 · 132/133 current');
   await expect(page.locator('#scan-freshness')).not.toContainText('133/133 current');

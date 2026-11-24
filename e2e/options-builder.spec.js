@@ -1,4 +1,4 @@
-import {expect,test} from '@playwright/test';
+import {expect,test} from './market-fixture.js';
 
 test('manual options builder computes a vertical spread and keeps it while switching tabs', async ({page}) => {
   await page.goto('./');

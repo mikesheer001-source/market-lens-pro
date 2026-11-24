@@ -1,5 +1,6 @@
 import {gzipSync} from 'node:zlib';
 import {test, expect} from '@playwright/test';
+import {mockMarket,waitForMarket} from './market-fixture.js';
 
 test('two devices on the same URL automatically share chart changes and saved scans', async ({browser, baseURL}) => {
   const saved = new Map();
@@ -24,9 +25,10 @@ test('two devices on the same URL automatically share chart changes and saved sc
   const first = await browser.newContext(contextOptions);
   const second = await browser.newContext(contextOptions);
   try {
-    await Promise.all([mock(first), mock(second)]);
+    await Promise.all([mock(first), mock(second),mockMarket(first),mockMarket(second)]);
     const [a,b] = await Promise.all([first.newPage(),second.newPage()]);
     await Promise.all([a.goto('./'),b.goto('./')]);
+    await Promise.all([waitForMarket(a),waitForMarket(b)]);
     await a.getByLabel('Scan name').fill('My saved scan');
     await a.getByRole('button',{name:'Save scan',exact:true}).click();
     await a.locator('.sidebar [data-tab="charts"]').click();

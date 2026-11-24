@@ -1,4 +1,4 @@
-import {test,expect} from '@playwright/test';
+import {test,expect} from './market-fixture.js';
 import {chooseSymbol} from './chart-symbol.js';
 import {LIVE_UNIVERSE,ALPACA_SCAN_LOOKBACK_DAYS} from '../src/universe.js';
 import {aggregate,statsFor} from '../src/engine.js';
@@ -25,7 +25,6 @@ test('Round 19: a real-five-year-length mocked scan fills W EMA200 and shows >12
     status:200,contentType:'application/json',body:responseBody,
     headers:{'X-Scan-Cache':'MISS'}}));
   await page.goto('./');
-  await page.locator('.mode-switch [data-action="mode-live"]').click();
   await expect(page.locator('#scan-status')).toContainText('133/133 symbols loaded',{timeout:150000});
   await expect(page.locator('tr[data-symbol]')).toHaveCount(133);
   await expect(page.getByRole('columnheader',{name:/% vs W EMA200/})).toBeVisible();

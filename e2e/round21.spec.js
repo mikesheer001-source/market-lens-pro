@@ -1,4 +1,4 @@
-import {test,expect} from '@playwright/test';
+import {test,expect} from './market-fixture.js';
 import {chooseSymbol} from './chart-symbol.js';
 import {sampleData} from '../src/engine.js';
 import {DEFAULT_ALPACA_WORKER,LIVE_SCAN_CACHE_REVISION} from '../src/live-history.js';
@@ -68,11 +68,10 @@ test('Round 21: stale imported IndexedDB ABBV history never overrides a real fiv
     await new Promise((ok,bad)=>{tx.oncomplete=ok;tx.onerror=()=>bad(tx.error)});
     db.close();
   });
-  await page.reload();
   await page.route('**/api/stocks/scan?**',route=>route.fulfill({
     status:200,contentType:'application/json',body:JSON.stringify(fresh),
     headers:{'X-Scan-Cache':'MISS'}}));
-  await page.locator('.mode-switch [data-action="mode-live"]').click();
+  await page.reload();
   await expect(page.locator('#scan-status')).toContainText('2/133 symbols loaded');
   await expect(page.locator('tr[data-symbol="ABBV"] td').nth(8)).toHaveText(String(longBars.length));
   await expect(page.locator('[data-weekly-ema200="ABBV"]')).not.toHaveText('—');
@@ -99,11 +98,9 @@ test('Round 21: saved outdated Worker is detected and switched to verified offic
     });}
     return route.abort();
   });
-  await page.goto('./');
-  await page.evaluate(base=>localStorage.setItem('market-lens-pro-settings',
+  await page.addInitScript(base=>localStorage.setItem('market-lens-pro-settings',
     JSON.stringify({apiBaseUrl:base})),oldWorker);
-  await page.reload();
-  await page.locator('.mode-switch [data-action="mode-live"]').click();
+  await page.goto('./');
   await expect(page.locator('#scan-status')).toContainText('2/133 symbols loaded');
   expect(legacyRequests).toBe(1);
   expect(officialRequests).toBe(1);

@@ -1,4 +1,4 @@
-import {test,expect} from '@playwright/test';
+import {test,expect} from './market-fixture.js';
 
 test('published Pages site renders screener, daily RSI, chart and backtest',async ({page})=>{
   const errors=[];
@@ -29,12 +29,12 @@ test('published Pages site renders screener, daily RSI, chart and backtest',asyn
   await page.locator('[data-action="scan-universe"]').click();
   await expect(page.locator('#scan-status')).toContainText('1 match');
   await expect(page.locator('#scan-status')).not.toContainText('1 matches');
-  await expect(page.locator('tr[data-symbol="DEMO-COIN"] .pill')).toHaveText('MATCH');
-  await expect(page.locator('tr[data-symbol="DEMO-SPY"] .pill')).toHaveText('NO MATCH');
+  await expect(page.locator('tr[data-symbol="COIN"] .pill')).toHaveText('MATCH');
+  await expect(page.locator('tr[data-symbol="SPY"] .pill')).toHaveText('NO MATCH');
 
   await page.locator('[data-option="preset"]').selectOption('volatility');
   await expect(page.locator('tr[data-symbol]')).toHaveCount(1);
-  await expect(page.locator('tr[data-symbol="DEMO-VXX"] .pill')).toHaveText('MATCH');
+  await expect(page.locator('tr[data-symbol="VXX"] .pill')).toHaveText('MATCH');
   await page.locator('[data-action="scan-universe"]').click();
   await expect(page.locator('#scan-status')).toContainText('1 match');
   expect(errors).toEqual([]);
@@ -67,7 +67,7 @@ test('published strategy leaderboard compares presets, renders top three, and re
   await expect(page.locator('.leaderboard-table tbody tr')).toHaveCount(12);
   await expect(page.locator('.leaderboard-table')).toContainText('Train Sharpe (rank)');
   await expect(page.locator('.leaderboard-table')).toContainText('OOS Sharpe (30%)');
-  await expect(page.locator('#walk-forward-summary')).toContainText('Source: SIMULATED');
+  await expect(page.locator('#walk-forward-summary')).toContainText('Source: Alpaca');
   await expect(page.locator('.leaderboard-best')).toHaveCount(1);
   await expect(page.locator('.leaderboard-table')).toContainText('Hidden bullish RSI divergence');
   await expect(page.locator('.leaderboard-table')).toContainText('Indicator · N/A');
@@ -116,7 +116,7 @@ test('published Round 15 best-fit portfolio and date-range controls work on depl
   await page.locator('[data-action="run-best-fit"]').click();
   await expect(page.locator('#portfolio-source')).toContainText('Saved best-fit portfolio',{timeout:80000});
   await expect(page.locator('#portfolio-source')).toContainText('Full available range');
-  await expect(page.locator('#portfolio-breakdown tr[data-portfolio-symbol="DEMO-VXX"]')).toContainText('Fit Sharpe:');
+  await expect(page.locator('#portfolio-breakdown tr[data-portfolio-symbol="VXX"]')).toContainText('Fit Sharpe:');
   await expect(page.locator('#portfolio-breakdown')).toContainText('Train return');
   await expect(page.locator('#portfolio-breakdown')).toContainText('OOS return');
   await expect(page.locator('#portfolio-breakdown')).toContainText('OOS Sharpe');

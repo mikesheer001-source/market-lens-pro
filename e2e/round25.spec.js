@@ -1,4 +1,4 @@
-import {test,expect} from '@playwright/test';
+import {test,expect} from './market-fixture.js';
 import {readFile} from 'node:fs/promises';
 import {sampleData} from '../src/engine.js';
 

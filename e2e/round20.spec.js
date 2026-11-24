@@ -1,4 +1,4 @@
-import {test,expect} from '@playwright/test';
+import {test,expect} from './market-fixture.js';
 
 test('Round 20: desktop fullscreen covers viewport, keeps symbol, returns to prior layout and preserves controls',async ({page})=>{
   const errors=[];page.on('pageerror',e=>errors.push(e.message));

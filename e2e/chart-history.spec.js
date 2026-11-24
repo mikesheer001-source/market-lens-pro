@@ -1,4 +1,4 @@
-import {test,expect} from '@playwright/test';
+import {test,expect} from './market-fixture.js';
 import {LIVE_SCAN_CACHE_REVISION} from '../src/live-history.js';
 import {sampleData} from '../src/engine.js';
 
@@ -10,7 +10,6 @@ async function openLiveChart(page){
     requested:133,returned:1,missing:[],bars:{SPY:daily}
   }}));
   await page.goto('./');
-  await page.locator('.mode-switch [data-action="mode-live"]').click();
   await expect(page.locator('#scan-status')).toContainText('1/133 symbols loaded');
   await page.locator('.sidebar [data-tab="charts"]').click();
   await expect(page.locator('.chart-data')).toContainText(daily.length+' D bars');
@@ -63,6 +62,8 @@ test('older intraday requests follow page tokens and deduplicate bars',async ({p
 });
 
 test('a quick scan finishing in Chart Lab leaves the chart mounted and caches the results',async ({page})=>{
+  await openLiveChart(page);
+  await page.locator('.sidebar [data-tab="screener"]').click();
   let finish;
   const pending=new Promise(resolve=>{finish=resolve;});
   let started;
@@ -75,8 +76,7 @@ test('a quick scan finishing in Chart Lab leaves the chart mounted and caches th
       requested:133,returned:1,bars:{SPY:daily}
     }});
   });
-  await page.goto('./');
-  await page.locator('.mode-switch [data-action="mode-live"]').click();
+  await page.locator('[data-action="scan-universe"]').click();
   await fetchStarted;
   await page.locator('.sidebar [data-tab="charts"]').click();
   const chart=page.locator('#price-chart');

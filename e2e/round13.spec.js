@@ -1,4 +1,4 @@
-import {test,expect} from '@playwright/test';
+import {test,expect} from './market-fixture.js';
 
 for(const tab of ['briefing','volatility']){
   test('saved '+tab+' preference opens Screener after tab removal',async ({page})=>{
@@ -11,6 +11,6 @@ for(const tab of ['briefing','volatility']){
     await page.locator('.mobile-more summary').click();
     await page.locator('[data-option="preset"]').selectOption('volatility');
     await expect(page.locator('.screener-results tr[data-symbol]')).toHaveCount(1);
-    await expect(page.locator('.screener-results tr[data-symbol]')).toHaveAttribute('data-symbol','DEMO-VXX');
+    await expect(page.locator('.screener-results tr[data-symbol]')).toHaveAttribute('data-symbol','VXX');
   });
 }

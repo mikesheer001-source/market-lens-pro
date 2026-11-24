@@ -1,4 +1,4 @@
-import {test,expect} from '@playwright/test';
+import {test,expect} from './market-fixture.js';
 import {sampleData} from '../src/engine.js';
 
 test('Round 15: single, equal-weight and best-fit use selected dates, show real strategy attribution',async ({page})=>{
@@ -22,7 +22,7 @@ test('Round 15: single, equal-weight and best-fit use selected dates, show real 
   await page.locator('[data-action="run-portfolio"]').click();
   await expect(page.locator('#portfolio-source')).toContainText('Selected range: '+start+' to '+end);
   await expect(page.locator('#portfolio-breakdown tbody tr')).toHaveCount(4);
-  await expect(page.locator('#portfolio-breakdown tbody tr').first()).toContainText('DEMO');
+  await expect(page.locator('#portfolio-breakdown tbody tr').first()).toContainText('ALPACA');
   await expect(page.locator('#equity-chart canvas').first()).toBeVisible();
   await page.locator('[data-option="portfolio-mode"]').selectOption('best-fit');
   await expect(page.locator('[data-action="run-best-fit"]')).toBeVisible();

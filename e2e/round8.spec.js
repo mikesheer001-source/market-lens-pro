@@ -1,16 +1,16 @@
-import {test,expect} from '@playwright/test';
+import {test,expect} from './market-fixture.js';
 
 test('equal-weight portfolio accepts named watchlist, combines equity, sweeps and persists',async ({page})=>{
   const errors=[];page.on('pageerror',e=>errors.push(e.message));
   await page.goto('./');
-  for(const symbol of ['DEMO-SPY','DEMO-VXX'])
+  for(const symbol of ['SPY','VXX'])
     await page.locator('tr[data-symbol="'+symbol+'"] button.star').click();
   await page.locator('.sidebar [data-tab="backtest"]').click();
   await page.locator('[data-option="portfolio-mode"]').selectOption('portfolio');
   await page.locator('[data-option="portfolio-scope"]').selectOption('watchlist');
   await expect(page.getByText('2 selected')).toBeVisible();
   await page.locator('[data-action="run-portfolio"]').click();
-  await expect(page.locator('#portfolio-source')).toContainText('SIMULATED');
+  await expect(page.locator('#portfolio-source')).toContainText('ALPACA');
   await expect(page.locator('#portfolio-source')).toContainText('2 symbols');
   await expect(page.locator('#equity-chart canvas').first()).toBeVisible();
   await expect(page.locator('.data-table tbody tr')).toHaveCount(2);
@@ -28,16 +28,16 @@ test('equal-weight portfolio accepts named watchlist, combines equity, sweeps an
   expect(errors).toEqual([]);
 });
 
-test('no daily Demo OHLCV is faked into 2H or 15m candles',async ({page})=>{
+test('no daily OHLCV is faked into 2H or 15m candles',async ({page})=>{
   const errors=[];page.on('pageerror',e=>errors.push(e.message));
   await page.goto('./');
   await page.locator('.sidebar [data-tab="charts"]').click();
-  await page.locator('[data-option="tf"]').selectOption('2H');
+  await page.locator('[data-timeframe="2H"]').click();
   await expect(page.locator('#price-chart canvas')).toHaveCount(0);
-  await expect(page.getByText(/No genuine 2H bars available/)).toBeVisible();
-  await expect(page.locator('.info-strip.warning')).toContainText('never expanded');
-  await page.locator('[data-option="tf"]').selectOption('15m');
+  await expect(page.getByText(/Live intraday unavailable/)).toBeVisible();
+  await expect(page.locator('.info-strip.warning')).toContainText('Alpaca');
+  await page.locator('[data-timeframe="15m"]').click();
   await expect(page.locator('#price-chart canvas')).toHaveCount(0);
-  await expect(page.getByText(/No genuine 15m bars available/)).toBeVisible();
+  await expect(page.getByText(/Live intraday unavailable/)).toBeVisible();
   expect(errors).toEqual([]);
 });

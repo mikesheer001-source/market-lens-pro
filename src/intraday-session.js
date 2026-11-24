@@ -29,7 +29,7 @@ export function normalizeStartupPreferences(saved={}){
   const lastSymbol=valid(saved.lastSymbol)?saved.lastSymbol:null;
   const tab=['screener','charts','backtest','options','optimize','scripts','data'].includes(saved.tab)?saved.tab:'screener';
   return {mode:'live',tab,lastLiveSymbol,lastBacktestSymbol,lastSymbol,
-    selectedSymbol:(tab==='backtest'?lastBacktestSymbol:lastSymbol)||lastLiveSymbol};
+    selectedSymbol:(tab==='backtest'?lastBacktestSymbol:lastSymbol)||lastSymbol||lastLiveSymbol};
 }
 export function intradayCacheFresh(entry,{symbol,feed,expected=expectedNyseBarDate(),now=Date.now(),maxAgeMs=300000}={}){
   if(!entry||entry.source!=='ALPACA'||entry.symbol!==symbol||entry.feed!==feed||

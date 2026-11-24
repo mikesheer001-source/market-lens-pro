@@ -40,7 +40,7 @@ test('persisted 15m bars stay current only for the expected NYSE session, correc
   assert.equal(intradayCacheFresh(JSON.parse(JSON.stringify(entry())),inputs),true);
 });
 
-test('Live/Demo mode, selected Backtester symbol and destination tab survive serialized settings independently',()=>{
+test('Live-only mode migrates old Demo preferences and preserves the real Backtester symbol and tab',()=>{
   const saved=JSON.parse(JSON.stringify({mode:'live',tab:'backtest',lastBacktestSymbol:'VXX',
     lastLiveSymbol:'SVIX',lastDemoSymbol:'DEMO-VXX',lastSymbol:'VXZ'}));
   const value=normalizeStartupPreferences(saved);
@@ -51,8 +51,10 @@ test('Live/Demo mode, selected Backtester symbol and destination tab survive ser
   const mixed=normalizeStartupPreferences({...saved,lastBacktestSymbol:'DEMO-SPY'});
   assert.equal(mixed.selectedSymbol,'VXZ','do not restore a Demo symbol while Live');
   const demo=normalizeStartupPreferences({...saved,mode:'demo'});
-  assert.equal(demo.selectedSymbol,'DEMO-VXX');
-  assert.equal(normalizeStartupPreferences({}).mode,'demo');
+  assert.equal(demo.mode,'live');
+  assert.equal(demo.selectedSymbol,'VXX');
+  assert.equal(normalizeStartupPreferences({mode:'demo',lastSymbol:'DEMO-SPY'}).selectedSymbol,'VXX');
+  assert.equal(normalizeStartupPreferences({}).mode,'live');
   assert.equal(normalizeStartupPreferences({tab:'javascript:bad'}).tab,'screener');
 });
 

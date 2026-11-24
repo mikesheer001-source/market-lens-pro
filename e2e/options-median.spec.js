@@ -1,4 +1,4 @@
-import {test,expect} from '@playwright/test';
+import {test,expect} from './market-fixture.js';
 import {LIVE_SCAN_CACHE_REVISION} from '../src/live-history.js';
 import {sampleData} from '../src/engine.js';
 import {OPTIONS_DEVICE_KEY} from '../src/options-api.js';
@@ -33,7 +33,6 @@ test('Chart Lab loads six-month and one-year options medians and can hide them',
     return route.fulfill({json:{feed:'indicative',contracts}});
   });
   await page.goto('./');
-  await page.locator('.mode-switch [data-action="mode-live"]').click();
   await expect(page.locator('#scan-status')).toContainText('1/133 symbols loaded');
   await page.locator('.sidebar [data-tab="charts"]').click();
   await page.getByRole('button',{name:'New indicator'}).click();

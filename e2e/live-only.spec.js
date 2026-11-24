@@ -6,7 +6,7 @@ test('old demo preferences migrate to real data, without a synthetic fallback',a
   await expect(page.locator('#scan-status')).toContainText('Live data unavailable');
   await expect(page.getByRole('button',{name:'Use Demo'})).toHaveCount(0);
   await expect(page.getByRole('button',{name:'Use Live'})).toHaveCount(0);
-  await expect(page.locator('.screener-results tbody tr')).toHaveCount(0);
+  await expect(page.locator('.screener-results tr[data-symbol]')).toHaveCount(0);
   await expect(page.locator('.source-badge').first()).toContainText('ALPACA UNAVAILABLE');
   expect(await page.evaluate(()=>JSON.parse(localStorage.getItem('market-lens-pro-settings')).mode)).toBe('live');
 });

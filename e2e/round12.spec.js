@@ -1,4 +1,4 @@
-import {test,expect} from '@playwright/test';
+import {test,expect} from './market-fixture.js';
 import {LIVE_UNIVERSE} from '../src/universe.js';
 import {sampleData} from '../src/engine.js';
 

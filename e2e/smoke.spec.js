@@ -1,4 +1,4 @@
-import {test,expect} from '@playwright/test';
+import {test,expect} from './market-fixture.js';
 
 test('desktop screener, chart, backtest, optimization and CSV import',async ({page})=>{
   const errors=[];page.on('pageerror',e=>errors.push(e.message));
@@ -18,19 +18,19 @@ test('desktop screener, chart, backtest, optimization and CSV import',async ({pa
   await expect(page.getByRole('heading',{name:'Chart Lab'})).toBeVisible();
   await expect(page.locator('[data-option="style"]')).toHaveValue('candles');
   await expect(page.locator('#price-chart canvas').first()).toBeVisible();
-  await page.locator('[data-option="tf"]').selectOption('W');
+  await page.locator('[data-timeframe="W"]').click();
   await expect(page.locator('#price-chart canvas').first()).toBeVisible();
   await page.locator('.sidebar [data-tab="screener"]').click();
   await page.locator('[data-option="preset"]').selectOption('oversold');
   await page.locator('[data-action="scan-universe"]').click();
   await expect(page.locator('#scan-status')).toContainText('1 match');
   await expect(page.locator('#scan-status')).not.toContainText('1 matches');
-  await expect(page.locator('tr[data-symbol="DEMO-COIN"] .pill')).toHaveText('MATCH');
-  await expect(page.locator('tr[data-symbol="DEMO-SPY"] .pill')).toHaveText('NO MATCH');
+  await expect(page.locator('tr[data-symbol="COIN"] .pill')).toHaveText('MATCH');
+  await expect(page.locator('tr[data-symbol="SPY"] .pill')).toHaveText('NO MATCH');
 
   await page.locator('[data-option="preset"]').selectOption('volatility');
   await expect(page.locator('tr[data-symbol]')).toHaveCount(1);
-  await expect(page.locator('tr[data-symbol="DEMO-VXX"] .pill')).toHaveText('MATCH');
+  await expect(page.locator('tr[data-symbol="VXX"] .pill')).toHaveText('MATCH');
   await page.locator('[data-action="scan-universe"]').click();
   await expect(page.locator('#scan-status')).toContainText('1 match');
   await page.locator('.sidebar [data-tab="backtest"]').click();
@@ -59,15 +59,13 @@ test('mobile navigation and candlestick canvas',async ({page})=>{
   expect(errors).toEqual([]);
 });
 
-test('failed Live scan restores Demo mode and keeps the sample universe visible',async ({page})=>{
+test('failed refresh preserves previously loaded market data without a demo fallback',async({page})=>{
   await page.goto('./');
-  await page.evaluate(()=>{
-    localStorage.setItem('market-lens-pro-settings',JSON.stringify({apiBaseUrl:'https://unreachable.market-lens.invalid'}));
-  });
-  await page.reload();
-  await page.route('https://unreachable.market-lens.invalid/**',route=>route.abort());
-  await page.locator('.mode-switch [data-action="mode-live"]').click();
-  await expect(page.locator('#scan-status')).toContainText('Live scan failed; Demo mode restored');
   await expect(page.locator('tr[data-symbol]')).toHaveCount(4);
-  await expect(page.locator('.mode-switch [data-action="mode-demo"]')).toHaveClass(/selected/);
+  await page.route('**/api/stocks/scan?**',route=>route.fulfill({status:503,json:{error:'Provider unavailable'}}));
+  await page.locator('[data-action="scan-universe"]').click();
+  await expect(page.locator('#scan-status')).toContainText('Live scan failed; showing the previous data');
+  await expect(page.locator('tr[data-symbol]')).toHaveCount(4);
+  await expect(page.locator('.source-badge').first()).toContainText('PREVIOUS DATA');
+  await expect(page.getByRole('button',{name:'Use Demo'})).toHaveCount(0);
 });

@@ -1,4 +1,4 @@
-import {test,expect} from '@playwright/test';
+import {test,expect} from './market-fixture.js';
 import {sampleData,backtest} from '../src/engine.js';
 import {rollingWindows,summarizeRollingSharpe,rollingPositiveText} from '../src/rolling-validation.js';
 

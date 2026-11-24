@@ -1,4 +1,4 @@
-import {test,expect} from '@playwright/test';
+import {test,expect} from './market-fixture.js';
 
 for(const width of [1440,1024,768,390]){
  test('trading workspace respects viewport grid at '+width+'px',async ({page})=>{
@@ -6,8 +6,8 @@ for(const width of [1440,1024,768,390]){
    await page.setViewportSize({width,height:900});
    await page.goto('./');
    await expect(page.getByRole('heading',{name:'Screener'})).toBeVisible();
-   await expect(page.locator('.market-fact')).toContainText('DEMO-VXX');
-   await expect(page.locator('.market-fact')).toContainText('SIMULATED');
+   await expect(page.locator('.market-fact')).toContainText('VXX');
+   await expect(page.locator('.market-fact')).toContainText('ALPACA');
    const check=async ()=>{
      const measurements=await page.evaluate(()=>{
        const main=document.querySelector('.main'),box=main.getBoundingClientRect();

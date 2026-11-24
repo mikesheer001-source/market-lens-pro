@@ -1,4 +1,4 @@
-import {test,expect} from '@playwright/test';
+import {test,expect} from './market-fixture.js';
 import {sampleData} from '../src/engine.js';
 const prices=sampleData()['DEMO-SPY'];
 test('Round 24: validated best-fit selects only qualifying symbols and auto-follows dates',async({page})=>{

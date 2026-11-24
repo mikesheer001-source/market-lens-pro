@@ -1,4 +1,4 @@
-import {test,expect} from '@playwright/test';
+import {test,expect} from './market-fixture.js';
 import {sampleData} from '../src/engine.js';
 import {LIVE_UNIVERSE} from '../src/universe.js';
 
@@ -14,7 +14,7 @@ test('Round 16 demo leaderboard shows train and OOS results, walk-forward summar
   await expect(page.locator('.leaderboard-table')).toContainText('OOS return (30%)');
   await expect(page.locator('.leaderboard-table')).toContainText('OOS Sharpe (30%)');
   await expect(page.locator('#walk-forward-summary')).toContainText('Walk-forward summary');
-  await expect(page.locator('#walk-forward-summary')).toContainText('Source: SIMULATED');
+  await expect(page.locator('#walk-forward-summary')).toContainText('Source: Alpaca');
   await expect(page.locator('#walk-forward-summary')).toContainText('bar date:');
   await expect(page.locator('.leaderboard-table .leaderboard-best')).toHaveCount(1);
   await expect(page.locator('.leaderboard-table tbody tr').first()).toContainText('Best Sharpe');
@@ -36,9 +36,9 @@ test('Round 16 best-fit per-symbol table shows independent OOS metrics and sourc
   await expect(page.locator('#portfolio-breakdown')).toContainText('Train return');
   await expect(page.locator('#portfolio-breakdown')).toContainText('OOS return');
   await expect(page.locator('#portfolio-breakdown')).toContainText('OOS Sharpe');
-  await expect(page.locator('tr[data-portfolio-symbol="DEMO-VXX"]')).toContainText('Fit Sharpe:');
-  await expect(page.locator('tr[data-portfolio-symbol="DEMO-VXX"]')).toContainText('SIMULATED');
-  await expect(page.locator('tr[data-portfolio-symbol="DEMO-VXX"]')).toContainText(end);
+  await expect(page.locator('tr[data-portfolio-symbol="VXX"]')).toContainText('Fit Sharpe:');
+  await expect(page.locator('tr[data-portfolio-symbol="VXX"]')).toContainText('ALPACA');
+  await expect(page.locator('tr[data-portfolio-symbol="VXX"]')).toContainText(end);
   await expect(page.locator('#portfolio-methodology')).toContainText('first 70% training bars');
   await expect(page.locator('#portfolio-methodology')).toContainText('selection bias');
   await expect(page.locator('#equity-chart canvas').first()).toBeVisible();

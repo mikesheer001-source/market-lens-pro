@@ -34,9 +34,6 @@ test('real Alpaca Worker scans entire 133-symbol universe and publishes VXX dail
     ', ABBV='+actualAbbv+' daily bars, SPY='+actualSpy+' daily bars.');
   const errors=[];page.on('pageerror',err=>errors.push(err.message));
   await page.goto('./');
-  await page.evaluate(url=>localStorage.setItem('market-lens-pro-settings',JSON.stringify({apiBaseUrl:url})),WORKER);
-  await page.reload();
-  await page.locator('.mode-switch [data-action="mode-live"]').click();
   const status=page.locator('#scan-status');
   await expect(status).toContainText('Live scan complete',{timeout:240_000});
   await expect(status).toContainText('133/133 symbols loaded');
@@ -106,16 +103,13 @@ test('actual Alpaca IEX 15m bars produce real 2H candles and portfolio results',
   expect(payload.bars.every(b=>typeof b.t==='string'&&typeof b.o==='number'&&typeof b.c==='number')).toBeTruthy();
   const pageErrors=[];page.on('pageerror',err=>pageErrors.push(err.message));
   await page.goto('./');
-  await page.evaluate(url=>localStorage.setItem('market-lens-pro-settings',JSON.stringify({apiBaseUrl:url})),WORKER);
-  await page.reload();
-  await page.locator('.mode-switch [data-action="mode-live"]').click();
   await expect(page.locator('#scan-status')).toContainText('133/133 symbols loaded',{timeout:150000});
   await page.locator('.sidebar [data-tab="charts"]').click();
   await chooseSymbol(page,'VXX');
-  await page.locator('[data-option="tf"]').selectOption('15m');
+  await page.locator('[data-timeframe="15m"]').click();
   await expect(page.locator('#price-chart canvas').first()).toBeVisible({timeout:60000});
   await expect(page.locator('.info-strip').first()).toContainText('Alpaca 15-minute trade-bar OHLCV');
-  await page.locator('[data-option="tf"]').selectOption('2H');
+  await page.locator('[data-timeframe="2H"]').click();
   await expect(page.locator('#price-chart canvas').first()).toBeVisible();
   await expect(page.locator('.info-strip').first()).toContainText('NYSE 09:30–16:00 ET session buckets');
   await page.locator('.sidebar [data-tab="screener"]').click();
@@ -138,9 +132,6 @@ test('real Alpaca IEX OHLCV runs the entire preset strategy leaderboard on VXX w
   test.setTimeout(180000);
   const errors=[];page.on('pageerror',err=>errors.push(err.message));
   await page.goto('./');
-  await page.evaluate(url=>localStorage.setItem('market-lens-pro-settings',JSON.stringify({apiBaseUrl:url})),WORKER);
-  await page.reload();
-  await page.locator('.mode-switch [data-action="mode-live"]').click();
   await expect(page.locator('#scan-status')).toContainText('133/133 symbols loaded',{timeout:150000});
   await page.locator('.sidebar [data-tab="backtest"]').click();
   await chooseSymbol(page,'VXX');
@@ -173,9 +164,6 @@ test('real Alpaca scan exposes latest-bar freshness and dated computed strategy 
   expect(Array.isArray(payload.retry.attempted)).toBe(true);
   const rawVxx=payload.bars.VXX.at(-1).t.slice(0,10);
   await page.goto('./');
-  await page.evaluate(url=>localStorage.setItem('market-lens-pro-settings',JSON.stringify({apiBaseUrl:url})),WORKER);
-  await page.reload();
-  await page.locator('.mode-switch [data-action="mode-live"]').click();
   await expect(page.locator('#scan-status')).toContainText('133/133 symbols loaded',{timeout:150000});
   const barDates=Object.values(payload.bars).map(bars=>bars?.at(-1)?.t?.slice(0,10)).filter(Boolean);
   const counts=new Map();
@@ -226,9 +214,6 @@ test('Round 11 live 2H comparison auto-fetches real Alpaca 15Min bars, caches in
   page.on('pageerror',e=>errors.push(e.message));
   page.on('request',r=>{if(r.url().includes('/api/stocks/intraday?'))intradayRequests.push(r.url());});
   await page.goto('./');
-  await page.evaluate(url=>localStorage.setItem('market-lens-pro-settings',JSON.stringify({apiBaseUrl:url})),WORKER);
-  await page.reload();
-  await page.locator('.mode-switch [data-action="mode-live"]').click();
   await expect(page.locator('#scan-status')).toContainText('133/133 symbols loaded',{timeout:150000});
   await page.locator('.sidebar [data-tab="backtest"]').click();
   await chooseSymbol(page,'VXX');
@@ -258,7 +243,7 @@ test('Round 11 live 2H comparison auto-fetches real Alpaca 15Min bars, caches in
   await expect(page.locator('#equity-chart canvas').first()).toBeVisible();
   const requestCount=intradayRequests.length;
   await page.reload();
-  await expect(page.locator('.mode-switch [data-action="mode-live"]')).toHaveAttribute('aria-pressed','true',{timeout:150000});
+  await expect(page.locator('.source-badge').first()).toContainText('ALPACA LIVE',{timeout:150000});
   await expect(page.locator('.sidebar [data-tab="backtest"]')).toHaveClass(/active/);
   await expect(page.locator('[data-option="symbol"]')).toHaveValue('VXX');
   await expect(page.locator('[data-option="tf"]')).toHaveValue('2H');

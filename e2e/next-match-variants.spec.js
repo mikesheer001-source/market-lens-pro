@@ -1,4 +1,4 @@
-import {test,expect} from '@playwright/test';
+import {test,expect} from './market-fixture.js';
 import {aggregate,backtest,sampleData,screenSymbol} from '../src/engine.js';
 import {windowBacktestBars} from '../src/date-window.js';
 import {assessHoldout} from '../src/validation.js';
@@ -10,7 +10,7 @@ test('mobile review follows the visible match order, explains rules and restores
   await page.locator('[data-rule="0"][data-key="value"]').fill('100');
   await page.locator('[data-option="sort"]').selectOption('price');
   await page.locator('[data-action="sort-order"]').click();
-  await page.getByRole('textbox',{name:'Search symbols'}).fill('DEMO');
+  await page.getByRole('textbox',{name:'Search symbols'}).fill('V');
   const table=page.locator('.screener-results');
   const symbols=await table.locator('tbody tr').evaluateAll(rows=>rows.map(row=>row.dataset.symbol));
   expect(symbols.length).toBeGreaterThan(1);
@@ -32,7 +32,7 @@ test('mobile review follows the visible match order, explains rules and restores
   await page.getByRole('button',{name:'Previous',exact:true}).click();
   await expect(page.locator('.chart-ticker')).toHaveAttribute('data-symbol',symbols[0]);
   await page.locator('[data-action="return-screener"]').click();
-  await expect(page.getByRole('textbox',{name:'Search symbols'})).toHaveValue('DEMO');
+  await expect(page.getByRole('textbox',{name:'Search symbols'})).toHaveValue('V');
   await expect(page.locator('[data-option="sort"]')).toHaveValue('price');
   expect(await table.locator('..').evaluate(element=>({x:element.scrollLeft,y:window.scrollY}))).toEqual(position);
 });

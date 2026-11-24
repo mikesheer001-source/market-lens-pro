@@ -1,4 +1,4 @@
-import {test, expect} from '@playwright/test';
+import {test, expect} from './market-fixture.js';
 
 test('U.S. scan uses technical summaries and loads an uncurated ticker on demand', async ({page}) => {
   const stats = {price: 102, ema200: 95, rsi: 54, rsi5: 52, ret20: 2, drawdown: -2, atrPct: 1, volume: 500, bars: 250};

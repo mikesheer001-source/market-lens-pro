@@ -1,4 +1,4 @@
-import {test,expect} from '@playwright/test';
+import {test,expect} from './market-fixture.js';
 import {sampleData,backtest} from '../src/engine.js';
 import {executePine} from '../src/pine.js';
 import {windowBacktestBars} from '../src/date-window.js';

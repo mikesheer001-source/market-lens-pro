@@ -1,4 +1,4 @@
-import {test,expect} from '@playwright/test';
+import {test,expect} from './market-fixture.js';
 import {sampleData,backtest} from '../src/engine.js';
 
 const history=sampleData()['DEMO-SPY'];
@@ -33,7 +33,7 @@ test('Round 17: changing the date pickers automatically rebuilds all leaderboard
   await expect(row.locator('td').nth(3)).toHaveText(pct(expectedOos.metrics.returnPct));
   await expect(page.locator('#walk-forward-summary')).toContainText(
     'holdout '+history[start+cut].time+' to '+history[end].time);
-  await expect(page.locator('#walk-forward-summary')).toContainText('Source: SIMULATED');
+  await expect(page.locator('#walk-forward-summary')).toContainText('Source: Alpaca');
   expect(await page.locator('#walk-forward-summary').textContent()).not.toBe(priorSummary);
   await expect(page.locator('#leaderboard-chart canvas').first()).toBeVisible();
   await page.reload();

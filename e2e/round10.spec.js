@@ -1,4 +1,4 @@
-import {test,expect} from '@playwright/test';
+import {test,expect} from './market-fixture.js';
 import {readFile} from 'node:fs/promises';
 
 test('Screener strategy picker yields dated LONG/FLAT/EXIT for all Demo symbols, sortable and filterable',async ({page})=>{
@@ -23,14 +23,14 @@ test('Screener strategy picker yields dated LONG/FLAT/EXIT for all Demo symbols,
   expect((await page.locator('tbody .signal-status').allTextContents()).every(s=>s.trim()==='LONG')).toBe(true);
   await page.locator('[data-option="signals-only"]').uncheck();
   await page.locator('[data-action="scan-universe"]').click();
-  await expect(page.locator('#scan-status')).toContainText('Demo scan complete');
+  await expect(page.locator('#scan-status')).toContainText('Live scan complete');
   await expect(page.locator('.alert-banner')).toHaveCount(0,'unchanged bars do not invent signal flips');
   const [download]=await Promise.all([page.waitForEvent('download'),page.locator('[data-action="export-screener"]').click()]);
   const csv=await readFile(await download.path(),'utf8');
   expect(csv).toContain('LatestBar');
   expect(csv).toContain('SignalStrategy');
   expect(csv).toContain('SignalBar');
-  expect(csv).toContain('DEMO-SPY');
+  expect(csv).toContain('SPY');
   await page.reload();
   await expect(page.locator('[data-option="signal-strategy"]')).toHaveValue('preset:breakout');
   await expect(page.locator('tbody .signal-status')).toHaveCount(4);

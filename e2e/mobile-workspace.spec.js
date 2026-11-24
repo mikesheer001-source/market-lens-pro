@@ -1,27 +1,27 @@
-import {test,expect} from '@playwright/test';
+import {test,expect} from './market-fixture.js';
 
 test.use({viewport:{width:390,height:844},hasTouch:true,isMobile:true});
 
 test('mobile workspace keeps ticker details, chosen columns, watchlist and recent symbols accessible',async ({page})=>{
   const errors=[];page.on('pageerror',error=>errors.push(error.message));
   await page.goto('./');
-  const row=page.locator('.screener-results tr[data-symbol="DEMO-VXX"]');
+  const row=page.locator('.screener-results tr[data-symbol="VXX"]');
   await row.getByRole('button',{name:'Toggle watchlist'}).tap();
   await page.getByRole('button',{name:'Columns',exact:true}).tap();
   await page.getByRole('checkbox',{name:'RSI W',exact:true}).uncheck();
   await page.getByRole('button',{name:'Close',exact:true}).tap();
   await expect(page.locator('.screener-results th').nth(3)).toBeHidden();
   await row.locator('.table-table-label').tap();
-  const details=page.getByRole('dialog',{name:'DEMO-VXX',exact:true});
+  const details=page.getByRole('dialog',{name:'VXX',exact:true});
   await expect(details.getByText('RSI W',{exact:true})).toBeVisible();
   await details.getByRole('button',{name:'Open chart',exact:true}).tap();
   await page.locator('.chart-ticker').tap();
-  await expect(page.locator('#chart-symbol-watchlist')).toContainText('DEMO-VXX');
-  await expect(page.locator('#chart-symbol-recent')).toContainText('DEMO-VXX');
+  await expect(page.locator('#chart-symbol-watchlist')).toContainText('VXX');
+  await expect(page.locator('#chart-symbol-recent')).toContainText('VXX');
   const picker=page.getByRole('dialog',{name:'Find symbol',exact:true});
   await picker.getByRole('searchbox').fill('SPY');
-  await picker.getByRole('button',{name:'DEMO-SPY',exact:true}).tap();
-  await expect(page.locator('.chart-ticker')).toHaveAttribute('data-symbol','DEMO-SPY');
+  await picker.getByRole('button',{name:'SPY',exact:true}).tap();
+  await expect(page.locator('.chart-ticker')).toHaveAttribute('data-symbol','SPY');
   await page.locator('[data-action="chart-timeframe"][data-timeframe="W"]').tap();
   await expect(page.locator('[data-timeframe="W"]')).toHaveAttribute('aria-pressed','true');
   await page.locator('.mobile-nav [data-tab="screener"]').tap();

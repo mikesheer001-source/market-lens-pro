@@ -544,7 +544,7 @@ async function initApp(){
     const decision=intradayFetchDecision({timeframe:S.chart.tf,mode:S.mode,source:S.sources.get(S.symbol),
       symbol:S.symbol,entry:S.intraday.get(key),feed:S.liveFeed});
     if(decision==='unavailable'){
-      S.analysisError=actionLabel+' requires genuine timestamped intraday OHLCV. Select Live Alpaca or import real intraday CSV.';
+      S.analysisError=actionLabel+' requires genuine timestamped intraday OHLCV. Connect to Alpaca or import real intraday CSV.';
       notice(S.analysisError);render();return false;
     }
     if(decision==='fetch'){
@@ -3076,8 +3076,8 @@ async function initApp(){
   if(S.signalSelection!=='none')evaluateScreenerSignals(false);
   render();
   await loadStored();
-  await switchToLive({restoreTab:S.tab,restoreSymbol:startupPrefs.selectedSymbol});
   workspaceReady=true;
+  await switchToLive({restoreTab:S.tab,restoreSymbol:startupPrefs.selectedSymbol});
   if(syncEnabled){
     function refreshSharedWorkspace(){
       if(document.visibilityState==='visible')return workspace.flush();
