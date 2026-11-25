@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import {estimateOptionsMedian,estimateOptionsMedianRelaxed,loadOptionsMedians,nearestMedianExpiry} from '../src/options-median.js';
+import {estimateOptionsMedian,estimateOptionsMedianRelaxed,loadOptionsMedians,nearestMedianExpiry,estimateOptionsProbabilityLevels,loadOptionsProbability} from '../src/options-median.js';
 
 const now=Date.parse('2026-01-15T20:00:00Z');
 const expiry='2026-07-15';
@@ -78,4 +78,17 @@ test('returns a labeled lower-confidence estimate for a defensible wider chain',
   assert.equal(result.confidence,'lower');
   assert.ok(Math.abs(result.price-103)<1);
   assert.ok(result.sensitivity[0]<result.price && result.sensitivity[1]>result.price);
+});
+
+test('25/50/75 survival levels use actual strikes and are ordered',()=>{
+  const rows=estimateOptionsProbabilityLevels(uniformChain(),{spot:100,expiry,now});
+  for(const [i,expected] of [113,103,93].entries()){
+    assert.ok(Math.abs(rows[i].price-expected)<.1,JSON.stringify(rows[i]));
+  }
+});
+test('forecast uses listed expirations and preserves unavailable horizons',async()=>{
+  const r=await loadOptionsProbability({symbol:'VXX',rate:.04,now,request:async path=>path==='expirations'?{underlying:{value:100},expirations:[expiry]}:{contracts:uniformChain()}});
+  assert.equal(r.levels.length,9);
+  assert.equal(r.levels.filter(x=>Number.isFinite(x.price)).length,3);
+  assert.ok(r.levels.filter(x=>Number.isFinite(x.price)).every(x=>x.expiry===expiry));
 });

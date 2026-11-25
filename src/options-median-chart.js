@@ -7,7 +7,7 @@ const projectionTime=(ms,intraday)=>intraday?(ms+20*3_600_000)/1000:isoDay(ms);
 export function medianChartPoints(levels,intraday=false){
   return levels.filter(level=>Number.isFinite(level.price)&&level.price>0&&Number.isFinite(expiryMs(level.expiry)))
     .map(level=>({...level,time:projectionTime(expiryMs(level.expiry),intraday),
-      title:'50/50 · '+level.label+(level.confidence==='lower'?' · Low conf.':''),
+      title:(level.probability==null?'50/50':level.probability+'% above')+' · '+level.label+(level.confidence==='lower'?' · Low conf.':''),
       caption:level.expiry+(intraday?' 20:00 UTC':'')+' · $'+level.price.toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2})}))
     .sort((a,b)=>dateMs(a.time)-dateMs(b.time));
 }
@@ -42,12 +42,32 @@ export function medianDotPrimitive(chart,readPoints){
   let requestUpdate=()=>{};
   const renderer={draw(target){
     target.useMediaCoordinateSpace(({context:ctx,mediaSize:{width,height}})=>{
-      const visible=readPoints().flatMap(({point,series})=>{
+      const projected=readPoints().flatMap(({point,series})=>{
         const x=chart.timeScale().timeToCoordinate(point.time),y=series.priceToCoordinate(point.price);
-        return x==null||y==null||!Number.isFinite(x)||!Number.isFinite(y)||x<0||x>width||y<0||y>height?[]:[{point,x,y}];
+        return x==null||y==null||!Number.isFinite(x)||!Number.isFinite(y)?[]:[{point,x,y}];
       });
-      if(!visible.length)return;
+      if(!projected.length)return;
+      const visible=projected.filter(({x,y})=>x>=0&&x<=width&&y>=0&&y<=height);
       ctx.save();
+      const groups=new Map();
+      for(const p of projected){
+        if(p.point.probability==null)continue;
+        const key=p.point.projectionGroup+':'+p.point.probability;
+        if(!groups.has(key))groups.set(key,[]);
+        groups.get(key).push(p);
+      }
+      for(const group of groups.values()){
+        group.sort((a,b)=>dateMs(a.point.time)-dateMs(b.point.time));
+        ctx.beginPath();ctx.strokeStyle=group[0].point.color;ctx.lineWidth=2;
+        ctx.setLineDash([6,4]);
+        for(let i=0;i<group.length;i++){
+          const p=group[i];
+          if(i&&p.point.months-group[i-1].point.months===(p.point.months===12?6:3))ctx.lineTo(p.x,p.y);
+          else ctx.moveTo(p.x,p.y);
+        }
+        ctx.stroke();
+      }
+      ctx.setLineDash([]);
       ctx.font='600 11px system-ui, sans-serif';ctx.textBaseline='top';
       const labels=[];
       for(const {point,x,y} of visible){
@@ -99,7 +119,7 @@ export function createMedianDotLayer({chart,base,lineSeries,lastTime,tf,onInitia
   }
   function set(id,levels){
     if(disposed)return;
-    const points=medianChartPoints(levels,!['D','W','M'].includes(tf));
+    const points=medianChartPoints(levels,!['D','W','M'].includes(tf)).map(p=>p.probability==null?p:{...p,projectionGroup:id});
     let entry=instances.get(id);
     if(!entry&&!points.length)return;
     if(!entry){entry={series:chart.addSeries(lineSeries,{...medianDotSeriesOptions,color:'#7bdac6'}),points:[]};instances.set(id,entry);}

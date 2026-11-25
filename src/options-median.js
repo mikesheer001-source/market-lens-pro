@@ -50,7 +50,7 @@ function monotone(samples) {
 const strict={confidence:'standard',maxSpread:.30,maxUncertainty:.20,widths:[.018,.035,.05,.065,.08],maxGap:.12};
 const relaxed={confidence:'lower',maxSpread:.65,maxUncertainty:.30,widths:[.035,.05,.065,.08,.10,.12,.16,.20],maxGap:.20};
 
-function evaluateMedian(contracts, {spot,expiry,rate=.04,now=Date.now()}, policy) {
+function evaluateMedian(contracts, {spot,expiry,rate=.04,now=Date.now(),target=.5}, policy) {
   const years=(Date.parse(expiry+'T20:00:00Z')-now)/(365*dayMs);
   if (!(spot>0 && years>0 && Number.isFinite(rate))) return {error:'Invalid underlying price, expiry or rate'};
   if (!contracts.length) return {error:'No contracts returned for this strike range'};
@@ -69,7 +69,7 @@ function evaluateMedian(contracts, {spot,expiry,rate=.04,now=Date.now()}, policy
     const strikes=[...new Set(rows.map(row=>row.strike))].sort((a,b)=>a-b);
     const byStrike=new Map(rows.map(row=>[row.type+':'+row.strike,row.quote]));
     for (const width of policy.widths) {
-      const result=estimateAtWidth(strikes,byStrike,discount,spot,width,policy);
+      const result=estimateAtWidth(strikes,byStrike,discount,spot,width,policy,target);
       maxSamples=Math.max(maxSamples,result.sampleCount);
       if (result.price!=null) return {...result,expiry,confidence:policy.confidence};
     }
@@ -91,7 +91,7 @@ export function estimateOptionsMedianRelaxed(contracts, params) {
   return result.price!=null ? result : null;
 }
 
-function estimateAtWidth(strikes,byStrike,discount,spot,width,policy) {
+function estimateAtWidth(strikes,byStrike,discount,spot,width,policy,target=.5) {
   const samples=[];
   const mid=q=>(q.bid+q.ask)/2;
   let right=1;
@@ -121,18 +121,18 @@ function estimateAtWidth(strikes,byStrike,discount,spot,width,policy) {
   }
   if (samples.length<4) return {sampleCount:samples.length};
   const fitted=monotone(samples);
-  const below=fitted.findLast(point=>point.probability<.5), above=fitted.find(point=>point.probability>.5);
+  const below=fitted.findLast(point=>point.probability<target), above=fitted.find(point=>point.probability>target);
   if (!below || !above || above.strike-below.strike>spot*policy.maxGap || above.probability-below.probability<.015) return {sampleCount:samples.length};
-  const ties=fitted.filter(point=>Math.abs(point.probability-.5)<1e-10);
+  const ties=fitted.filter(point=>Math.abs(point.probability-target)<1e-10);
   const price=ties.length ? (ties[0].strike+ties.at(-1).strike)/2 :
-    below.strike+(.5-below.probability)*(above.strike-below.strike)/(above.probability-below.probability);
+    below.strike+(target-below.probability)*(above.strike-below.strike)/(above.probability-below.probability);
   const quoteTime=Math.min(below.time,above.time,...ties.map(point=>point.time));
   let sensitivity;
   if (policy.confidence==='lower') {
     // Use actual (unpooled) quote slopes, not merely the smoothed midpoint,
     // to check that the available bid/ask ranges support a bounded crossing.
-    const lo=samples.findLast(p=>p.strike<price && p.probability+p.uncertainty<.5);
-    const hi=samples.find(p=>p.strike>price && p.probability-p.uncertainty>.5);
+    const lo=samples.findLast(p=>p.strike<price && p.probability+p.uncertainty<target);
+    const hi=samples.find(p=>p.strike>price && p.probability-p.uncertainty>target);
     if (!lo || !hi || hi.strike-lo.strike>spot*.35) return {sampleCount:samples.length};
     sensitivity=[lo.strike,hi.strike];
   }
@@ -177,5 +177,57 @@ export async function loadOptionsMedians({request,symbol,rate,signal,now=Date.no
     }
     return {...horizon,expiry:candidates[0],error:failures.join(' | ')||'Nearby expirations lack a reliable 50/50 level'};
   }));
+  return {levels:results,spot};
+}
+
+export const probabilityHorizons=[{months:3,label:'3M'},{months:6,label:'6M'},{months:12,label:'1Y'}];
+export const probabilityBands=[{probability:25,color:'#e5a34b'},{probability:50,color:'#4295ff'},{probability:75,color:'#22b88a'}];
+
+// One actual listed expiry per horizon; all three quantiles use the same chain.
+// A survival probability of p corresponds to a terminal CDF of 1-p.
+export function estimateOptionsProbabilityLevels(contracts,params){
+  const levels=probabilityBands.map(band=>{
+    const p={...params,target:1-band.probability/100};
+    const standard=evaluateMedian(contracts,p,strict);
+    const estimate=standard.price!=null?standard:evaluateMedian(contracts,p,relaxed);
+    return {...band,...estimate,...(estimate.price==null?{error:estimate.error?.replaceAll('50%','requested probability')}:{}),expiry:params.expiry};
+  });
+  // Different quote-quality passes can cross; suppress inconsistent levels.
+  const valid=levels.filter(x=>Number.isFinite(x.price));
+  if(valid.some((x,i)=>i>0&&x.price>valid[i-1].price))
+    return levels.map(x=>({...x,price:undefined,error:'Inconsistent quantile ordering; no reliable estimate'}));
+  return levels;
+}
+
+export async function loadOptionsProbability({request,symbol,rate,signal,now=Date.now()}){
+  const listing=await request('expirations',{symbol},signal);
+  const spot=listing.underlying?.value;
+  if(!(spot>0))return {levels:[],message:'No Alpaca underlying quote is available.'};
+  const results=[];
+  for(const horizon of probabilityHorizons){
+    const candidates=nearbyExpirations(listing.expirations??[],horizon.months,now).slice(0,3);
+    let best=null, failure='No listed expiration within 45 days of this horizon', retryAfter;
+    const score=rows=>rows.reduce((n,x)=>n+(Number.isFinite(x.price)?(x.confidence==='standard'?2:1):0),0);
+    const complete=rows=>rows.every(x=>Number.isFinite(x.price)&&x.confidence==='standard');
+    for(const expiry of candidates){
+      for(const width of [.30,.80]){
+        try{
+          const data=await request('chain',{symbol,expiry,center:spot,width},signal);
+          const rows=estimateOptionsProbabilityLevels(data.contracts??[],{spot,expiry,rate,now})
+            .map(x=>({...horizon,...x,range:width}));
+          if(!best||score(rows)>score(best))best=rows;
+          if(complete(rows))break;
+        }catch(error){
+          if(signal?.aborted)throw error;
+          failure=error.message;
+          if(error.status===429)retryAfter=error.retryAfter||60;
+          if([401,403,429].includes(error.status))break;
+        }
+      }
+      if(retryAfter||best?.every(x=>Number.isFinite(x.price)))break;
+    }
+    results.push(...(best??probabilityBands.map(b=>({...horizon,...b,expiry:candidates[0],error:failure}))).map(x=>({...x,retryAfter})));
+    if(retryAfter)break;
+  }
   return {levels:results,spot};
 }
