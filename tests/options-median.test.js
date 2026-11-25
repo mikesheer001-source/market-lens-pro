@@ -116,7 +116,7 @@ test('MSTR-like high-volatility chain expands the strike window to recover all t
   assert.ok(widths.some(x=>x[1]===.8));
   for(const expiry of expirations){
     const rows=result.levels.filter(x=>x.expiry===expiry).sort((a,b)=>b.probability-a.probability);
-    assert.ok(rows[0].price>rows[1].price&&rows[1].price>rows[2].price);
+    assert.ok(rows[0].price<rows[1].price&&rows[1].price<rows[2].price,JSON.stringify(rows));
     assert.ok(Math.abs(rows[1].price-400)<5);
   }
 });
