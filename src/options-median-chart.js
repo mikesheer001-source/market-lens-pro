@@ -44,7 +44,7 @@ export function medianDotPrimitive(chart,readPoints){
     target.useMediaCoordinateSpace(({context:ctx,mediaSize:{width,height}})=>{
       const visible=readPoints().flatMap(({point,series})=>{
         const x=chart.timeScale().timeToCoordinate(point.time),y=series.priceToCoordinate(point.price);
-        return x==null||y==null||!Number.isFinite(x)||!Number.isFinite(y)||x<0||x>width||y<0||y>height?[]:[{point,x,y}];
+        return x==null||y==null||!Number.isFinite(x)||!Number.isFinite(y)?[]:[{point,x,y}];
       });
       if(!visible.length)return;
       ctx.save();
