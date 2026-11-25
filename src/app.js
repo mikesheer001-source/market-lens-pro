@@ -1257,12 +1257,25 @@ async function initApp(){
       const valid=levels.filter(item=>Number.isFinite(item.price)&&item.expiry);
       hasLevels=valid.length>0;
       if(forecast){
-        for(const band of probabilityBands)dotLayer.set(id+'-'+band.probability,valid.filter(x=>x.probability===band.probability));
-        const summary=message||valid.length+' of 9 probability pins available · risk-neutral chance of finishing above each price.';
+        for(const band of probabilityBands){
+          dotLayer.set(id+'-'+band.probability,valid.filter(x=>x.probability===band.probability));
+        }
+        const summary=message||valid.length+' of 9 probability levels available · risk-neutral chance of finishing above each price.';
         medianStatus(id,summary);
-        panel.innerHTML='<span class="chart-options-median-status">'+esc(summary)+'</span>'+probabilityHorizons.map(h=>{
+        const rowsHtml=probabilityHorizons.map(h=>{
           const rows=levels.filter(x=>x.label===h.label);
-          return '<span class="chart-options-median-level" title="'+esc(rows.map(x=>x.probability+'%: '+(x.error||'Quotes as of '+clock.format(x.quoteTime))).join(' | '))+'"><strong>'+h.label+'</strong> '+esc(rows[0]?.expiry||'')+' '+probabilityBands.map(b=>{const x=rows.find(r=>r.probability===b.probability);return '<span style="color:'+b.color+'">'+b.probability+'% '+(Number.isFinite(x?.price)?'
+          const expiry=rows.find(x=>x.expiry)?.expiry||'';
+          const cells=probabilityBands.map(band=>{
+            const estimate=rows.find(x=>x.probability===band.probability);
+            const price=Number.isFinite(estimate?.price)?'$'+format(estimate.price)+(estimate.confidence==='lower'?'*':''):'—';
+            const detail=estimate?.error||(estimate?.confidence==='lower'?'Lower-confidence quote estimate':'Risk-neutral probability quantile');
+            return '<span class="chart-options-median-level" style="--level-color:'+band.color+'" title="'+esc(detail)+'"><strong>'+band.probability+'%</strong> '+price+'</span>';
+          }).join('');
+          return '<span class="chart-options-median-level" style="--level-color:var(--muted)" title="'+esc(rows.map(x=>x.error).filter(Boolean).join(' · '))+'"><strong>'+h.label+'</strong> '+esc(expiry)+'</span>'+cells;
+        }).join('');
+        panel.innerHTML='<span class="chart-options-median-status">'+esc(summary)+'</span>'+rowsHtml+shortcut;
+        return;
+      }
       const summary=message||(!hasLevels?'No 50/50 dots: '+levels.map(row=>row.label+': '+(row.error||'No reliable estimate')).join(' · '):
         valid.length+' expiration dot'+(valid.length===1?'':'s')+' available. Use View dots to fit the time and price axes.');
       medianStatus(id,summary);
