@@ -3,6 +3,7 @@ import {optionsAuthorized,optionsRequest} from "./options.js";
 import { workspaceRequest, publicWorkspaceRequest } from "./workspace.js";
 export { Workspace } from "./workspace.js";
 import { marketScan } from "./market-scan.js";
+import { assetDirectory } from "./asset-directory.js";
 import { LIVE_UNIVERSE, ALPACA_BATCH_SIZE, ALPACA_SCAN_LOOKBACK_DAYS, ALPACA_SCAN_CACHE_SECONDS } from "../src/universe.js";
 import { expectedNyseBarDate, freshnessWithUniverse } from "../src/freshness.js";
 import {LIVE_SCAN_CACHE_REVISION} from "../src/live-history.js";
@@ -156,12 +157,13 @@ export default {
       }
     }
 
+    const isUniverse = url.pathname === "/api/stocks/universe";
     const isMarket = url.pathname === "/api/stocks/market";
     const isScan = url.pathname === "/api/stocks/scan";
     const isBars = url.pathname === "/api/stocks/bars";
     const isIntraday = url.pathname === "/api/stocks/intraday";
     const isDiagnostics = url.pathname === "/api/stocks/diagnostics";
-    if (!isMarket && !isScan && !isBars && !isIntraday && !isDiagnostics) {
+    if (!isUniverse && !isMarket && !isScan && !isBars && !isIntraday && !isDiagnostics) {
       return json({ error: "Not found." }, 404, origin, env);
     }
 
@@ -173,6 +175,17 @@ export default {
     if (!env.ALPACA_API_KEY || !env.ALPACA_API_SECRET) {
       return json({ error: "Alpaca credentials are not configured on the Worker." }, 503, origin, env);
     }
+    if (isUniverse) {
+      try {
+        return json(await assetDirectory(url, env), 200, origin, env);
+      } catch (error) {
+        const status = [400, 401, 403, 429].includes(error.status) ? error.status : 502;
+        const extra = status === 429 && error.retryAfter ? { "Retry-After": error.retryAfter } :
+          status === 429 ? { "Retry-After": "60" } : {};
+        return json({ error: error.message || "Alpaca U.S. equity directory unavailable." }, status, origin, env, extra);
+      }
+    }
+
     if (isMarket) {
       try {
         return json(await marketScan(url, env), 200, origin, env);
