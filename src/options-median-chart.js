@@ -117,9 +117,14 @@ export function probabilityLinePrimitive(chart,readPoints){
 export function createMedianDotLayer({chart,base,lineSeries,lastTime,tf,onInitialView,onView}){
   const instances=new Map();
   const all=()=>[...instances.values()].flatMap(({series,points})=>points.map(point=>({series,point})));
+  const dotPrimitive=medianDotPrimitive(chart,all);
   const linePrimitive=probabilityLinePrimitive(chart,all);
-  const primitive=medianDotPrimitive(chart,all);
-  base.attachPrimitive(linePrimitive);
+  const primitive={
+    attached({requestUpdate}){dotPrimitive.attached({requestUpdate});linePrimitive.attached({requestUpdate});},
+    detached(){dotPrimitive.detached();linePrimitive.detached();},
+    paneViews(){return [...dotPrimitive.paneViews(),...linePrimitive.paneViews()];},
+    refresh(){dotPrimitive.refresh();linePrimitive.refresh();}
+  };
   base.attachPrimitive(primitive);
   let first=true,queued=false,disposed=false;
   const timeScale=chart.timeScale();
@@ -135,7 +140,7 @@ export function createMedianDotLayer({chart,base,lineSeries,lastTime,tf,onInitia
     // Explicitly fit the shared price scale whenever the projection is revealed.
     base.priceScale().setAutoScale(true);
     onView?.();
-    linePrimitive.refresh();primitive.refresh();
+    primitive.refresh();
     return true;
   }
   function set(id,levels){
@@ -167,7 +172,7 @@ export function createMedianDotLayer({chart,base,lineSeries,lastTime,tf,onInitia
   return {set,show,dispose(){
     if(disposed)return;
     disposed=true;
-    base.detachPrimitive(linePrimitive);base.detachPrimitive(primitive);
+    base.detachPrimitive(primitive);
     for(const {series} of instances.values())chart.removeSeries(series);
     instances.clear();
   },hasPoints:()=>all().length>0};
