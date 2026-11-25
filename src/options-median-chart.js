@@ -59,7 +59,7 @@ export function medianDotPrimitive(chart,readPoints){
       for(const group of groups.values()){
         group.sort((a,b)=>dateMs(a.point.time)-dateMs(b.point.time));
         ctx.beginPath();ctx.strokeStyle=group[0].point.color;ctx.lineWidth=2;
-        ctx.setLineDash([6,4]);
+        ctx.setLineDash?.([6,4]);
         for(let i=0;i<group.length;i++){
           const p=group[i];
           if(i&&p.point.months-group[i-1].point.months===(p.point.months===12?6:3))ctx.lineTo(p.x,p.y);
@@ -67,7 +67,7 @@ export function medianDotPrimitive(chart,readPoints){
         }
         ctx.stroke();
       }
-      if(groups.size)ctx.setLineDash([]);
+      if(groups.size)ctx.setLineDash?.([]);
       ctx.font='600 11px system-ui, sans-serif';ctx.textBaseline='top';
       const labels=[];
       for(const {point,x,y} of visible){
