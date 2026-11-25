@@ -42,34 +42,12 @@ export function medianDotPrimitive(chart,readPoints){
   let requestUpdate=()=>{};
   const renderer={draw(target){
     target.useMediaCoordinateSpace(({context:ctx,mediaSize:{width,height}})=>{
-      // Keep the original median visibility and coordinate filtering unchanged.
       const visible=readPoints().flatMap(({point,series})=>{
         const x=chart.timeScale().timeToCoordinate(point.time),y=series.priceToCoordinate(point.price);
         return x==null||y==null||!Number.isFinite(x)||!Number.isFinite(y)||x<0||x>width||y<0||y>height?[]:[{point,x,y}];
       });
       if(!visible.length)return;
       ctx.save();
-      // Probability forecasts add dashed quantile paths; the existing 50/50
-      // dots keep their original rendering path and never gain connecting lines.
-      const groups=new Map();
-      for(const p of visible){
-        if(p.point.probability==null)continue;
-        const key=p.point.projectionGroup+':'+p.point.probability;
-        if(!groups.has(key))groups.set(key,[]);
-        groups.get(key).push(p);
-      }
-      for(const group of groups.values()){
-        group.sort((a,b)=>dateMs(a.point.time)-dateMs(b.point.time));
-        ctx.beginPath();ctx.strokeStyle=group[0].point.color;ctx.lineWidth=2;
-        ctx.setLineDash?.([6,4]);
-        for(let i=0;i<group.length;i++){
-          const p=group[i];
-          if(i&&p.point.months-group[i-1].point.months===(p.point.months===12?6:3))ctx.lineTo(p.x,p.y);
-          else ctx.moveTo(p.x,p.y);
-        }
-        ctx.stroke();
-      }
-      if(groups.size)ctx.setLineDash?.([]);
       ctx.font='600 11px system-ui, sans-serif';ctx.textBaseline='top';
       const labels=[];
       for(const {point,x,y} of visible){
@@ -97,6 +75,45 @@ export function medianDotPrimitive(chart,readPoints){
     paneViews:()=>views,refresh:()=>requestUpdate()};
 }
 
+// Separate primitive for probability paths so the established 50/50 dot renderer
+// remains unchanged. Paths connect only the same survival quantile across horizons.
+export function probabilityLinePrimitive(chart,readPoints){
+  let requestUpdate=()=>{};
+  const renderer={draw(target){
+    target.useMediaCoordinateSpace(({context:ctx})=>{
+      const projected=readPoints().flatMap(({point,series})=>{
+        if(point.probability==null)return [];
+        const x=chart.timeScale().timeToCoordinate(point.time),y=series.priceToCoordinate(point.price);
+        return x==null||y==null||!Number.isFinite(x)||!Number.isFinite(y)?[]:[{point,x,y}];
+      });
+      const groups=new Map();
+      for(const p of projected){
+        const key=p.point.projectionGroup+':'+p.point.probability;
+        if(!groups.has(key))groups.set(key,[]);
+        groups.get(key).push(p);
+      }
+      if(!groups.size)return;
+      ctx.save();
+      for(const group of groups.values()){
+        group.sort((a,b)=>dateMs(a.point.time)-dateMs(b.point.time));
+        ctx.beginPath();ctx.strokeStyle=group[0].point.color;ctx.lineWidth=2;
+        ctx.setLineDash?.([6,4]);
+        for(let i=0;i<group.length;i++){
+          const p=group[i];
+          if(i&&p.point.months-group[i-1].point.months===(p.point.months===12?6:3))ctx.lineTo(p.x,p.y);
+          else ctx.moveTo(p.x,p.y);
+        }
+        ctx.stroke();
+      }
+      ctx.setLineDash?.([]);
+      ctx.restore();
+    });
+  }};
+  const views=[{zOrder:()=> 'normal',renderer:()=>renderer}];
+  return {attached({requestUpdate:update}){requestUpdate=update;},detached(){requestUpdate=()=>{};},
+    paneViews:()=>views,refresh:()=>requestUpdate()};
+}
+
 export function createMedianDotLayer({chart,base,lineSeries,lastTime,tf,onInitialView,onView}){
   const instances=new Map();
   const all=()=>[...instances.values()].flatMap(({series,points})=>points.map(point=>({series,point})));
@@ -116,7 +133,7 @@ export function createMedianDotLayer({chart,base,lineSeries,lastTime,tf,onInitia
     // Explicitly fit the shared price scale whenever the projection is revealed.
     base.priceScale().setAutoScale(true);
     onView?.();
-    primitive.refresh();
+    linePrimitive.refresh();primitive.refresh();
     return true;
   }
   function set(id,levels){
@@ -148,7 +165,7 @@ export function createMedianDotLayer({chart,base,lineSeries,lastTime,tf,onInitia
   return {set,show,dispose(){
     if(disposed)return;
     disposed=true;
-    base.detachPrimitive(primitive);
+    base.detachPrimitive(linePrimitive);base.detachPrimitive(primitive);
     for(const {series} of instances.values())chart.removeSeries(series);
     instances.clear();
   },hasPoints:()=>all().length>0};
