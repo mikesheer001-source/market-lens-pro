@@ -42,15 +42,17 @@ export function medianDotPrimitive(chart,readPoints){
   let requestUpdate=()=>{};
   const renderer={draw(target){
     target.useMediaCoordinateSpace(({context:ctx,mediaSize:{width,height}})=>{
-      const projected=readPoints().flatMap(({point,series})=>{
+      // Keep the original median visibility and coordinate filtering unchanged.
+      const visible=readPoints().flatMap(({point,series})=>{
         const x=chart.timeScale().timeToCoordinate(point.time),y=series.priceToCoordinate(point.price);
-        return x==null||y==null||!Number.isFinite(x)||!Number.isFinite(y)?[]:[{point,x,y}];
+        return x==null||y==null||!Number.isFinite(x)||!Number.isFinite(y)||x<0||x>width||y<0||y>height?[]:[{point,x,y}];
       });
-      if(!projected.length)return;
-      const visible=projected.filter(({x,y})=>x>=0&&x<=width&&y>=0&&y<=height);
+      if(!visible.length)return;
       ctx.save();
+      // Probability forecasts add dashed quantile paths; the existing 50/50
+      // dots keep their original rendering path and never gain connecting lines.
       const groups=new Map();
-      for(const p of projected){
+      for(const p of visible){
         if(p.point.probability==null)continue;
         const key=p.point.projectionGroup+':'+p.point.probability;
         if(!groups.has(key))groups.set(key,[]);
