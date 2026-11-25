@@ -1,3 +1,4 @@
+import {createHistoryCache,frameLatest} from './history-cache.js';
 import {createMedianDotLayer} from './options-median-chart.js';
 import {readChartWorkspace,writeChartWorkspace,chartAlertLevels,chartOptionLevels,matchingTradeMarkers} from './chart-workspace.js';
 import {readWorkspaceLayout,writeWorkspaceLayout,moveWorkspace} from './workspace-layout.js';
@@ -33,14 +34,19 @@ import {INDICATOR_ORDER,activeIndicatorReadings,indicatorInputs,indicatorLabel,u
   movingAverages,addMovingAverage,editMovingAverage,
   nextFullscreenState,chartScaleOptions,resetPriceScale,mountPriceAxisTouch,macdSeries,bollingerSeries} from './chart-usability.js';
 async function initApp(){
-  const {
-    parseCsv,normalizeBars,alpacaBars,aggregate,ema,sma,rsi,indicators,statsFor,screenSymbol,screenStats,backtest,parameterSweep,csvDownload,stamp
-  }=await import('./engine.js');
+  const engine=await import('./engine.js');
+  const {parseCsv,normalizeBars,alpacaBars,ema,sma,rsi,indicators,screenStats,backtest,parameterSweep,csvDownload,stamp}=engine;
+  const {aggregate,statsFor,screenSymbol}=createHistoryCache(engine);
   const {
     createChart,CandlestickSeries,BarSeries,LineSeries,AreaSeries,HistogramSeries,PriceScaleMode,TrackingModeExitMode,createSeriesMarkers
   }=await import('lightweight-charts');
   const $=(q)=>document.querySelector(q),esc=(s)=>String(s??'').replaceAll('&','&amp;').replaceAll('<','&lt;').replaceAll('>','&gt;').replaceAll('"','&quot;');
-  const format=(n,d=2)=>n==null||!Number.isFinite(n)?'—':Number(n).toLocaleString('en-US',{maximumFractionDigits:d,minimumFractionDigits:d});
+  const numberFormatters=new Map();
+  const format=(n,d=2)=>{
+    if(n==null||!Number.isFinite(n))return '—';
+    if(!numberFormatters.has(d))numberFormatters.set(d,new Intl.NumberFormat('en-US',{maximumFractionDigits:d,minimumFractionDigits:d}));
+    return numberFormatters.get(d).format(n);
+  };
   const pct=n=>n==null||!Number.isFinite(n)?'—':(n>0?'+':'')+format(n)+'%';
   const priceColor=n=>n==null?'muted':n>=0?'positive':'negative';
   const dateLabel=t=>typeof t==='number'?new Date(t*1000).toISOString().slice(0,16).replace('T',' '):String(t);
@@ -422,12 +428,14 @@ async function initApp(){
   async function removeImports(){try{const db=await openDb(),tx=db.transaction('symbols','readwrite');tx.objectStore('symbols').clear();await new Promise((res,rej)=>{tx.oncomplete=res;tx.onerror=()=>rej(tx.error);});db.close();workspace.changed('imports');}catch{}for(const [symbol,source] of S.sources)if(source==='IMPORTED'){S.sources.delete(symbol);S.data.delete(symbol);}if(!S.data.has(S.symbol))restoreSymbolState(S.data.has(S.lastLiveSymbol)?S.lastLiveSymbol:[...S.data.keys()][0]||S.lastLiveSymbol);S.result=null;S.sweep=null;render();}
   const intradayTf=isIntraday;
   const intradayKey=(symbol,tf=S.chart.tf)=>symbol+'|'+String(S.liveFeed||'iex')+(sourceResolution(tf)==='15Min'?'':'|'+sourceResolution(tf));
+  const emptyHistory=[],importedIntraday=new WeakMap();
   const barsFor=(symbol,tf)=>{
-    const daily=S.data.get(symbol)||[];
+    const daily=S.data.get(symbol)||emptyHistory;
     if(!intradayTf(tf))return aggregate(daily,tf);
     const source=S.sources.get(symbol);
-    const raw=source==='ALPACA'?S.intraday.get(intradayKey(symbol,tf))?.bars||[]:
-      daily.filter(b=>typeof b.time==='number');
+    if(source!=='ALPACA'&&!importedIntraday.has(daily))
+      importedIntraday.set(daily,daily.filter(b=>typeof b.time==='number'));
+    const raw=source==='ALPACA'?S.intraday.get(intradayKey(symbol,tf))?.bars||emptyHistory:importedIntraday.get(daily);
     // Reject known coarser imported bars instead of relabeling them as finer candles.
     if(source!=='ALPACA'&&['1m','5m'].includes(tf)){
       const gap=raw.slice(1).reduce((min,b,i)=>Math.min(min,b.time-raw[i].time),Infinity);
@@ -448,10 +456,14 @@ async function initApp(){
     const key=JSON.stringify([base,S.liveFeed,S.symbol,resolution]);
     return {base,key,raw,intraday,resolution,symbol:S.symbol,feed:S.liveFeed};
   }
+  let combinedChartHistory;
   function chartBars(){
     const series=liveChartHistory();
     const older=series&&olderHistory.get(series.key)?.bars;
-    return older?.length?aggregate(normalizeBars([...older,...series.raw]),S.chart.tf):bars();
+    if(!older?.length)return bars();
+    if(combinedChartHistory?.older!==older||combinedChartHistory?.raw!==series.raw)
+      combinedChartHistory={older,raw:series.raw,bars:normalizeBars([...older,...series.raw])};
+    return aggregate(combinedChartHistory.bars,S.chart.tf);
   }
   function olderHistoryControl(){
     const series=liveChartHistory();
@@ -2119,7 +2131,8 @@ async function initApp(){
         const fragment=document.createElement('template');
         fragment.innerHTML=workspaceStart(key,workspaceTitles[key])+'<div class="workspace-content"></div></details>';
         const section=fragment.content.firstElementChild;container.append(section);
-        if(section.open||mountedWorkspaceKeys.has(key))mountWorkspaceContent(section);
+        if(section.open||key==='options'&&retainedOptionsHost)mountWorkspaceContent(section);
+        else mountedWorkspaceKeys.delete(key);
       }
     }
   }
@@ -2143,6 +2156,7 @@ async function initApp(){
   let workspaceDrag=null;
   function clearWorkspaceDrag(){
     if(!workspaceDrag)return;
+    updateWorkspaceDrag.cancel();
     workspaceDrag.handle.closest('details')?.classList.remove('workspace-dragging');
     $('#chart-workspaces')?.querySelectorAll('[data-workspace-drop]').forEach(el=>delete el.dataset.workspaceDrop);
     workspaceDrag=null;
@@ -2154,26 +2168,35 @@ async function initApp(){
     workspaceDrag={handle,key:handle.dataset.workspaceDrag,pointer:ev.pointerId,startY:ev.clientY,target:null,after:false,started:false};
     handle.setPointerCapture(ev.pointerId);
   });
+  const updateWorkspaceDrag=frameLatest(clientY=>{
+    const drag=workspaceDrag;if(!drag)return;
+    const container=$('#chart-workspaces');if(!container)return;
+    // Read geometry before mutating classes / drop markers.
+    const sections=[...container.children].filter(el=>el.dataset.workspaceSection!==drag.key);
+    const bounds=sections.map(el=>({el,rect:el.getBoundingClientRect()}));
+    const target=bounds.find(({rect})=>clientY<=rect.bottom)||bounds.at(-1);
+    if(!target)return;
+    const after=clientY>target.rect.top+target.rect.height/2;
+    if(drag.target!==target.el.dataset.workspaceSection||drag.after!==after){
+      container.querySelectorAll('[data-workspace-drop]').forEach(el=>delete el.dataset.workspaceDrop);
+      drag.target=target.el.dataset.workspaceSection;drag.after=after;
+      target.el.dataset.workspaceDrop=after?'after':'before';
+    }
+    drag.handle.closest('details').classList.add('workspace-dragging');
+    if(clientY<65)window.scrollBy(0,-25);else if(clientY>innerHeight-65)window.scrollBy(0,25);
+  });
   document.addEventListener('pointermove',ev=>{
     const drag=workspaceDrag;if(!drag||drag.pointer!==ev.pointerId)return;
     if(!drag.started&&Math.abs(ev.clientY-drag.startY)<5)return;
-    drag.started=true;drag.handle.closest('details').classList.add('workspace-dragging');
-    const container=$('#chart-workspaces');if(!container)return;
-    const sections=[...container.children].filter(el=>el.dataset.workspaceSection!==drag.key);
-    let target=sections.find(el=>ev.clientY<=el.getBoundingClientRect().bottom)||sections.at(-1);
-    if(!target)return;
-    container.querySelectorAll('[data-workspace-drop]').forEach(el=>delete el.dataset.workspaceDrop);
-    const rect=target.getBoundingClientRect();
-    drag.target=target.dataset.workspaceSection;drag.after=ev.clientY>rect.top+rect.height/2;
-    target.dataset.workspaceDrop=drag.after?'after':'before';
-    if(ev.clientY<65)window.scrollBy(0,-25);else if(ev.clientY>innerHeight-65)window.scrollBy(0,25);
+    drag.started=true;updateWorkspaceDrag(ev.clientY);
   });
   document.addEventListener('pointerup',ev=>{
     const drag=workspaceDrag;if(!drag||drag.pointer!==ev.pointerId)return;
+    updateWorkspaceDrag.flush();
     clearWorkspaceDrag();
     if(drag.started&&drag.target)reorderWorkspace(drag.key,drag.target,drag.after);
   });
-  document.addEventListener('pointercancel',clearWorkspaceDrag);
+  document.addEventListener('pointercancel',()=>{updateWorkspaceDrag.cancel();clearWorkspaceDrag();});
   document.addEventListener('keydown',ev=>{
     const handle=ev.target.closest('[data-workspace-drag]');
     if(!handle||!['ArrowUp','ArrowDown','Home','End'].includes(ev.key))return;
@@ -2184,7 +2207,7 @@ async function initApp(){
   });
   function render(){
     clearWorkspaceDrag();
-    if(liveScanPending&&quickScreenerVisible())applyPendingLiveScan();
+    if(liveScanPending&&(quickScreenerVisible()||S.tab==='charts'||S.tab==='data'))applyPendingLiveScan();
     const keepOptions=S.tab==='options'||S.tab==='charts'&&(S.workspaceSections.options||mountedWorkspaceKeys.has('options'));
     if(retainedOptionsHost){
       if(keepOptions)retainedOptionsHost.remove();
@@ -2230,13 +2253,15 @@ async function initApp(){
       handle.classList.add('is-resizing');
       event.preventDefault();
     });
+    const resizeFrame=frameLatest(value=>{if(area.isConnected)setHeight(value);});
     handle.addEventListener('pointermove',event=>{
       if(drag?.pointer!==event.pointerId)return;
-      setHeight(drag.height+event.clientY-drag.y);
+      resizeFrame(drag.height+event.clientY-drag.y);
     });
     const finish=event=>{
       if(drag?.pointer!==event.pointerId)return;
       const previous=drag.previous;
+      if(event.type==='pointercancel')resizeFrame.cancel();else resizeFrame.flush();
       drag=null;
       handle.classList.remove('is-resizing');
       if(event.type==='pointercancel'){
@@ -2396,16 +2421,18 @@ async function initApp(){
     const barIndices=new Map(b.map((bar,index)=>[stamp(bar.time),index]));
     const readout=$('#readout');
     let displayedIndex=b.length-1;
-    chart.subscribeCrosshairMove(param=>{
-      const index=(param.time==null?undefined:barIndices.get(stamp(param.time)))??b.length-1;
-      if(index===displayedIndex)return;
+    const indicatorTypes=new Map(instances.map(item=>[item.id,item.type]));
+    const updateReadout=frameLatest(index=>{
+      if(!el.isConnected||index===displayedIndex)return;
       displayedIndex=index;
       readout.innerHTML=chartReadout(b[index]);
       for(const [key,series] of indicatorData){
         const [value,...details]=series.map(values=>values[index]);
-        valuesByIndicator.get(key).textContent=indicatorValue(instances.find(item=>item.id===key)?.type??key,value,details);
+        const node=valuesByIndicator.get(key),next=indicatorValue(indicatorTypes.get(key)??key,value,details);
+        if(node&&node.textContent!==next)node.textContent=next;
       }
     });
+    chart.subscribeCrosshairMove(param=>updateReadout((param.time==null?undefined:barIndices.get(stamp(param.time)))??b.length-1));
     const viewKey=S.symbol+'|'+S.chart.tf;
     const savedView=S.chartViews[viewKey];
     const timeScale=chart.timeScale();
@@ -2482,9 +2509,10 @@ async function initApp(){
         gestureUntil=0;
         void loadOlderChart();
       };
+      const checkLeftEdge=frameLatest(()=>{if(el.isConnected)atLeftEdge(timeScale.getVisibleLogicalRange());});
       const arm=()=>{
         gestureUntil=performance.now()+400;
-        requestAnimationFrame(()=>{if(el.isConnected)atLeftEdge(timeScale.getVisibleLogicalRange());});
+        checkLeftEdge();
       };
       timeScale.subscribeVisibleLogicalRangeChange(atLeftEdge);
       el.addEventListener('wheel',arm,{passive:true});
@@ -2635,9 +2663,15 @@ async function initApp(){
     if(!history.ok)throw new Error('Stale or truncated live daily history rejected. '+
       history.reason+' Check the configured Worker URL or reload the site.');
     const raw=payload.bars&&typeof payload.bars==='object'?payload.bars:{},parsed=[];
+    let sliceStart=performance.now();
     for(const [symbol,items] of Object.entries(raw)){
       const liveBars=alpacaBars(items,'1Day');
       if(liveBars.length)parsed.push([symbol,liveBars]);
+      // Large scans should yield between symbols rather than monopolize input
+      // and chart painting for the entire normalization pass.
+      if(performance.now()-sliceStart>=12){
+        await new Promise(resolve=>setTimeout(resolve,0));sliceStart=performance.now();
+      }
     }
     if(!parsed.length)throw new Error('Alpaca returned no daily bars for the bundled universe. Check the feed and subscription.');
     const remembered=options.restoreSymbol;
@@ -2719,7 +2753,7 @@ async function initApp(){
       liveScanPending=pending;
       if(quickScreenerVisible()){
         applyPendingLiveScan();refreshMarketMode();refreshScreenerResults();
-      }else if((options.restoreTab&&initialMain===$('#main'))||!hasLiveData()||workspaceActive('data')||workspaceActive('screener')||options.chartRefresh&&S.tab==='charts'){
+      }else if((options.restoreTab&&initialMain===$('#main'))||!hasLiveData()||S.tab==='data'||options.chartRefresh&&S.tab==='charts'){
         // Refresh integrated workspaces and chart from the same live-data snapshot.
         if(S.tab==='charts'&&chart)preserveChartViewport();
         applyPendingLiveScan();render();
@@ -3118,8 +3152,8 @@ async function initApp(){
     },
     'pine-clear-plots':()=>{S.activeIndicators=[];S.scriptOutput='Removed all custom indicator plots from Chart Lab.';render();},
     import:()=>$('#csv-file')?.click(),
-    'mode-live':()=>{market.shown=false;market.controller?.abort();clearSavedScanView();return switchToLive({restoreSymbol:S.lastLiveSymbol});},
-    'scan-universe':()=>{if(liveScanActive)return;clearSavedScanView();return switchToLive();},
+    'mode-live':()=>{market.shown=false;market.controller?.abort();clearSavedScanView();return switchToLive({restoreSymbol:S.lastLiveSymbol,chartRefresh:S.tab==='charts'});},
+    'scan-universe':()=>{if(liveScanActive)return;clearSavedScanView();return switchToLive({chartRefresh:S.tab==='charts'});},
     'test-live':()=>testLiveBackend().catch(err=>notice('Backend test failed: '+err.message)),
     'view-charts':()=>{S.tab='charts';render();},
     'refresh-intraday':()=>{if(S.mode==='live')void loadLiveIntraday(S.symbol,true).catch(()=>{});
@@ -3398,7 +3432,7 @@ async function initApp(){
       }
       return;
     }
-    if(el.dataset.input==='search'){market.page=0;S.query=el.value;const focus=el.selectionStart;render();const input=$('[data-input="search"]');if(input){input.focus();input.setSelectionRange(focus,focus);}}
+    if(el.dataset.input==='search'){market.page=0;S.query=el.value;refreshScreenerResults();saveSettings();}
   });
   document.addEventListener('input',ev=>{
     const el=ev.target;

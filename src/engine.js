@@ -30,8 +30,8 @@ function parseCsv(text, fallback='IMPORT') {
 function stamp(t){return typeof t==='number'?t:Math.floor(Date.parse(t+'T00:00:00Z')/1000);}
 
 function normalizeBars(bars){
-  const map=new Map();for(const b of bars){if(!b||!Number.isFinite(b.close)||b.close<=0||!Number.isFinite(stamp(b.time)))continue;map.set(stamp(b.time),b);}
-  return [...map.values()].sort((a,b)=>stamp(a.time)-stamp(b.time));
+  const map=new Map();for(const b of bars){if(!b||!Number.isFinite(b.close)||b.close<=0)continue;const time=stamp(b.time);if(Number.isFinite(time))map.set(time,b);}
+  return [...map.entries()].sort(([a],[b])=>a-b).map(([,bar])=>bar);
 }
 
 function alpacaBars(items,timeframe='1Day') {
@@ -44,10 +44,10 @@ function alpacaBars(items,timeframe='1Day') {
   return normalizeBars(bars);
 }
 
+const nyFormatter=new Intl.DateTimeFormat('en-CA',{timeZone:'America/New_York',year:'numeric',month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit',hourCycle:'h23'});
 function nyParts(t) {
   const d=new Date(stamp(t)*1000);
-  const f=new Intl.DateTimeFormat('en-CA',{timeZone:'America/New_York',year:'numeric',month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit',hourCycle:'h23'});
-  const p=Object.fromEntries(f.formatToParts(d).map(x=>[x.type,x.value]));
+  const p=Object.fromEntries(nyFormatter.formatToParts(d).map(x=>[x.type,x.value]));
   return {day:p.year+'-'+p.month+'-'+p.day,minute:Number(p.hour)*60+Number(p.minute)};
 }
 
@@ -56,11 +56,13 @@ function aggregate(bars,tf) {
   const periods=new Map();
   for(const b of bars){
     const intraday=typeof b.time==='number'&&!Number.isInteger(b.time/86400);
-    const day=intraday?nyParts(b.time).day:String(b.time).slice(0,10);
+    const session=isIntraday(tf);
+    if(session&&typeof b.time!=='number')continue;
+    const n=intraday||session?nyParts(b.time):null;
+    const day=intraday?n.day:String(b.time).slice(0,10);
     let k=day, t=day;
-    if(isIntraday(tf)){
-      if(typeof b.time!=='number')continue;
-      const n=nyParts(b.time);if(n.minute<570||n.minute>=960)continue;
+    if(session){
+      if(n.minute<570||n.minute>=960)continue;
       const size=INTRADAY_MINUTES[tf];
       const bucket=Math.floor((n.minute-570)/size);
       k=n.day+'-'+bucket;t=b.time;
