@@ -117,7 +117,9 @@ export function probabilityLinePrimitive(chart,readPoints){
 export function createMedianDotLayer({chart,base,lineSeries,lastTime,tf,onInitialView,onView}){
   const instances=new Map();
   const all=()=>[...instances.values()].flatMap(({series,points})=>points.map(point=>({series,point})));
+  const linePrimitive=probabilityLinePrimitive(chart,all);
   const primitive=medianDotPrimitive(chart,all);
+  base.attachPrimitive(linePrimitive);
   base.attachPrimitive(primitive);
   let first=true,queued=false,disposed=false;
   const timeScale=chart.timeScale();
@@ -153,7 +155,7 @@ export function createMedianDotLayer({chart,base,lineSeries,lastTime,tf,onInitia
       item.series.setData(dates.map(({time})=>values.has(time)?{time,value:values.get(time)}:{time}));
     }
     if(priorRange)timeScale.setVisibleLogicalRange(priorRange);
-    primitive.refresh();
+    linePrimitive.refresh();primitive.refresh();
     if(first&&!queued&&all().length){
       queued=true;
       queueMicrotask(()=>{
