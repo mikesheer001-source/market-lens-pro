@@ -16,12 +16,12 @@ export function nearestMedianExpiry(expirations,months,now=Date.now()) {
   return nearbyExpirations(expirations,months,now)[0];
 }
 
-function eligibleQuotes(contracts, now, maxSpread) {
+function eligibleQuotes(contracts, now, maxSpread, allowZeroBid=false) {
   const quotes = contracts.filter(({strike,type,quote}) => {
     const age = now-Date.parse(quote?.time);
     return Number.isFinite(strike) && strike>0 && ['call','put'].includes(type) &&
       Number.isFinite(age) && age >= -60_000 && age <= 7*dayMs && Number.isFinite(quote.bid) &&
-      Number.isFinite(quote.ask) && quote.bid>0 && quote.ask>=quote.bid && quote.ask-quote.bid <= maxSpread*(quote.ask+quote.bid)/2;
+      Number.isFinite(quote.ask) && (allowZeroBid?quote.bid>=0:quote.bid>0) && quote.ask>0 && quote.ask>=quote.bid && quote.ask-quote.bid <= maxSpread*(quote.ask+quote.bid)/2;
   });
   const latest = Math.max(...quotes.map(({quote})=>Date.parse(quote.time)));
   return quotes.filter(({quote}) => latest-Date.parse(quote.time)<=dayMs);
@@ -48,15 +48,15 @@ function monotone(samples) {
 // First retain the original strict filters; then widen verticals and allow
 // less liquid quotes only if their bid/ask sensitivity still bounds a crossing.
 const strict={confidence:'standard',maxSpread:.30,maxUncertainty:.20,widths:[.018,.035,.05,.065,.08],maxGap:.12};
-const relaxed={confidence:'lower',maxSpread:.65,maxUncertainty:.30,widths:[.035,.05,.065,.08,.10,.12,.16,.20],maxGap:.20};
+const relaxed={confidence:'lower',maxSpread:2,maxUncertainty:.40,widths:[.035,.05,.065,.08,.10,.12,.16,.20,.25,.30,.35],maxGap:.35};
 
 function evaluateMedian(contracts, {spot,expiry,rate=.04,now=Date.now(),target=.5}, policy) {
   const years=(Date.parse(expiry+'T20:00:00Z')-now)/(365*dayMs);
   if (!(spot>0 && years>0 && Number.isFinite(rate))) return {error:'Invalid underlying price, expiry or rate'};
   if (!contracts.length) return {error:'No contracts returned for this strike range'};
-  const valid=eligibleQuotes(contracts,now,Infinity);
+  const valid=eligibleQuotes(contracts,now,Infinity,true);
   if (!valid.length) return {error:'No fresh, valid two-sided quotes with a positive bid (maximum age 7 days)'};
-  const eligible=eligibleQuotes(contracts,now,policy.maxSpread);
+  const eligible=eligibleQuotes(contracts,now,policy.maxSpread,policy.confidence==='lower');
   if (!eligible.length) return {error:'No quotes pass the spread and timestamp filters'};
   const byRoot=new Map();
   for (const row of eligible) {
@@ -127,16 +127,21 @@ function estimateAtWidth(strikes,byStrike,discount,spot,width,policy,target=.5) 
   const price=ties.length ? (ties[0].strike+ties.at(-1).strike)/2 :
     below.strike+(target-below.probability)*(above.strike-below.strike)/(above.probability-below.probability);
   const quoteTime=Math.min(below.time,above.time,...ties.map(point=>point.time));
-  let sensitivity;
+  let sensitivity,sensitivityBounded=policy.confidence!=='lower';
   if (policy.confidence==='lower') {
-    // Use actual (unpooled) quote slopes, not merely the smoothed midpoint,
-    // to check that the available bid/ask ranges support a bounded crossing.
+    // Prefer a range whose individual bid/ask intervals clear the target.
     const lo=samples.findLast(p=>p.strike<price && p.probability+p.uncertainty<target);
     const hi=samples.find(p=>p.strike>price && p.probability-p.uncertainty>target);
-    if (!lo || !hi || hi.strike-lo.strike>spot*.35) return {sampleCount:samples.length};
-    sensitivity=[lo.strike,hi.strike];
+    if (lo && hi && hi.strike-lo.strike<=spot*.35) {
+      sensitivity=[lo.strike,hi.strike];
+      sensitivityBounded=true;
+    } else {
+      // Do not hide a midpoint estimate solely because noisy quote intervals
+      // overlap the target; show the adjacent midpoint bracket and mark it.
+      sensitivity=[below.strike,above.strike];
+    }
   }
-  return {price,quoteTime,spreadCount:samples.length,sampleCount:samples.length,width,sensitivity};
+  return {price,quoteTime,spreadCount:samples.length,sampleCount:samples.length,width,sensitivity,sensitivityBounded};
 }
 
 export async function loadOptionsMedians({request,symbol,rate,signal,now=Date.now()}) {
@@ -151,7 +156,7 @@ export async function loadOptionsMedians({request,symbol,rate,signal,now=Date.no
     for (const expiry of candidates) {
       let narrow=null;
       const params={spot,expiry,rate,now};
-      for (const range of [.30,.80]) {
+      for (const range of [.30,.80,.95]) {
         try {
           const data=await request('chain',{symbol,expiry,center:spot,width:range},signal);
           const contracts=data.contracts??[];
@@ -207,10 +212,10 @@ export async function loadOptionsProbability({request,symbol,rate,signal,now=Dat
   for(const horizon of probabilityHorizons){
     const candidates=nearbyExpirations(listing.expirations??[],horizon.months,now).slice(0,3);
     let best=null, failure='No listed expiration within 45 days of this horizon', retryAfter;
-    const score=rows=>rows.reduce((n,x)=>n+(Number.isFinite(x.price)?(x.confidence==='standard'?2:1):0),0);
+    const score=rows=>rows.filter(x=>Number.isFinite(x.price)).length*10+rows.filter(x=>Number.isFinite(x.price)&&x.confidence==='standard').length;
     const complete=rows=>rows.every(x=>Number.isFinite(x.price)&&x.confidence==='standard');
     for(const expiry of candidates){
-      for(const width of [.30,.80]){
+      for(const width of [.30,.80,.95]){
         try{
           const data=await request('chain',{symbol,expiry,center:spot,width},signal);
           const rows=estimateOptionsProbabilityLevels(data.contracts??[],{spot,expiry,rate,now})

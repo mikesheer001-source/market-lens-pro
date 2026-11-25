@@ -80,6 +80,15 @@ test('returns a labeled lower-confidence estimate for a defensible wider chain',
   assert.ok(result.sensitivity[0]<result.price && result.sensitivity[1]>result.price);
 });
 
+function mstrWideChain({expiry='2026-07-17',spread=2,now:quoteNow=now}={}){
+  const years=(Date.parse(expiry+'T20:00:00Z')-quoteNow)/(365*86_400_000);
+  const discount=Math.exp(-.04*years);
+  return Array.from({length:25},(_,i)=>100+i*25).map(strike=>{
+    const mid=discount*Math.max(0,700-strike)**2/1200;
+    return {root:'MSTR',strike,type:'call',quote:{bid:Math.max(0,mid-spread/2),ask:mid+spread/2,time:new Date(quoteNow).toISOString()}};
+  });
+}
+
 test('25/50/75 survival levels use actual strikes and are ordered',()=>{
   const rows=estimateOptionsProbabilityLevels(uniformChain(),{spot:100,expiry,now});
   for(const [i,expected] of [113,103,93].entries()){
@@ -91,4 +100,29 @@ test('forecast uses listed expirations and preserves unavailable horizons',async
   assert.equal(r.levels.length,9);
   assert.equal(r.levels.filter(x=>Number.isFinite(x.price)).length,3);
   assert.ok(r.levels.filter(x=>Number.isFinite(x.price)).every(x=>x.expiry===expiry));
+});
+
+test('MSTR-like high-volatility chain expands the strike window to recover all three quantiles',async()=>{
+  const expirations=['2026-04-17','2026-07-17','2027-01-15'];
+  const widths=[];
+  const result=await loadOptionsProbability({symbol:'MSTR',rate:.04,now,request:async(path,params)=>{
+    if(path==='expirations')return {underlying:{value:400},expirations};
+    widths.push([params.expiry,params.width]);
+    const all=mstrWideChain({expiry:params.expiry,now});
+    return {contracts:all.filter(x=>x.strike>=400*(1-params.width)&&x.strike<=400*(1+params.width))};
+  }});
+  assert.equal(result.levels.length,9);
+  assert.equal(result.levels.filter(x=>Number.isFinite(x.price)).length,9);
+  assert.ok(widths.some(x=>x[1]===.8));
+  for(const expiry of expirations){
+    const rows=result.levels.filter(x=>x.expiry===expiry).sort((a,b)=>b.probability-a.probability);
+    assert.ok(rows[0].price>rows[1].price&&rows[1].price>rows[2].price);
+    assert.ok(Math.abs(rows[1].price-400)<5);
+  }
+});
+test('lower-confidence MSTR-style quotes retain usable zero-bid wings and disclose uncertainty',()=>{
+  const chain=mstrWideChain({spread:15});
+  assert.ok(chain.some(x=>x.quote.bid===0&&x.quote.ask>0));
+  const rows=estimateOptionsProbabilityLevels(chain,{spot:400,expiry,now});
+  assert.ok(rows.some(x=>x.confidence==='lower'&&Number.isFinite(x.price)));
 });
