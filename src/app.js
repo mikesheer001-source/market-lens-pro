@@ -1276,6 +1276,7 @@ async function initApp(){
         panel.innerHTML='<span class="chart-options-median-status">'+esc(summary)+'</span>'+rowsHtml+shortcut;
         return;
       }
+      dotLayer.set(id,valid);
       const summary=message||(!hasLevels?'No 50/50 dots: '+levels.map(row=>row.label+': '+(row.error||'No reliable estimate')).join(' · '):
         valid.length+' expiration dot'+(valid.length===1?'':'s')+' available. Use View dots to fit the time and price axes.');
       medianStatus(id,summary);
