@@ -67,7 +67,7 @@ export function medianDotPrimitive(chart,readPoints){
         }
         ctx.stroke();
       }
-      ctx.setLineDash([]);
+      if(groups.size)ctx.setLineDash([]);
       ctx.font='600 11px system-ui, sans-serif';ctx.textBaseline='top';
       const labels=[];
       for(const {point,x,y} of visible){
