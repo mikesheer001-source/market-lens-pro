@@ -1114,7 +1114,7 @@ async function initApp(){
         '<label class="control">Condition '+select([['>','Above'],['<','Below']],S.alertDraft.op,'data-alert-field="op"')+'</label>'+
         '<label class="control">Level <input type="number" class="textinput" data-alert-field="threshold" value="'+esc(S.alertDraft.threshold)+'" step="any"/></label>'+
         button('Add alert','alert-create','small primary')+
-        '</div><div class="data-list">'+alertRows+'</div><h3>Server scan notifications</h3><div class="data-list">'+serverAlertRows+'</div>'+end;
+        '</div><div class="data-list">'+alertRows+'<h3>Server scan notifications</h3>'+serverAlertRows+'</div>'+end;
   }
   function preserveChartViewport(){
     try{S.pendingChartRange=chart?.timeScale().getVisibleLogicalRange()||null;}
