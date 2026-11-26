@@ -265,7 +265,9 @@ async function initApp(){
       const response=await fetch(serverScanEndpoint('/notifications/ack'),{method:'POST',
         headers:{'Content-Type':'application/json'},body:JSON.stringify({id}),cache:'no-store'});
       if(!response.ok)throw Error('Could not dismiss the server scan alert.');
-      await refreshServerNotifications(false);
+      const data=await response.json().catch(()=>({}));
+      S.serverNotifications=S.serverNotifications.map(alert=>alert.id===id?
+        {...alert,readAt:data.readAt||new Date().toISOString(),unread:false}:alert);
       render();
     }catch(error){notice(error.message);}
   }
