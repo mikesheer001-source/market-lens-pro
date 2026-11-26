@@ -89,7 +89,7 @@ export async function fitValidatedAcrossUniverse({symbols,data,options,backtest,
         });
         if(chosen)rows.push(chosen);
       }catch(error){errors.push({symbol,error:String(error.message||error)});}
-    }else if(history.length)errors.push({symbol,error:'Insufficient OHLCV history ('+history.length+' bars)'});
+    }else errors.push({symbol,error:history.length?'Insufficient OHLCV history ('+history.length+' bars)':'No OHLCV bars returned'});
     onProgress(i+1,rows.length);
     // Yield between batches so the page can show progress and accept date changes.
     if(i%4===3)await new Promise(resolve=>setTimeout(resolve,0));

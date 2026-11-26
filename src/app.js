@@ -17,6 +17,8 @@ import {expectedNyseBarDate,scanFreshness,staleReasonForSymbol} from './freshnes
 import {FIT_COLUMNS,sortUniverseFit,bestUniverseFit,fitAcrossUniverse} from './fit.js';
 import {leaderboardDisplayRows,fitDisplayRows,leaderboardRankingCsv,fitRankingCsv,portfolioRankingCsv} from './ranking-export.js';
 import {fitValidatedAcrossUniverse,NO_VALIDATED_FIT} from './fit-validated.js';
+import {analyzeFullUniverse} from './universe-analysis.js';
+import {downloadHistoricalBars} from './history-download.js';
 import {compareStrategies,sortLeaderboard,leaderboardBest,updateSymbolMemory,pruneSymbolMemory,symbolMemoryItem,compactLeaderboard,LEADERBOARD_METRICS} from './leaderboard.js';
 import {runPortfolio,runPortfolioSweep,portfolioUniverse} from './portfolio.js';
 import {windowBacktestBars,windowPortfolioData,validateBacktestRange,actualPortfolioRange,displayBacktestRange} from './date-window.js';
@@ -167,6 +169,7 @@ async function initApp(){
     signalSelection:typeof saved.signalSelection==='string'?saved.signalSelection:'none',
     signalsOnly:!!saved.signalsOnly,signalRows:new Map(),signalErrors:[],
     signalHistory:priorSignalHistory,signalAsOf:null,freshness:null,staleDiagnostics:{},
+    universeSymbols:[...LIVE_UNIVERSE],universeDirectory:null,universeLeaderboard:null,universeAnalysis:null,universeFitController:null,
     rules:saved.rules||preset.trend.map(x=>({...x})),sort:saved.sort||'symbol',ascending:saved.ascending!==false,showOnlyMatches:!!saved.showOnlyMatches,showWatch:!!saved.showWatch,chart:{...defaultSettings,...saved.chart},bt:{...defaultBacktest,...saved.bt},result:previousAnalysis?.result||null,sweep:previousAnalysis?.sweep||null,lastAnalysis:previousAnalysis,resultSymbol:previousAnalysis?.symbol||null,resultTf:previousAnalysis?.tf||null,
     portfolioMode:!!saved.portfolioMode,bestFitMode:!!saved.bestFitMode,bestFitValidatedOnly:!!saved.bestFitValidatedOnly,
     btRange:{startDate:String(saved.btRange?.startDate||''),endDate:String(saved.btRange?.endDate||'')},
@@ -361,11 +364,17 @@ async function initApp(){
     });
   }
 
-  function persistSignalHistory(){
+  const universeCount=()=>S.universeSymbols?.length||LIVE_UNIVERSE.length;
+  function persistSignalHistory(maxSymbols=5000){
     try{
       const keys=Object.keys(S.signalHistory);
       if(keys.length>20)for(const oldKey of keys.slice(0,keys.length-20))delete S.signalHistory[oldKey];
-      saveLocal('signals',JSON.stringify(S.signalHistory));
+      const snapshot={};
+      for(const key of Object.keys(S.signalHistory)){
+        const state=S.signalHistory[key]||{},entries=Object.entries(state);
+        snapshot[key]=entries.length>maxSymbols?Object.fromEntries(entries.slice(-maxSymbols)):state;
+      }
+      saveLocal('signals',JSON.stringify(snapshot));
     }catch{notice('Signal history could not be saved locally. Flip detection may reset after reload.');}
   }
   function evaluateScreenerSignals(detectFlips=false){
@@ -721,7 +730,7 @@ async function initApp(){
   const timeframes=CHART_FRAMES.map(([id,label])=>[id,label+(isIntraday(id)?' · genuine intraday OHLCV':' · daily OHLCV')]);
   const symbolSelect=()=>{
     const options=[...S.data.keys()].filter(modeSymbol).sort(),selected=options.includes(S.symbol)?S.symbol:options[0]||'';
-    return '<div class="symbol-picker"><label class="control">Find symbol <input type="search" class="symbol-search" data-input="symbol-search" aria-label="Find symbol" placeholder="Search all '+options.length+' loaded tickers" value="'+esc(S.symbolQuery)+'"/></label>'+
+    return '<div class="symbol-picker"><label class="control">Find symbol <input type="search" class="symbol-search" data-input="symbol-search" aria-label="Find symbol" placeholder="Search '+universeCount().toLocaleString('en-US')+' Alpaca U.S. equities" value="'+esc(S.symbolQuery)+'"/></label>'+
       '<label class="control">Symbol '+select(options.map(symbol=>[symbol,symbol]),selected,'data-option="symbol"')+'</label></div>';
   };
   const tfSelect=()=>'<label class="control">Timeframe '+select(timeframes,S.chart.tf,'data-option="tf"')+'</label>';
@@ -826,7 +835,7 @@ async function initApp(){
       if(!full&&!isVisibleSymbol(symbol))continue;
       const evalResult=full?marketRules(history):screenSymbol(history,S.rules);
       const d=full?history.frames.D:evalResult.stats,w=full?history.frames.W:statsFor(aggregate(history,'W'));
-      const strategySignal=full?null:S.signalRows.get(symbol)||null;
+      const strategySignal=S.signalRows.get(symbol)||null;
       if(S.showOnlyMatches&&!evalResult.pass)continue;if(S.showWatch&&!S.watch.has(symbol))continue;
       if(!full&&S.signalsOnly&&S.signalSelection!=='none'&&strategySignal?.status!=='LONG')continue;
       if(S.query&&!symbol.toLowerCase().includes(S.query.toLowerCase()))continue;
@@ -926,16 +935,16 @@ async function initApp(){
   }
   async function loadMarketChart(symbol){
     const selection=++chartSelection;
-    if(S.sources.get(symbol)!=='ALPACA'){
+    if(S.sources.get(symbol)!=='ALPACA'||!S.data.get(symbol)?.length){
       notice('Loading daily bars for '+symbol+'…');
       try{
-        const url=new URL('/api/stocks/bars',canonicalWorkerBase(S.apiBaseUrl));
-        url.searchParams.set('symbol',symbol);
-        const response=await fetch(url);
-        const payload=await response.json();
-        const history=alpacaBars(payload.bars,'1Day');
-        if(!response.ok||!history.length)throw new Error(payload.error||'No daily bars returned.');
-        S.data.set(symbol,history);S.sources.set(symbol,'ALPACA');
+        const end=new Date().toISOString().slice(0,10);
+        const start=new Date(Date.now()-ALPACA_SCAN_LOOKBACK_DAYS*86_400_000).toISOString().slice(0,10);
+        const downloaded=await downloadHistoricalBars({workerUrl:canonicalWorkerBase(S.apiBaseUrl),
+          symbols:[symbol],feed:S.liveFeed||'iex',timeframe:'1Day',start,end,batchSize:1});
+        const history=alpacaBars(downloaded.bars?.[symbol]||[],'1Day');
+        if(!history.length)throw new Error('No daily OHLCV bars returned for '+symbol+'.');
+        S.data.set(symbol,history);S.sources.set(symbol,'ALPACA');S.liveFeed=downloaded.feed||S.liveFeed||'iex';
       }catch(error){
         if(selection===chartSelection)notice('Could not open '+symbol+': '+error.message);
         return false;
@@ -1061,11 +1070,15 @@ async function initApp(){
     const factLabel='ALPACA VXX DAILY CLOSE';
     const serverScanStatus=S.serverScanStatus==='idle'?'':'<p id="server-scan-status" class="info-strip" role="status">'+
       esc(S.serverScanStatus==='loading'?'Running server-side screener…':S.serverScanStatus)+'</p>';
+    const universeSignalStatus=S.universeAnalysis?.status==='complete'&&S.universeAnalysis.signalCount?
+      '<div class="info-strip" id="universe-signal-status">Full-universe signals: '+
+      S.universeAnalysis.signalCount.toLocaleString('en-US')+' symbols · '+esc(S.universeAnalysis.signalStrategy||'selected strategy')+
+      (S.universeAnalysis.signalsStale?' · strategy changed; rerun full-universe analysis':'')+'</div>':'';
     const fact=factBar?'<div class="market-fact" role="status"><span class="market-fact-label">'+factLabel+'</span><strong>'+esc(factSymbol)+' &nbsp; $'+format(factBar.close)+'</strong><small>Bar date: '+esc(String(factBar.time))+(S.mode==='live'?' · '+esc(String(S.liveFeed).toUpperCase())+' feed · Alpaca daily close, not a last-trade quote':' · simulated, not a market quote')+'</small></div>':S.mode==='live'?'<div class="market-fact warning" role="status">Alpaca VXX daily close unavailable — VXX was not returned by the connected feed.</div>':'';
-    return '<div id="screener-intro">'+head('Screener',full?'U.S. exchange listings · Alpaca daily, weekly and monthly filters.':'Filter '+symbols.length+' '+('Alpaca or imported instruments')+' with explicit technical conditions.',marketControls()+(!full&&S.mode==='live'?button(S.serverScanStatus==='loading'?'Server scanning…':'Run server scan','server-scan','small'):'')+button('Open Chart Lab','view-charts','small')+
+    return '<div id="screener-intro">'+head('Screener',full?'U.S. exchange listings · Alpaca daily, weekly and monthly filters.':'Filter '+symbols.length+' '+('Alpaca or imported instruments')+' with explicit technical conditions.',marketControls()+(!full&&S.mode==='live'?button(S.serverScanStatus==='loading'?'Server scanning…':'Run server scan','server-scan','small'):'')+button('Analyze full universe','run-universe-analysis','small')+button('Open Chart Lab','view-charts','small')+
         (reviewableMatches(rows).length?button('Review matches','screener-chart','primary'):''))+'</div>'+
       '<div id="screener-facts">'+(full?'':fact)+activeAlertBanner()+activeSnapshotBanner()+'</div>'+
-      '<div id="screener-metrics" class="metrics">'+metric(S.savedScanView?'Saved rows':'Symbols loaded',S.savedScanView?rows.length:all.length,S.savedScanView?'Historical snapshot':'Alpaca and imported data')+metric('Matching filters',matched,'All visible symbols')+metric('Visible results',rows.length,'Search and match filter')+metric('Active conditions',S.rules.length,'AND logic; all must pass') +'</div><div id="screener-status">'+(full?'<p id="market-scan-status" class="info-strip" role="status">'+esc(marketMessage())+'</p><p class="section-note">Covers active U.S. exchange listings in Alpaca’s directory. Thinly traded tickers may have older or missing bars. Two-hour filters and strategy signals are available in the quick screener.</p>':scanStatus)+freshnessBadge+serverScanStatus+'</div>'+
+      '<div id="screener-metrics" class="metrics">'+metric(S.savedScanView?'Saved rows':'Symbols loaded',S.savedScanView?rows.length:all.length,S.savedScanView?'Historical snapshot':'Alpaca and imported data')+metric('Matching filters',matched,'All visible symbols')+metric('Visible results',rows.length,'Search and match filter')+metric('Active conditions',S.rules.length,'AND logic; all must pass') +'</div><div id="screener-status">'+(full?'<p id="market-scan-status" class="info-strip" role="status">'+esc(marketMessage())+'</p><p class="section-note">Covers active U.S. exchange listings in Alpaca’s directory. Thinly traded tickers may have older or missing bars. Two-hour filters and strategy signals are available in the quick screener.</p>':scanStatus)+freshnessBadge+serverScanStatus+universeSignalStatus+'</div>'+
       '<div class="panel"><div class="panel-header"><h2>Screen rules</h2><div class="flex"><label class="control">Preset '+select([['custom','Custom rules'],['trend','Trend pullback'],['original','Original strict W/D/2H'],['oversold','RSI oversold'],['momentum','Momentum'],['volatility','VXX / Volatility'],['all','Show all']],presetKey,'data-option="preset"')+'</label>'+button('+ Add rule','add-rule')+'</div></div><div class="panel-body"><div class="filters">'+(rules||'<span class="muted">No filters — showing all instruments.</span>')+'</div><div class="section-note" style="margin-top:12px">“Original strict” reproduces the weekly EMA200 and weekly/daily/two-hour RSI filter logic. RSI 5D is calculated from daily closes; daily bars cannot reconstruct true two-hour data. The VXX / Volatility preset narrows the universe to VXX, UVXY, SVXY, VIXY, VIXM, VXZ, SVIX, UVIX, SVOL and ZVOL, using daily RSI, 252-session drawdown and % versus daily EMA200.</div></div></div>'+
       '<div class="panel"><div class="panel-header"><h2>Market results</h2><div class="flex"><span id="screener-refresh">'+(full?'':button(S.scan.status==='loading'?'Scanning…':'Refresh live scan','scan-universe','small primary'))+'</span>'+button('Export screener CSV','export-screener','small')+button('Columns','screener-columns','small')+
       (full?'':'<label class="control">Strategy '+selectStrategy+'</label>'+
@@ -1258,20 +1271,22 @@ async function initApp(){
   }
   function chartSymbolChoices(query=''){
     const all=[...S.data.keys()].filter(modeSymbol).sort();
-    const available=new Set(all);
+    const directory=S.universeSymbols?.length?S.universeSymbols:all;
+    const available=new Set([...all,...directory]);
     const choices=(symbols,id,title)=>symbols.length?'<section id="'+id+'"><h3>'+title+'</h3>'+
       symbols.map(symbol=>'<button type="button" data-action="chart-choose-symbol" data-symbol="'+esc(symbol)+'"'+
         (symbol===S.symbol?' aria-current="true"':'')+'>'+esc(symbol)+'</button>').join('')+'</section>':'';
     const q=query.trim().toUpperCase();
-    if(q)return choices(all.filter(symbol=>symbol.toUpperCase().includes(q)),'chart-symbol-all','Matches')||'<p>No matching symbols.</p>';
+    if(q){const matches=directory.filter(symbol=>symbol.toUpperCase().includes(q)).slice(0,100);
+      return choices(matches,'chart-symbol-all','Matches · first '+matches.length+' of up to '+universeCount().toLocaleString('en-US'))||'<p>No matching symbols.</p>';}
     return choices(S.chartRecentSymbols.filter(symbol=>available.has(symbol)),'chart-symbol-recent','Recent')+
       choices([...S.watch].filter(symbol=>available.has(symbol)),'chart-symbol-watchlist','Watchlist')+
-      choices(all,'chart-symbol-all','All symbols');
+      choices(all,'chart-symbol-all','Loaded symbols');
   }
   function openChartSymbolPicker(){
     const dialog=$('#chart-symbol-dialog');
     dialog.innerHTML=dialogHeader('Find symbol','chart-symbol-title')+
-      '<input type="search" class="chart-symbol-search" data-input="chart-symbol-query" aria-label="Search chart symbols" placeholder="Search ticker" autocomplete="off" autofocus>'+
+      '<input type="search" class="chart-symbol-search" data-input="chart-symbol-query" aria-label="Search chart symbols" placeholder="Search '+universeCount().toLocaleString('en-US')+' U.S. equities" autocomplete="off" autofocus>'+
       '<div class="chart-symbol-choices">'+chartSymbolChoices()+'</div>';
     dialog.showModal();
   }
@@ -2729,6 +2744,22 @@ async function initApp(){
     if(!payload.configured)throw new Error('Worker is reachable, but Alpaca secrets have not been configured yet.');
     S.liveFeed=payload.feed||'iex';notice('Alpaca backend is ready · '+String(S.liveFeed).toUpperCase()+' feed.');return payload;
   }
+  async function loadUniverseDirectory(){
+    const base=canonicalWorkerBase(S.apiBaseUrl);
+    if(!base.startsWith('https://'))return null;
+    try{
+      const response=await fetch(base+'/api/stocks/universe',{headers:{Accept:'application/json'},cache:'no-store'});
+      const payload=await response.json().catch(()=>({}));
+      if(!response.ok||!Array.isArray(payload.symbols)||!payload.symbols.length)
+        throw Error(payload.error||'Alpaca equity directory unavailable.');
+      S.universeSymbols=payload.symbols;
+      S.universeDirectory={id:payload.id||null,count:payload.count||payload.symbols.length,
+        source:payload.source||'alpaca-v2-assets',refreshedAt:payload.refreshedAt||null};
+      const search=$('.symbol-search');
+      if(search)search.placeholder='Search '+universeCount().toLocaleString('en-US')+' Alpaca U.S. equities';
+      return S.universeDirectory;
+    }catch{return null;}
+  }
   async function fetchLiveUniverse(options={}){
     let base=canonicalWorkerBase(S.apiBaseUrl);
     if(!base.startsWith('https://'))throw new Error('Enter the Cloudflare Worker URL in Data Center first.');
@@ -3287,8 +3318,10 @@ async function initApp(){
     'review-step':el=>stepScanReview(Number(el.dataset.step)),
     'review-rules':showReviewRules,
     'chart-symbol-picker':()=>openChartSymbolPicker(),
-    'chart-choose-symbol':el=>{
-      restoreSymbolState(el.dataset.symbol);
+    'chart-choose-symbol':async el=>{
+      const symbol=el.dataset.symbol;
+      if(!S.data.has(symbol)&&!await loadMarketChart(symbol))return;
+      restoreSymbolState(symbol);
       render();
       $('[data-action="chart-symbol-picker"]')?.focus({preventScroll:true});
     },
@@ -3522,7 +3555,11 @@ async function initApp(){
       S.symbolQuery=el.value;
       const dropdown=el.closest('.symbol-picker')?.querySelector('[data-option="symbol"]');
       if(dropdown){
-        const options=[...S.data.keys()].filter(modeSymbol).filter(s=>s.toLowerCase().includes(el.value.trim().toLowerCase())||s===S.symbol).sort();
+        const query=el.value.trim().toLowerCase();
+        const universe=[...new Set([...(S.universeSymbols||[]),...S.data.keys()])];
+        const options=(query?universe.filter(s=>s.toLowerCase().includes(query)):[...S.data.keys()].filter(modeSymbol))
+          .sort().slice(0,100);
+        if(S.data.has(S.symbol)&&!options.includes(S.symbol))options.unshift(S.symbol);
         dropdown.innerHTML=options.map(s=>'<option value="'+esc(s)+'"'+(s===S.symbol?' selected':'')+'>'+esc(s)+'</option>').join('');
       }
       return;
@@ -3586,7 +3623,9 @@ async function initApp(){
     if(el.dataset.option){
       const opt=el.dataset.option,val=el.value;
       if(opt==='signal-strategy'){S.signalSelection=val;S.signalsOnly=false;
-        evaluateScreenerSignals(false);saveSettings();render();return;}
+        evaluateScreenerSignals(false);
+        if(S.universeAnalysis?.status==='complete')S.universeAnalysis.signalsStale=true;
+        saveSettings();render();return;}
       if(opt==='signals-only'){S.signalsOnly=el.checked;saveSettings();render();return;}
       if(opt==='leaderboard-validated-only'){
         S.leaderboardValidatedOnly=el.checked;saveSettings();render();return;
@@ -3610,6 +3649,11 @@ async function initApp(){
       if(opt==='saved-scan-select'){if(val)loadSavedScan(val);else{clearSavedScanView();render();}return;}
       if(opt==='preset'){if(val==='custom')return;clearSavedScanView();S.rules=(preset[val]||[]).map(x=>({...x}));S.universeFilter=val==='volatility'?'volatility':'all';S.scan={status:'idle'};}
       else if(opt==='symbol'){
+        const previous=S.symbol;
+        if(!S.data.has(val)&&!await loadMarketChart(val)){
+          if(previous)restoreSymbolState(previous);
+          render();return;
+        }
         restoreSymbolState(val);
         if(['backtest','optimize'].includes(S.tab)||el.closest('[data-workspace-section="backtest"],[data-workspace-section="optimize"]'))S.lastBacktestSymbol=val;
       }
@@ -3647,6 +3691,7 @@ async function initApp(){
   await loadStored();
   workspaceReady=true;
   await switchToLive({restoreTab:S.tab,restoreSymbol:startupPrefs.selectedSymbol});
+  void loadUniverseDirectory();
   void refreshServerNotifications(true);
   setInterval(()=>{if(document.visibilityState==='visible')void refreshServerNotifications(true);},60_000);
   if(syncEnabled){

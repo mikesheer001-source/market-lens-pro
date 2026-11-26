@@ -24,7 +24,6 @@ export async function analyzeFullUniverse({
   const fitRows=[],validatedRows=[],validatedErrors=[],signalRows=Object.create(null),signalErrors=[];
   const leaderboard=createUniverseLeaderboardAccumulator();
   let directory=null,processed=0,fitCompleted=0,validatedCompleted=0,totalPages=0,totalBars=0;
-  const sourceFor=symbol=>'ALPACA '+String(feed).toUpperCase()+' 1Day';
   const result=await download({
     workerUrl,feed,timeframe:'1Day',start,end,adjustment,batchSize,requestIntervalMs,
     retainBars:false,signal,
@@ -39,6 +38,7 @@ export async function analyzeFullUniverse({
         const bars=alpacaBars(batch.bars[symbol]||[],'1Day');
         if(bars.length)data.set(symbol,bars);
       }
+      const sourceFor=symbol=>data.has(symbol)?'ALPACA '+String(feed).toUpperCase()+' 1Day':'NO ALPACA BARS';
       const common={symbols:batch.symbols,data,options:{...options,timeframe:'D'},
         backtest,compilePine,executePine,dateRange,expectedBarDate,sourceFor};
       const fit=fitAcrossUniverse({...common,strategyScript});
