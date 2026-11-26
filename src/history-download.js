@@ -79,6 +79,8 @@ function normalizeConfig(options,requireSymbols){
   if(typeof fetchImpl!=='function')throw new Error('Fetch is unavailable in this environment.');
   const config={workerBase,start,end,feed,timeframe,adjustment,batchSize,limit,requestIntervalMs,
     maxRetries,retryBaseDelayMs,maxRetryDelayMs,maxPagesPerBatch,fetchImpl,signal:options.signal,
+    retainBars:options.retainBars!==false,
+    onBatch:typeof options.onBatch==='function'?options.onBatch:null,
     onProgress:typeof options.onProgress==='function'?options.onProgress:null};
   if(requireSymbols)config.symbols=normalizeSymbols(options.symbols);
   return config;
@@ -122,10 +124,11 @@ function splitBatches(symbols,size){
 }
 async function downloadSymbols(config,symbols,state,directory){
   const batches=splitBatches(symbols,config.batchSize);
-  const bySymbol=new Map(symbols.map(symbol=>[symbol,new Map()]));
-  let totalPages=0,totalBars=0;
+  const retained=Object.create(null),missing=[];
+  let totalPages=0,totalBars=0,returned=0;
   for(let batchIndex=0;batchIndex<batches.length;batchIndex++){
     const batch=batches[batchIndex],seenTokens=new Set();
+    const bySymbol=new Map(batch.map(symbol=>[symbol,new Map()]));
     let pageToken=null,pagesInBatch=0;
     while(true){
       const params=new URLSearchParams({
@@ -156,16 +159,26 @@ async function downloadSymbols(config,symbols,state,directory){
       if(pagesInBatch>=config.maxPagesPerBatch)throw new Error('Alpaca history batch exceeded the page safety limit.');
       seenTokens.add(next);pageToken=next;
     }
+    const batchBars=Object.create(null);
+    for(const symbol of batch){
+      const rows=[...bySymbol.get(symbol).values()].sort((a,b)=>a.t.localeCompare(b.t));
+      batchBars[symbol]=rows;
+      if(rows.length){
+        returned++;
+        if(config.retainBars)retained[symbol]=rows;
+      }else missing.push(symbol);
+    }
+    if(config.onBatch)await config.onBatch({
+      batchIndex:batchIndex+1,batchCount:batches.length,symbols:batch,bars:batchBars,
+      pages:pagesInBatch,totalPages,totalBars,requestedSymbols:symbols.length,returnedSymbols:returned
+    });
     config.onProgress?.({type:'batch',batchIndex:batchIndex+1,batchCount:batches.length,
       completedSymbols:Math.min((batchIndex+1)*config.batchSize,symbols.length),
-      requestedSymbols:symbols.length,totalPages,totalBars});
+      requestedSymbols:symbols.length,returnedSymbols:returned,totalPages,totalBars});
   }
-  const bars=Object.create(null);
-  for(const symbol of symbols)bars[symbol]=[...bySymbol.get(symbol).values()].sort((a,b)=>a.t.localeCompare(b.t));
-  const missing=symbols.filter(symbol=>bars[symbol].length===0);
   return {source:'alpaca',feed:config.feed,timeframe:config.timeframe,start:config.start,end:config.end,
-    symbols,requested:symbols.length,returned:symbols.length-missing.length,missing,
-    batches:batches.length,pages:totalPages,retries:state.retries,totalBars,bars,
+    symbols,requested:symbols.length,returned,missing,batches:batches.length,pages:totalPages,
+    retries:state.retries,totalBars,...(config.retainBars?{bars:retained}:{}),
     directory:directory||null,completedAt:new Date().toISOString()};
 }
 
@@ -191,6 +204,7 @@ export async function downloadUniverseHistory(options={}){
   if(!Array.isArray(payload?.symbols))throw new Error('The Worker returned an invalid U.S. equity directory.');
   const symbols=normalizeSymbols(payload.symbols);
   const directory={id:payload.id||null,count:Number(payload.count)||symbols.length,
-    source:payload.source||'alpaca-v2-assets',refreshedAt:payload.refreshedAt||null};
+    source:payload.source||'alpaca-v2-assets',refreshedAt:payload.refreshedAt||null,symbols};
+  config.onProgress?.({type:'directory',directory,requestedSymbols:symbols.length});
   return downloadSymbols(config,symbols,state,directory);
 }

@@ -43,3 +43,21 @@ test('Pine fit compiles once, executes independently per symbol and rejects indi
  assert.throws(()=>fitAcrossUniverse({symbols:['AAA'],data:new Map(),options:{strategy:'pine-custom'},
  backtest:()=>{},strategyScript:{code:'indicator("x")'},compilePine:()=>({mode:'indicator'})}),/indicator/);
 });
+
+
+test('validated Fit exposes each per-symbol comparison for universe leaderboard aggregation',async()=>{
+ const prices=Array.from({length:80},(_,i)=>({time:Date.UTC(2026,0,1+i)/1000,
+   open:100+i,high:101+i,low:99+i,close:100+i,volume:1000}));
+ const seen=[];
+ const {fitValidatedAcrossUniverse}=await import('../src/fit-validated.js');
+ const result=await fitValidatedAcrossUniverse({
+   symbols:['AAA','BBB'],data:new Map([['AAA',prices],['BBB',prices]]),
+   options:{strategy:'ema-cross',capital:10000},backtest:()=>({metrics:{sharpe:1},curve:[{time:1,value:10000}]}),
+   compare:({symbol})=>({rows:[{id:'preset:ema-cross',name:'EMA crossover',strategy:'ema-cross',
+     metrics:{returnPct:5,maxDD:10,trades:2},trainMetrics:{sharpe:1},testMetrics:{sharpe:.5},
+     validation:{enoughTestBars:true,validated:true}}]}),
+   onComparison:(symbol,report)=>seen.push([symbol,report.rows.length])
+ });
+ assert.deepEqual(seen,[['AAA',1],['BBB',1]]);
+ assert.equal(result.completed,2);
+});

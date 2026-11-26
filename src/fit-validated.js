@@ -60,7 +60,7 @@ export function validatedFitSymbolRow(symbol,leaderboard,meta={}){
 
 export async function fitValidatedAcrossUniverse({symbols,data,options,backtest,
   compilePine,executePine,savedScripts=[],builtInExamples=[],sourceFor=()=>null,
-  expectedBarDate=null,dateRange={},onProgress=()=>{},isCancelled=()=>false,
+  expectedBarDate=null,dateRange={},onProgress=()=>{},onComparison=()=>{},isCancelled=()=>false,
   compare=compareStrategiesInRange}){
   if(!Array.isArray(symbols)||!symbols.length)throw Error('Choose a research universe.');
   if(typeof backtest!=='function')throw Error('Backtest engine unavailable.');
@@ -81,6 +81,7 @@ export async function fitValidatedAcrossUniverse({symbols,data,options,backtest,
           source:sourceFor(symbol)||'NO ALPACA DATA',backtest,
           compilePine,executePine,savedScripts,builtInExamples
         });
+        onComparison(symbol,comparison);
         completed++;
         const chosen=validatedFitSymbolRow(symbol,comparison,{
           source:sourceFor(symbol)||'NO ALPACA DATA',barDate:last,

@@ -96,3 +96,29 @@ test('history downloader rejects invalid dates, symbols, batch sizes and page li
   await assert.rejects(()=>downloadHistoricalBars({...base,symbols:['AAA'],limit:10001}),/Page limit/);
   await assert.rejects(()=>downloadHistoricalBars({...base,symbols:['AAA'],start:'2024-02-01'}),/valid start and end/);
 });
+
+
+test('streaming universe download releases each completed batch and does not retain the full history',async()=>{
+  const symbols=Array.from({length:205},(_,index)=>'S'+String(index).padStart(4,'0'));
+  const batches=[];
+  const fetchImpl=async input=>{
+    const url=new URL(input);
+    if(url.pathname.endsWith('/api/stocks/universe'))
+      return response({source:'alpaca-v2-assets',count:symbols.length,symbols});
+    const batch=url.searchParams.get('symbols').split(',');
+    return response({bars:Object.fromEntries(batch.map(symbol=>[symbol,[bar('2024-01-02',10)]])),next_page_token:null});
+  };
+  const result=await downloadUniverseHistory({
+    start:'2024-01-01',end:'2024-02-01',batchSize:100,requestIntervalMs:0,
+    retainBars:false,fetchImpl,
+    onBatch:async batch=>batches.push({symbols:batch.symbols.length,bars:Object.keys(batch.bars).length,totalBars:batch.totalBars})
+  });
+  assert.equal(result.requested,205);
+  assert.equal(result.returned,205);
+  assert.equal(result.totalBars,205);
+  assert.equal(result.batches,3);
+  assert.equal(Object.hasOwn(result,'bars'),false);
+  assert.deepEqual(batches.map(x=>x.symbols),[100,100,5]);
+  assert.deepEqual(batches.map(x=>x.bars),[100,100,5]);
+  assert.equal(batches.at(-1).totalBars,205);
+});
