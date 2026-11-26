@@ -1,6 +1,7 @@
 import {createHistoryCache,frameLatest} from './history-cache.js';
 import {createMedianDotLayer} from './options-median-chart.js';
 import {readChartWorkspace,writeChartWorkspace,chartAlertLevels,chartOptionLevels,matchingTradeMarkers} from './chart-workspace.js';
+import {chartOptionsPnl} from './chart-options-pnl.js';
 import {readWorkspaceLayout,writeWorkspaceLayout,moveWorkspace} from './workspace-layout.js';
 import {getOptionsDevice, requestOptions} from './options-api.js';
 import {loadOptionsMedians, medianHorizons, loadOptionsProbability, probabilityHorizons, probabilityBands} from './options-median.js';
@@ -1505,7 +1506,8 @@ async function initApp(){
       ['trades','Backtest trade markers','Only actual saved backtest fills for this symbol and timeframe.'],
       ['pine','Pine plots & shapes','Keep the applied scripts; hide or show their output.'],
       ['alertLevels','Price alert levels','Daily-close thresholds for the active symbol. RSI alerts remain in the alert list.'],
-      ['strikes','Options strike levels','Matching builder contract strikes or user-entered assumptions, not quotes.']
+      ['strikes','Options strike levels','Matching builder contract strikes or user-entered assumptions, not quotes.'],
+      ['optionsPnl','Options P&L overlay','Green/red expiration payoff from Builder entry/package premiums, live mark P&L from executable bid/ask quotes, and breakeven levels. Requires fresh quotes for every leg and a shared expiration; no option-pricing model is used.']
     ]]
   ];
   function openChartWorkspaceTools(){
@@ -1594,7 +1596,7 @@ async function initApp(){
       staleNote(S.symbol)+'</div>':'';
     const panel='<div class="panel '+(S.chartFullscreen?'chart-is-fullscreen':'')+
       '" id="chart-lab-panel" data-fullscreen="'+S.chartFullscreen+'">'+chartControls()+scanReviewControls()+
-      '<div class="chart-readout" id="readout">'+chartReadout(b.at(-1))+'</div>'+chartWorkspaceControls()+
+      '<div class="chart-readout" id="readout">'+chartReadout(b.at(-1))+'<span id="options-pnl-readout" class="chart-options-pnl-readout" hidden></span></div>'+chartWorkspaceControls()+
       '<div class="chart-stage" id="chart-stage"><div class="chart-area" id="price-chart"'+(!S.chartFullscreen&&S.chartHeight!=null?' style="height:'+S.chartHeight+'px"':'')+'></div>'+
       chartIndicatorLegend(b)+'</div><div class="chart-ranges" aria-label="Chart range" role="group">'+
       button('1M','range-1m','small')+button('3M','range-3m','small')+button('1Y','range-1y','small')+
@@ -2444,26 +2446,91 @@ async function initApp(){
     const base=chart.addSeries(type,{...baseOptions,...style});
     const datapoints=b.map(x=>S.chart.style==='line'||S.chart.style==='area'?{time:x.time,value:x.close}:{time:x.time,open:x.open,high:x.high,low:x.low,close:x.close});
     base.setData(datapoints);
-    let workspaceLines=[],lastWorkspaceLevels='';
+    let workspaceLines=[],lastWorkspaceLevels='',optionsPnlSeries=[],lastOptionsPnlKey='';
+    let activeOptionsPnl=null,displayedIndex=b.length-1;
+    const updateOptionsPnlReadout=(index=displayedIndex)=>{
+      const node=$('#options-pnl-readout');
+      if(!node)return;
+      if(!chartTools.optionsPnl){node.hidden=true;node.textContent='';return;}
+      node.hidden=false;
+      const money=value=>new Intl.NumberFormat('en-US',{style:'currency',currency:'USD',maximumFractionDigits:2}).format(value);
+      const signed=value=>(value>0?'+':value<0?'−':'')+money(Math.abs(value));
+      if(activeOptionsPnl?.available){
+        const point=activeOptionsPnl.points[index]||activeOptionsPnl.points.at(-1);
+        if(point){
+          node.className='chart-options-pnl-readout '+(point.pnl>=0?'positive':'negative');
+          node.textContent='Expiry '+signed(point.pnl)+' · Live '+signed(activeOptionsPnl.markPnl);
+          node.title='Exact intrinsic payoff at expiration for '+money(point.price)+
+            '. Live mark-to-market uses bid to close long legs and ask to close short legs; fees are included.';
+          return;
+        }
+      }
+      if(Number.isFinite(activeOptionsPnl?.markPnl)){
+        node.className='chart-options-pnl-readout '+(activeOptionsPnl.markPnl>=0?'positive':'negative');
+        node.textContent='Live mark '+signed(activeOptionsPnl.markPnl)+' · '+(activeOptionsPnl.reason||'No exact expiration curve');
+        node.title='Live liquidation P&L from timestamped option bid/ask quotes, less the Builder entry premium and fees.';
+        return;
+      }
+      node.className='chart-options-pnl-readout muted';
+      node.textContent=activeOptionsPnl?.reason||'No quote-verified Options Builder position for '+S.symbol+'.';
+      node.title='The overlay requires a matching position and fresh live option quotes for every leg.';
+    };
     refreshWorkspaceOverlays=()=>{
       if(!el.isConnected)return;
+      const snapshot=optionsBuilder.chartPositions();
       const alerts=chartTools.alertLevels?chartAlertLevels(S.alerts,S.symbol):[];
-      const strikes=chartTools.strikes?chartOptionLevels(optionsBuilder.chartPositions(),S.symbol):[];
-      const key=JSON.stringify([alerts,strikes]);
+      const strikes=chartTools.strikes?chartOptionLevels(snapshot,S.symbol):[];
+      const pnl=chartTools.optionsPnl?chartOptionsPnl(snapshot,S.symbol,b):null;
+      activeOptionsPnl=pnl;
+      const optionKey=JSON.stringify([chartTools.optionsPnl,snapshot,b.length,b[0]?.time,b.at(-1)?.time,
+        pnl?.status,pnl?.debit,pnl?.quoteTime,pnl?.breakevens]);
+      if(lastOptionsPnlKey!==optionKey){
+        lastOptionsPnlKey=optionKey;
+        for(const series of optionsPnlSeries)chart.removeSeries(series);
+        optionsPnlSeries=[];
+        if(chartTools.optionsPnl&&pnl?.available){
+          const profitData=pnl.points.map(point=>point.pnl>=0?
+            {time:point.time,value:point.price}:{time:point.time});
+          const lossData=pnl.points.map(point=>point.pnl<0?
+            {time:point.time,value:point.price}:{time:point.time});
+          if(profitData.some(point=>Number.isFinite(point.value))){
+            const series=chart.addSeries(LineSeries,{color:'#49d79d',lineWidth:3,
+              priceLineVisible:false,lastValueVisible:false,crosshairMarkerVisible:false,
+              title:'Options expiration P&L · profit'},0);
+            series.setData(profitData);optionsPnlSeries.push(series);
+          }
+          if(lossData.some(point=>Number.isFinite(point.value))){
+            const series=chart.addSeries(LineSeries,{color:'#f08b82',lineWidth:3,
+              priceLineVisible:false,lastValueVisible:false,crosshairMarkerVisible:false,
+              title:'Options expiration P&L · loss'},0);
+            series.setData(lossData);optionsPnlSeries.push(series);
+          }
+        }
+        const roots=pnl?.available?pnl.breakevens:[];
+        el.dataset.optionsPnlStatus=chartTools.optionsPnl?(pnl?.status||'unavailable'):'off';
+        el.dataset.optionsPnlProfitPoints=String(pnl?.available?pnl.points.filter(point=>point.pnl>=0).length:0);
+        el.dataset.optionsPnlLossPoints=String(pnl?.available?pnl.points.filter(point=>point.pnl<0).length:0);
+        el.dataset.optionsPnlBreakevens=JSON.stringify(roots.map(value=>Number(value.toFixed(6))));
+      }
+      const breakevens=pnl?.available?pnl.breakevens.map((price,index)=>({price,label:'Options BE '+(index+1)})):[];
+      const key=JSON.stringify([alerts,strikes,breakevens]);
       if(lastWorkspaceLevels!==key){
         lastWorkspaceLevels=key;
         for(const line of workspaceLines)base.removePriceLine(line);
         workspaceLines=[
           ...alerts.map(level=>base.createPriceLine({price:level.price,title:level.label,color:level.active?'#e9bd68':'#d69c65',lineWidth:1,lineStyle:2,axisLabelVisible:true})),
-          ...strikes.map(level=>base.createPriceLine({price:level.price,title:level.label,color:'#71b8b3',lineWidth:1,lineStyle:3,axisLabelVisible:true}))
+          ...strikes.map(level=>base.createPriceLine({price:level.price,title:level.label,color:'#71b8b3',lineWidth:1,lineStyle:3,axisLabelVisible:true})),
+          ...breakevens.map(level=>base.createPriceLine({price:level.price,title:level.label,color:'#e8bb72',lineWidth:2,lineStyle:2,axisLabelVisible:true}))
         ];
         el.dataset.workspaceAlertLevels=String(alerts.length);
         el.dataset.workspaceStrikeLevels=String(strikes.length);
+        el.dataset.workspaceOptionPnlBreakevens=String(breakevens.length);
       }
       const status=$('#chart-workspace-options-status');
       if(status)status.textContent=optionWorkspaceStatus();
       const alertStatus=$('#chart-workspace-alert-status');
       if(alertStatus)alertStatus.textContent=alertWorkspaceStatus();
+      updateOptionsPnlReadout();
     };
     refreshWorkspaceOverlays();
     const instances=indicatorInstances();
@@ -2569,12 +2636,12 @@ async function initApp(){
     chart.subscribeClick(param=>{if(!S.drawLine||!param.point)return;const p=base.coordinateToPrice(param.point.y);if(p==null||!Number.isFinite(p))return;const price=Number(p.toFixed(4));(S.chart.lines[S.symbol]??=[]).push(price);base.createPriceLine({price,color:'#e4b766',lineWidth:1,lineStyle:2,axisLabelVisible:true,title:'Level'});S.drawLine=false;saveSettings();notice('Added horizontal price level at '+format(price,4));});
     const barIndices=new Map(b.map((bar,index)=>[stamp(bar.time),index]));
     const readout=$('#readout');
-    let displayedIndex=b.length-1;
     const indicatorTypes=new Map(instances.map(item=>[item.id,item.type]));
     const updateReadout=frameLatest(index=>{
       if(!el.isConnected||index===displayedIndex)return;
       displayedIndex=index;
-      readout.innerHTML=chartReadout(b[index]);
+      readout.innerHTML=chartReadout(b[index])+'<span id="options-pnl-readout" class="chart-options-pnl-readout" hidden></span>';
+      updateOptionsPnlReadout(index);
       for(const [key,series] of indicatorData){
         const [value,...details]=series.map(values=>values[index]);
         const node=valuesByIndicator.get(key),next=indicatorValue(indicatorTypes.get(key)??key,value,details);

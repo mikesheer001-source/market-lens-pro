@@ -2,7 +2,7 @@
 export const CHART_WORKSPACE_KEY='market-lens-pro-chart-workspace-tools-v1';
 export const CHART_WORKSPACE_DEFAULTS=Object.freeze({
   watchlist:false,scan:false,backtest:false,alerts:false,options:false,scripts:false,data:false,
-  trades:true,pine:true,alertLevels:false,strikes:false
+  trades:true,pine:true,alertLevels:false,strikes:false,optionsPnl:false
 });
 export function normalizeChartWorkspace(raw={}){
   return Object.fromEntries(Object.entries(CHART_WORKSPACE_DEFAULTS).map(([key,value])=>

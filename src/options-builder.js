@@ -97,9 +97,13 @@ export function createOptionsBuilder({onPositionsChange=()=>{}}={}) {
   const $ = name => root.querySelector('[data-ob="'+name+'"]');
   const manualExpiry = days => localDate(Date.now()+DAY*days);
   const active = () => root?.isConnected;
-  // Only expose committed position geometry; never expose tokens, quote credentials or model prices.
-  const chartPositions=()=>({symbol:state.symbol,legs:state.legs.map(({strike,side,type})=>
-    ({strike:numeric(strike),side,type}))});
+  // Share only the active position inputs and timestamped quote marks with Chart Lab.
+  // Device credentials and the Options Builder's model assumptions never leave this module.
+  const chartPositions=()=>({symbol:state.symbol,feed,fee:numeric(state.fee),
+    packagePremium:numeric(state.package),legs:state.legs.map(({strike,side,type,expiry,quantity,entry,
+      multiplier,root,symbol,quote})=>({strike:numeric(strike),side,type,expiry,
+      quantity:numeric(quantity),entry:numeric(entry),multiplier:numeric(multiplier),root,symbol,
+      quote:quote?{bid:numeric(quote.bid),ask:numeric(quote.ask),time:quote.time??null}:null}))});
   let lastChartPositions='';
   function publishChartPositions(){
     const snapshot=chartPositions(),key=JSON.stringify(snapshot);
