@@ -72,6 +72,10 @@ export class ScanNotifications {
       let result;
       this.storage.transactionSync(() => {
         const previousMatches = JSON.parse(this.stateValue('matches') || '[]');
+        const staleSet = new Set((Array.isArray(body.staleSymbols) ? body.staleSymbols : [])
+          .filter(symbol => typeof symbol === 'string'));
+        const retainedStaleMatches = previousMatches.filter(symbol => staleSet.has(symbol));
+        const nextMatches = [...new Set([...currentMatches, ...retainedStaleMatches])].sort();
         const newMatches = currentMatches.filter(symbol => !previousMatches.includes(symbol));
         const createdAt = body.scannedAt || new Date().toISOString();
         const notificationId = newMatches.length ? body.runId : null;
@@ -80,7 +84,7 @@ export class ScanNotifications {
             notificationId, body.runId, createdAt, body.scanType || 'scheduled',
             newMatches.length, JSON.stringify(newMatches), body.expectedBarDate || null);
         }
-        this.setState('matches', JSON.stringify(currentMatches));
+        this.setState('matches', JSON.stringify(nextMatches));
         result = {
           ok: true,
           notificationId,
@@ -99,7 +103,9 @@ export class ScanNotifications {
             feed: body.feed || 'iex',
             staleSymbols: Array.isArray(body.staleSymbols) ? body.staleSymbols : [],
             upstreamRequests: Number(body.upstreamRequests) || 0,
-            scanDurationMs: Number(body.scanDurationMs) || 0
+            scanDurationMs: Number(body.scanDurationMs) || 0,
+            disabled: !!body.disabled,
+            skipReason: body.skipReason || null
           }
         };
         this.setState('last_run', JSON.stringify(result.lastRun));

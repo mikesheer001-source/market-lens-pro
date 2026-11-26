@@ -224,7 +224,20 @@ async function initApp(){
       serverConfigSignature=signature;serverConfigRetryAfter=0;return true;
     }catch(error){
       serverConfigRetryAfter=Date.now()+60_000;
-      return false;
+      if(/daily, weekly, and monthly/i.test(String(error.message||error))){
+        try{
+          const paused={enabled:false,rules:[],universeFilter:S.universeFilter,feed:S.liveFeed||'iex'};
+          const response=await fetch(serverScanEndpoint('/config'),{method:'PUT',
+            headers:{'Content-Type':'application/json'},body:JSON.stringify(paused),cache:'no-store'});
+          if(response.ok){
+            serverConfigSignature=signature;serverConfigRetryAfter=0;
+            S.serverScanStatus='Background scan paused · two-hour rules are client-side only.';
+            render();return false;
+          }
+        }catch{}
+      }
+      S.serverScanStatus='Server scan settings not synced · '+String(error.message||error);
+      render();return false;
     }
   }
   async function refreshServerNotifications(shouldRender=false){

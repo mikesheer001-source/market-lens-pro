@@ -11,6 +11,7 @@ const TIMEFRAMES = new Set(['D', 'W', 'M']);
 const DAY_MS = 86_400_000;
 
 export const DEFAULT_SERVER_SCAN_CONFIG = Object.freeze({
+  enabled: true,
   rules: Object.freeze([
     Object.freeze({ metric: 'emaDist', tf: 'D', op: '>', value: 0 }),
     Object.freeze({ metric: 'rsi', tf: 'D', op: '<', value: 60 })
@@ -46,6 +47,10 @@ export function normalizeServerScanConfig(input = {}, fallbackFeed = 'iex') {
     }
     return { metric, tf, op, value, ...(rule.enabled === false ? { enabled: false } : {}) };
   });
+  const enabled = input.enabled === undefined ? true : input.enabled;
+  if (typeof enabled !== 'boolean') {
+    throw Object.assign(new Error('Server scan enabled flag must be boolean.'), { status: 400 });
+  }
   const universeFilter = input.universeFilter === undefined ? 'all' : String(input.universeFilter);
   if (!['all', 'volatility'].includes(universeFilter)) {
     throw Object.assign(new Error('Unsupported server scan universe filter.'), { status: 400 });
@@ -54,7 +59,7 @@ export function normalizeServerScanConfig(input = {}, fallbackFeed = 'iex') {
   if (!FEEDS.has(feed)) {
     throw Object.assign(new Error('Unsupported Alpaca feed.'), { status: 400 });
   }
-  return { rules, universeFilter, feed };
+  return { enabled, rules, universeFilter, feed };
 }
 
 async function fetchBatch(symbols, range, feed, env) {
@@ -105,15 +110,40 @@ function latestDate(items) {
 }
 
 export async function scanServerUniverse(env, rawConfig, now = new Date()) {
-  if (!env?.ALPACA_API_KEY || !env?.ALPACA_API_SECRET) {
-    throw Object.assign(new Error('Alpaca credentials are not configured on the Worker.'), { status: 503 });
-  }
-  const config = normalizeServerScanConfig(rawConfig, env.ALPACA_DATA_FEED || 'iex');
+  const config = normalizeServerScanConfig(rawConfig, env?.ALPACA_DATA_FEED || 'iex');
   const symbols = config.universeFilter === 'volatility'
     ? VOLATILITY_UNIVERSE.filter(symbol => LIVE_UNIVERSE.includes(symbol))
     : [...LIVE_UNIVERSE];
   const startedAt = Date.now();
   const expectedBarDate = expectedNyseBarDate(now);
+  const activeRules = config.rules.filter(rule => rule.enabled !== false);
+  if (!config.enabled || !activeRules.length) {
+    return {
+      source: 'alpaca',
+      feed: config.feed,
+      timeframe: '1Day',
+      universeFilter: config.universeFilter,
+      expectedBarDate,
+      requested: symbols.length,
+      returned: 0,
+      matchCount: 0,
+      matches: [],
+      staleSymbols: [],
+      freshness: { expected: expectedBarDate, allFresh: false, checked: 0, stale: [], latestBySymbol: {} },
+      retryErrors: [],
+      batchSize: ALPACA_BATCH_SIZE,
+      batches: 0,
+      upstreamRequests: 0,
+      lookbackDays: ALPACA_SCAN_LOOKBACK_DAYS,
+      scanDurationMs: Date.now() - startedAt,
+      scannedAt: now.toISOString(),
+      disabled: !config.enabled,
+      skipReason: !config.enabled ? 'Background scan paused by the current screener rules.' : 'No active screener rules.'
+    };
+  }
+  if (!env?.ALPACA_API_KEY || !env?.ALPACA_API_SECRET) {
+    throw Object.assign(new Error('Alpaca credentials are not configured on the Worker.'), { status: 503 });
+  }
   const end = now.toISOString();
   const start = new Date(now.getTime() - ALPACA_SCAN_LOOKBACK_DAYS * DAY_MS).toISOString();
   const barsBySymbol = Object.create(null);
@@ -159,7 +189,6 @@ export async function scanServerUniverse(env, rawConfig, now = new Date()) {
   });
   const staleSet = new Set(staleSymbols);
   const matches = [];
-  const activeRules = config.rules.filter(rule => rule.enabled !== false);
   if (activeRules.length) {
     for (const symbol of symbols) {
       if (staleSet.has(symbol)) continue;

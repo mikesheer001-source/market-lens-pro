@@ -63,6 +63,14 @@ test('server scan config validates the same rule vocabulary and rejects unsuppor
   assert.throws(() => normalizeServerScanConfig({
     rules: [{ metric: 'not-a-metric', tf: 'D', op: '>', value: 1 }]
   }), /Invalid metric/i);
+  assert.equal(normalizeServerScanConfig({enabled:false,rules:[]}).enabled,false);
+});
+
+test('a disabled or empty server profile skips Alpaca requests', async () => {
+  const result=await scanServerUniverse({}, {enabled:false,rules:[],universeFilter:'all',feed:'iex'});
+  assert.equal(result.disabled,true);
+  assert.equal(result.upstreamRequests,0);
+  assert.equal(result.matchCount,0);
 });
 
 test('server scan evaluates the 133-symbol live universe in 15-symbol Alpaca batches', async () => {
@@ -114,9 +122,15 @@ test('notification Durable Object stores new match alerts once and persists dism
   assert.equal((await request('/run/start', 'POST', { runId: 'run-2' })).status, 200);
   const second = await request('/run/complete', 'POST', {
     runId: 'run-2', scanType: 'scheduled', scannedAt: '2026-11-27T23:00:00.000Z',
-    expectedBarDate: '2026-11-27', requested: 2, returned: 2, matches: [{ symbol: 'AAPL' }, { symbol: 'MSFT' }]
+    expectedBarDate: '2026-11-27', requested: 2, returned: 1, staleSymbols: ['AAPL'], matches: [{ symbol: 'MSFT' }]
   }).then(response => response.json());
   assert.equal(second.newMatchCount, 0);
+  assert.equal((await request('/run/start', 'POST', { runId: 'run-3' })).status, 200);
+  const afterStaleRetry = await request('/run/complete', 'POST', {
+    runId: 'run-3', scanType: 'scheduled', scannedAt: '2026-11-28T23:00:00.000Z',
+    expectedBarDate: '2026-11-28', requested: 2, returned: 2, matches: [{ symbol: 'AAPL' }, { symbol: 'MSFT' }]
+  }).then(response => response.json());
+  assert.equal(afterStaleRetry.newMatchCount, 0);
   let notifications = await request('/notifications').then(response => response.json());
   assert.equal(notifications.notifications.length, 1);
   assert.equal(notifications.notifications[0].unread, true);
