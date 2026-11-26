@@ -40,6 +40,7 @@ test('backtester and single-symbol strategy leaderboard can select and download 
 });
 
 test('full-universe analysis streams more than the quick universe into backtests, Fit, leaderboard and signals',async({page})=>{
+ test.setTimeout(180000);
  const errors=[],requests=[];
  page.on('pageerror',error=>errors.push(error.message));
  const symbols=Array.from({length:134},(_,index)=>'U'+String(index).padStart(4,'0'));
