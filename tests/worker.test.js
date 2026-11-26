@@ -132,3 +132,81 @@ test('market scan refuses to run without server-side Alpaca credentials', async 
   assert.equal(response.status,503);
   assert.match((await response.json()).error,/not configured/i);
 });
+
+
+test('multi-symbol bars endpoint proxies one bounded Alpaca page and preserves its cursor and rate headers', async () => {
+  const originalFetch=globalThis.fetch;
+  let requestedUrl,requestedHeaders;
+  globalThis.fetch=async (url,options)=>{
+    requestedUrl=new URL(url);requestedHeaders=options.headers;
+    return new Response(JSON.stringify({
+      bars:{AAA:[{t:'2024-01-02T05:00:00Z',o:10,h:11,l:9,c:10.5,v:100}]},
+      next_page_token:'next-page-2'
+    }),{status:200,headers:{
+      'Content-Type':'application/json','X-RateLimit-Limit':'200',
+      'X-RateLimit-Remaining':'199','X-RateLimit-Reset':String(Math.floor(Date.now()/1000)+60)
+    }});
+  };
+  try {
+    const response=await worker.fetch(new Request(base+'/api/stocks/bars?symbols=AAA%2CBBB&timeframe=1Day&start=2024-01-01&end=2024-02-01&limit=10000&page_token=cursor-1',{
+      headers:{Origin:allowed,'CF-Connecting-IP':'198.51.100.141'}
+    }),{ALPACA_API_KEY:'batch-key',ALPACA_API_SECRET:'batch-secret',ALLOWED_ORIGINS:allowed});
+    const body=await response.json();
+    assert.equal(response.status,200);
+    assert.equal(requestedUrl.hostname,'data.alpaca.markets');
+    assert.equal(requestedUrl.pathname,'/v2/stocks/bars');
+    assert.equal(requestedUrl.searchParams.get('symbols'),'AAA,BBB');
+    assert.equal(requestedUrl.searchParams.get('limit'),'10000');
+    assert.equal(requestedUrl.searchParams.get('page_token'),'cursor-1');
+    assert.equal(requestedUrl.searchParams.get('sort'),'asc');
+    assert.equal(requestedHeaders['APCA-API-KEY-ID'],'batch-key');
+    assert.equal(requestedHeaders['APCA-API-SECRET-KEY'],'batch-secret');
+    assert.deepEqual(body.symbols,['AAA','BBB']);
+    assert.equal(body.requested,2);
+    assert.equal(body.bars.AAA[0].c,10.5);
+    assert.equal(body.next_page_token,'next-page-2');
+    assert.equal(response.headers.get('X-RateLimit-Remaining'),'199');
+    assert.match(response.headers.get('Access-Control-Expose-Headers'),/X-RateLimit-Reset/);
+    assert.equal(JSON.stringify(body).includes('batch-secret'),false);
+  } finally {
+    globalThis.fetch=originalFetch;
+  }
+});
+
+test('multi-symbol bars endpoint rejects batches over 100 and malformed symbols before contacting Alpaca', async () => {
+  const originalFetch=globalThis.fetch;
+  let calls=0;
+  globalThis.fetch=async()=>{calls++;throw new Error('must not contact Alpaca');};
+  try {
+    const env={ALPACA_API_KEY:'key',ALPACA_API_SECRET:'secret',ALLOWED_ORIGINS:allowed};
+    const tooMany=Array.from({length:101},(_,i)=>'S'+String(i).padStart(3,'0')).join(',');
+    const oversized=await worker.fetch(new Request(base+'/api/stocks/bars?symbols='+tooMany,{
+      headers:{'CF-Connecting-IP':'198.51.100.142'}
+    }),env);
+    assert.equal(oversized.status,400);
+    const invalid=await worker.fetch(new Request(base+'/api/stocks/bars?symbols=AAA%2C%21BAD',{
+      headers:{'CF-Connecting-IP':'198.51.100.143'}
+    }),env);
+    assert.equal(invalid.status,400);
+    assert.equal(calls,0);
+  } finally {
+    globalThis.fetch=originalFetch;
+  }
+});
+
+test('multi-symbol bars endpoint forwards Alpaca Retry-After on upstream rate limits', async () => {
+  const originalFetch=globalThis.fetch;
+  globalThis.fetch=async()=>new Response(JSON.stringify({message:'rate limited'}),{
+    status:429,headers:{'Retry-After':'3','X-RateLimit-Limit':'200','X-RateLimit-Remaining':'0'}
+  });
+  try {
+    const response=await worker.fetch(new Request(base+'/api/stocks/bars?symbols=AAA%2CBBB&start=2024-01-01&end=2024-02-01',{
+      headers:{'CF-Connecting-IP':'198.51.100.144'}
+    }),{ALPACA_API_KEY:'key',ALPACA_API_SECRET:'secret',ALLOWED_ORIGINS:allowed});
+    assert.equal(response.status,429);
+    assert.equal(response.headers.get('Retry-After'),'3');
+    assert.equal(response.headers.get('X-RateLimit-Remaining'),'0');
+  } finally {
+    globalThis.fetch=originalFetch;
+  }
+});

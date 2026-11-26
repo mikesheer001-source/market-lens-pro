@@ -18,6 +18,7 @@ const DEFAULT_ORIGINS = [
 
 const FEEDS = new Set(["iex", "sip", "delayed_sip", "boats", "overnight", "otc"]);
 const TIMEFRAMES = /^(?:[1-9]|[1-5]\d)Min$|^(?:[1-9]|1\d|2[0-3])Hour$|^(?:1Day|1Week|1Month)$/;
+const MAX_HISTORY_BATCH_SYMBOLS = 100;
 const rateWindows = new Map();
 const SCAN_NOTIFICATIONS_ID = "market-lens-server-scan-v1";
 
@@ -414,6 +415,7 @@ export default {
             upstreamUrl.searchParams.set("limit", "10000");
             upstreamUrl.searchParams.set("adjustment", "all");
             upstreamUrl.searchParams.set("feed", feed);
+    upstreamUrl.searchParams.set("sort", "asc");
             upstreamUrl.searchParams.set("sort", "asc");
             if (pageToken) upstreamUrl.searchParams.set("page_token", pageToken);
 
@@ -535,8 +537,21 @@ export default {
       return response;
     }
 
+    const symbolsParam = url.searchParams.get("symbols");
+    const multiSymbols = symbolsParam !== null;
     const symbol = String(url.searchParams.get("symbol") || "").trim().toUpperCase();
-    if (!/^[A-Z0-9][A-Z0-9.^_-]{0,19}$/.test(symbol)) {
+    let symbols = null;
+    if (multiSymbols) {
+      if (url.searchParams.has("symbol")) {
+        return json({ error: "Use either symbol or symbols, not both." }, 400, origin, env);
+      }
+      const supplied = symbolsParam.split(",").map(value => value.trim().toUpperCase());
+      if (!supplied.length || supplied.length > MAX_HISTORY_BATCH_SYMBOLS ||
+          supplied.some(value => !/^[A-Z0-9][A-Z0-9.^_-]{0,19}$/.test(value))) {
+        return json({ error: "Provide 1 to " + MAX_HISTORY_BATCH_SYMBOLS + " valid ticker symbols per batch." }, 400, origin, env);
+      }
+      symbols = [...new Set(supplied)];
+    } else if (!/^[A-Z0-9][A-Z0-9.^_-]{0,19}$/.test(symbol)) {
       return json({ error: "Provide one valid ticker symbol, such as SPY." }, 400, origin, env);
     }
 
@@ -571,9 +586,10 @@ export default {
       return json({ error: "Unsupported adjustment value." }, 400, origin, env);
     }
 
-    const upstreamUrl = new URL(
-      "https://data.alpaca.markets/v2/stocks/" + encodeURIComponent(symbol) + "/bars"
-    );
+    const upstreamUrl = multiSymbols
+      ? new URL("https://data.alpaca.markets/v2/stocks/bars")
+      : new URL("https://data.alpaca.markets/v2/stocks/" + encodeURIComponent(symbol) + "/bars");
+    if (multiSymbols) upstreamUrl.searchParams.set("symbols", symbols.join(","));
     upstreamUrl.searchParams.set("timeframe", timeframe);
     upstreamUrl.searchParams.set("start", start);
     upstreamUrl.searchParams.set("end", end);
@@ -588,9 +604,9 @@ export default {
 
     // Preserve explicit paging when the caller supplies limit/page_token.
     // For the default 5-year daily request, fetch all pages automatically.
-    const aggregateDaily=timeframe==="1Day"&&!url.searchParams.has("limit")&&!pageToken;
-    const bars=[];
-    let nextToken=null,pages=0;
+    const aggregateDaily=!multiSymbols&&timeframe==="1Day"&&!url.searchParams.has("limit")&&!pageToken;
+    const bars=multiSymbols?Object.create(null):[];
+    let nextToken=null,pages=0,lastUpstream=null;
     do{
       let upstream;
       try{
@@ -600,31 +616,57 @@ export default {
           "APCA-API-SECRET-KEY":env.ALPACA_API_SECRET,
           "Accept":"application/json"
         }});
+        lastUpstream=upstream;
       }catch{
         return json({error:"Could not reach Alpaca market data."},502,origin,env);
       }
       const payload=await upstream.json().catch(()=>null);
       if(!upstream.ok){
         const detail=typeof payload?.message==="string"?payload.message:"Alpaca rejected the request.";
+        const extraHeaders={"Access-Control-Expose-Headers":"Retry-After, X-RateLimit-Limit, X-RateLimit-Remaining, X-RateLimit-Reset"};
+        for(const name of ["Retry-After","X-RateLimit-Limit","X-RateLimit-Remaining","X-RateLimit-Reset"]){
+          const value=upstream.headers.get(name);
+          if(value)extraHeaders[name]=value;
+        }
+        if(upstream.status===429&&!extraHeaders["Retry-After"])extraHeaders["Retry-After"]="60";
         return json({error:"Alpaca market-data request failed.",detail,
-          upstream_status:upstream.status},upstream.status===429?429:502,origin,env);
+          upstream_status:upstream.status},upstream.status===429?429:502,origin,env,extraHeaders);
       }
-      if(Array.isArray(payload?.bars))bars.push(...payload.bars);
+      if (multiSymbols) {
+        if (!payload?.bars || typeof payload.bars !== "object" || Array.isArray(payload.bars)) {
+          return json({error:"Alpaca returned an invalid multi-symbol bars page."},502,origin,env);
+        }
+        const rows = payload.bars;
+        const requested = new Set(symbols);
+        for (const [name, items] of Object.entries(rows)) {
+          const key = name.toUpperCase();
+          if (requested.has(key) && Array.isArray(items)) bars[key] = items;
+        }
+      } else if(Array.isArray(payload?.bars)) {
+        bars.push(...payload.bars);
+      }
       nextToken=payload?.next_page_token||null;
       pages++;
       if(aggregateDaily&&nextToken&&pages>=20)
         return json({error:"Daily Alpaca pagination exceeded 20 pages; refusing incomplete history."},502,origin,env);
     }while(aggregateDaily&&nextToken);
+    const rateHeaders={"Access-Control-Expose-Headers":"Retry-After, X-RateLimit-Limit, X-RateLimit-Remaining, X-RateLimit-Reset"};
+    for(const name of ["X-RateLimit-Limit","X-RateLimit-Remaining","X-RateLimit-Reset"]){
+      const value=lastUpstream?.headers?.get(name);
+      if(value)rateHeaders[name]=value;
+    }
     return json({
       source:"alpaca",
-      symbol,
+      ...(multiSymbols?{symbols,requested:symbols.length}:{symbol}),
       timeframe,
       feed,
+      start,
+      end,
       lookback_days:timeframe==="1Day"&&!url.searchParams.has("start")?ALPACA_SCAN_LOOKBACK_DAYS:null,
       bars,
       pages,
       next_page_token:aggregateDaily?null:nextToken
-    },200,origin,env);
+    },200,origin,env,rateHeaders);
   },
 
   async scheduled(controller, env, ctx) {
