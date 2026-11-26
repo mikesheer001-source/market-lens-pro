@@ -8,7 +8,7 @@ async function configure(page,choices){
     await dialog.locator('[data-chart-workspace-choice="'+key+'"]').setChecked(enabled);
   await dialog.getByRole('button',{name:'Apply visibility'}).click();
 }
-const optionRow=page=>page.locator('#chart-workspaces [data-chart-workspace-row="options"]');
+const optionRow=page=>page.locator('#chart-lab-panel [data-chart-workspace-row="options"]');
 const optionsPanel=page=>page.locator('#chart-workspaces > [data-workspace-section="options"]');
 
 test('draws quote-verified green/red expiration P&L and breakevens, then recalculates premium and quantity edits',async({page})=>{
