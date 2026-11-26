@@ -3220,7 +3220,7 @@ async function initApp(){
     if(S.fitValidatedOnly&&!Number.isFinite(best.rollingMeanSharpe)){
       notice('No validated symbol has a numeric rolling mean OOS Sharpe.');return;
     }
-    if(!S.data.has(best.symbol)&&!await loadMarketChart(best.symbol))return;
+    if(S.sources.get(best.symbol)!=='ALPACA'&&!await loadMarketChart(best.symbol))return;
     restoreSymbolState(best.symbol);S.bt={...S.bt,...report.settings};
     const winner=S.fitValidatedOnly?best.validatingStrategy:null;
     if(winner)S.bt.strategy=winner.strategy;
@@ -3507,7 +3507,7 @@ async function initApp(){
     },
 
     'fit-universe':()=>void runUniverseFitCurrent(),
-    'run-universe-analysis':()=>{showWorkspace('backtest');void runUniverseFitCurrent();render();},
+    'run-universe-analysis':()=>{S.portfolioMode=false;S.bestFitMode=false;showWorkspace('backtest');void runUniverseFitCurrent();render();},
     'cancel-universe-fit':()=>{
       fitRunSerial++;S.universeFitController?.abort();S.universeFitController=null;
       S.fitStatus='';S.universeAnalysis={...S.universeAnalysis,status:'cancelled'};render();
