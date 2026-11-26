@@ -31,6 +31,6 @@ test('server scan produces a persistent in-app alert that can be dismissed', asy
   await runButton.click();
   await expect(page.locator('.alert-banner')).toContainText('AAPL');
   await expect(page.locator('#server-scan-status')).toContainText('1 match');
-  await page.getByRole('button', {name:'Dismiss server alert'}).click();
+  await page.locator('#screener-facts').getByRole('button', {name:'Dismiss server alert'}).click();
   await expect(page.locator('.alert-banner')).not.toContainText('AAPL');
 });
