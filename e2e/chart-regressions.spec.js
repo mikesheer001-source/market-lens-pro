@@ -53,6 +53,8 @@ test('Backtest workspace content is present when expanded after a collapsed char
   await expect(backtest).not.toHaveAttribute('open','');
   await chooseSymbol(page,'VXX');
   await expect(backtest).not.toHaveAttribute('open','');
+  // A previously mounted panel must remain populated when a chart rerender recreates it collapsed.
+  await expect(backtest.locator('.workspace-content')).toContainText('Strategy settings');
   await backtest.locator(':scope > summary').click();
   await expect(backtest).toHaveAttribute('open','');
   await expect(backtest.locator('.workspace-content')).toContainText('Strategy settings');
@@ -63,10 +65,10 @@ test('daily crosshair readout follows the hovered BusinessDay instead of stickin
   const lastDate=sampleData()['DEMO-SPY'].at(-1).time;
   await page.goto('./');
   await page.locator('.sidebar [data-tab="charts"]').click();
-  await page.getByRole('button',{name:'All',exact:true}).click();
-  const chart=page.locator('#price-chart');
-  const bounds=await chart.boundingBox();
-  await page.mouse.move(bounds.x+bounds.width*.25,bounds.y+bounds.height*.3);
+  const canvas=page.locator('#price-chart canvas').first();
+  await expect(canvas).toBeVisible();
+  const bounds=await canvas.boundingBox();
+  await page.mouse.move(bounds.x+bounds.width*.85,bounds.y+bounds.height*.45);
   await expect.poll(async()=>page.locator('#readout time').textContent()).not.toBe(lastDate);
 });
 
