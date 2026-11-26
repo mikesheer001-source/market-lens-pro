@@ -3171,7 +3171,8 @@ async function initApp(){
         const directoryUnavailable=error?.status===404||/invalid U\.S\. equity directory|invalid multi-symbol bars page|invalid bars object/i.test(message)||
           (!error?.status&&/failed to fetch|fetch failed|networkerror/i.test(message));
         if(!directoryUnavailable)throw error;
-        const fallbackSymbols=[...S.data.keys()].filter(symbol=>modeSymbol(symbol)&&S.sources.get(symbol)==='ALPACA');
+        const fallbackSymbols=[...new Set([...LIVE_UNIVERSE.filter(modeSymbol),
+          ...[...S.data.keys()].filter(symbol=>modeSymbol(symbol)&&S.sources.get(symbol)==='ALPACA')])];
         if(!fallbackSymbols.length)throw error;
         const fallbackDownload=async options=>{
           const directory={id:'quick-scan-fallback',count:fallbackSymbols.length,
@@ -3179,6 +3180,7 @@ async function initApp(){
           options.onProgress?.({type:'directory',directory,requestedSymbols:fallbackSymbols.length});
           const batchSize=100,batchCount=Math.ceil(fallbackSymbols.length/batchSize);
           let totalBars=0,returned=0;
+          const missing=[];
           for(let offset=0;offset<fallbackSymbols.length;offset+=batchSize){
             const symbols=fallbackSymbols.slice(offset,offset+batchSize),bars=Object.create(null);
             for(const symbol of symbols){
@@ -3190,14 +3192,14 @@ async function initApp(){
                 return {t,o:bar.open,h:bar.high,l:bar.low,c:bar.close,v:bar.volume};
               });
               totalBars+=bars[symbol].length;
-              if(bars[symbol].length)returned++;
+              if(bars[symbol].length)returned++;else missing.push(symbol);
             }
             const batchIndex=Math.floor(offset/batchSize)+1;
             await options.onBatch?.({batchIndex,batchCount,symbols,bars,pages:0,totalPages:0,
               totalBars,requestedSymbols:fallbackSymbols.length,returnedSymbols:returned});
           }
           return {source:'alpaca',feed:S.liveFeed||'iex',timeframe:'1Day',start:downloadStart,end:downloadEnd,
-            symbols:fallbackSymbols,requested:fallbackSymbols.length,returned,missing:[],
+            symbols:fallbackSymbols,requested:fallbackSymbols.length,returned,missing,
             batches:batchCount,pages:0,retries:0,totalBars,directory,completedAt:new Date().toISOString()};
         };
         result=await analyzeFullUniverse({...analysisOptions,download:fallbackDownload});
