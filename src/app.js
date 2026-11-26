@@ -169,7 +169,7 @@ async function initApp(){
     signalSelection:typeof saved.signalSelection==='string'?saved.signalSelection:'none',
     signalsOnly:!!saved.signalsOnly,signalRows:new Map(),signalErrors:[],
     signalHistory:priorSignalHistory,signalAsOf:null,freshness:null,staleDiagnostics:{},
-    universeSymbols:[...LIVE_UNIVERSE],universeDirectory:null,universeLeaderboard:null,universeAnalysis:null,universeFitController:null,
+    universeSymbols:[...LIVE_UNIVERSE],universeDirectory:null,universeLeaderboard:null,universeAnalysis:null,universeSignalRows:new Map(),universeFitController:null,
     rules:saved.rules||preset.trend.map(x=>({...x})),sort:saved.sort||'symbol',ascending:saved.ascending!==false,showOnlyMatches:!!saved.showOnlyMatches,showWatch:!!saved.showWatch,chart:{...defaultSettings,...saved.chart},bt:{...defaultBacktest,...saved.bt},result:previousAnalysis?.result||null,sweep:previousAnalysis?.sweep||null,lastAnalysis:previousAnalysis,resultSymbol:previousAnalysis?.symbol||null,resultTf:previousAnalysis?.tf||null,
     portfolioMode:!!saved.portfolioMode,bestFitMode:!!saved.bestFitMode,bestFitValidatedOnly:!!saved.bestFitValidatedOnly,
     btRange:{startDate:String(saved.btRange?.startDate||''),endDate:String(saved.btRange?.endDate||'')},
@@ -1028,7 +1028,7 @@ async function initApp(){
   }
   function universeSignalResultsView(){
     if(S.universeAnalysis?.status!=='complete'||!S.universeAnalysis.signalCount)return '';
-    const actionable=[...S.signalRows.entries()].filter(([,signal])=>signal.status==='LONG'||signal.status==='EXIT')
+    const actionable=[...S.universeSignalRows.entries()].filter(([,signal])=>signal.status==='LONG'||signal.status==='EXIT')
       .sort((a,b)=>(a[1].status==='LONG'?0:1)-(b[1].status==='LONG'?0:1)||a[0].localeCompare(b[0]));
     const rows=actionable.slice(0,100).map(([symbol,signal])=>'<tr data-universe-signal="'+esc(symbol)+'">'+
       '<td>'+esc(symbol)+'</td><td><strong>'+esc(signal.status)+'</strong></td>'+
@@ -3109,7 +3109,7 @@ async function initApp(){
       {...(S.activeStrategy||{code:S.scriptCode,settings:{...S.scriptSettings}})}:null;
     fitConfig={cfg,script};
     fitEverStarted=true;
-    S.fitReport=null;S.fitValidatedReport=null;S.universeLeaderboard=null;
+    S.fitReport=null;S.fitValidatedReport=null;S.universeLeaderboard=null;S.universeSignalRows=new Map();
     S.fitError='';S.fitStatus='Loading Alpaca active/tradable U.S. equity directory…';
     S.universeAnalysis={status:'loading',requested:universeCount(),processed:0,
       feed:S.liveFeed||'iex',timeframe:'1Day',signalStrategy:S.signalSelection};
@@ -3172,6 +3172,7 @@ async function initApp(){
       S.fitSort='sharpe';S.fitDescending=true;
       if(result.signals){
         S.signalRows=new Map(Object.entries(result.signals));
+        S.universeSignalRows=new Map(Object.entries(result.signals));
         S.signalErrors=result.signalErrors;
         S.signalAsOf=new Date().toISOString();
         const chosen=screenerStrategies().find(item=>item.id===S.signalSelection);
