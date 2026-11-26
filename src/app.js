@@ -3167,9 +3167,11 @@ async function initApp(){
       try{
         result=await analyzeFullUniverse(analysisOptions);
       }catch(error){
-        const directoryUnavailable=error?.status===404||/invalid U\.S\. equity directory|invalid multi-symbol bars page|invalid bars object/i.test(String(error?.message||''));
+        const message=String(error?.message||'');
+        const directoryUnavailable=error?.status===404||/invalid U\.S\. equity directory|invalid multi-symbol bars page|invalid bars object/i.test(message)||
+          (!error?.status&&/failed to fetch|fetch failed|networkerror/i.test(message));
         if(!directoryUnavailable)throw error;
-        const fallbackSymbols=[...S.data.keys()].filter(modeSymbol);
+        const fallbackSymbols=[...S.data.keys()].filter(symbol=>modeSymbol(symbol)&&S.sources.get(symbol)==='ALPACA');
         if(!fallbackSymbols.length)throw error;
         const fallbackDownload=async options=>{
           const directory={id:'quick-scan-fallback',count:fallbackSymbols.length,
@@ -3260,7 +3262,7 @@ async function initApp(){
     if(S.fitValidatedOnly&&!Number.isFinite(best.rollingMeanSharpe)){
       notice('No validated symbol has a numeric rolling mean OOS Sharpe.');return;
     }
-    if(S.sources.get(best.symbol)!=='ALPACA'&&!await loadMarketChart(best.symbol))return;
+    if((S.sources.get(best.symbol)!=='ALPACA'||!S.data.get(best.symbol)?.length)&&!await loadMarketChart(best.symbol))return;
     restoreSymbolState(best.symbol);S.bt={...S.bt,...report.settings};
     const winner=S.fitValidatedOnly?best.validatingStrategy:null;
     if(winner)S.bt.strategy=winner.strategy;
