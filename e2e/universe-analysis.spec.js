@@ -16,24 +16,21 @@ test('backtester and single-symbol strategy leaderboard can select and download 
  }}));
  await page.route('**/api/stocks/bars?**',async route=>{
   const url=new URL(route.request().url());
-  const symbols=url.searchParams.get('symbols')?.split(',')||[];
-  requests.push({symbols,limit:url.searchParams.get('limit'),sort:url.searchParams.get('sort')});
-  return route.fulfill({json:{source:'alpaca',feed:'iex',timeframe:'1Day',
-   bars:Object.fromEntries(symbols.map(symbol=>[symbol,makeBars(300,5)])),next_page_token:null}});
+  const symbol=url.searchParams.get('symbol');
+  requests.push({symbol});
+  return route.fulfill({json:{source:'alpaca',feed:'iex',timeframe:'1Day',bars:makeBars(300,5)}});
  });
  await page.goto('./');
  await page.locator('.sidebar [data-tab="backtest"]').click();
  await expect(page.locator('.symbol-search')).toHaveAttribute('placeholder',/4 Alpaca/);
  await page.locator('.symbol-search').fill('AAPL');
  const response=page.waitForResponse(response=>response.url().includes('/api/stocks/bars')&&
-  new URL(response.url()).searchParams.get('symbols')==='AAPL');
+  new URL(response.url()).searchParams.get('symbol')==='AAPL');
  await page.locator('[data-option="symbol"]').selectOption('AAPL');
  await response;
  await expect(page.locator('[data-option="symbol"]')).toHaveValue('AAPL');
  expect(requests).toHaveLength(1);
- expect(requests[0].symbols).toEqual(['AAPL']);
- expect(requests[0].limit).toBe('10000');
- expect(requests[0].sort).toBe('asc');
+ expect(requests[0].symbol).toBe('AAPL');
  await page.locator('[data-action="run-backtest"]').click();
  await expect(page.locator('#equity-chart canvas').first()).toBeVisible();
  await page.locator('[data-action="compare-strategies"]').first().click();

@@ -3167,7 +3167,7 @@ async function initApp(){
       try{
         result=await analyzeFullUniverse(analysisOptions);
       }catch(error){
-        const directoryUnavailable=error?.status===404||/invalid U\.S\. equity directory/i.test(String(error?.message||''));
+        const directoryUnavailable=error?.status===404||/invalid U\.S\. equity directory|invalid multi-symbol bars page|invalid bars object/i.test(String(error?.message||''));
         if(!directoryUnavailable)throw error;
         const fallbackSymbols=[...S.data.keys()].filter(modeSymbol);
         if(!fallbackSymbols.length)throw error;
