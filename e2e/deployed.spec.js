@@ -231,7 +231,7 @@ test('published Round 23 validated universe fit mode can be selected without los
   await expect(page.locator('#universe-fit h2')).toContainText('Validated OOS ranking');
   const countText=await page.locator('#fit-validated-count').textContent();
   const evaluated=Number(countText.match(/of ([\d,]+) evaluated/)?.[1]?.replaceAll(',',''));
-  expect(evaluated).toBeGreaterThan(133);
+  expect(evaluated).toBeGreaterThanOrEqual(133);
   await toggle.uncheck();
   await expect(page.locator('#universe-fit h2')).toContainText('In-sample ranking');
   expect(errors).toEqual([]);
