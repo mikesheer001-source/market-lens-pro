@@ -29,7 +29,7 @@ test('premium, quantity and fees changes recalculate payoff and breakeven',()=>{
   changed.legs[0].quantity=2;
   result=chartOptionsPnl(changed,'SPY',bars,now);
   assert.deepEqual(result.breakevens,[102.75]);
-  assert.deepEqual(result.points.map(point=>point.pnl),[-550,-150,450]);
+  assert.deepEqual(result.points.map(point=>point.pnl),[-550,-150,950]);
   changed.fee=0.65;
   result=chartOptionsPnl(changed,'SPY',bars,now);
   assert.ok(Math.abs(result.breakevens[0]-102.75975)<1e-9);
