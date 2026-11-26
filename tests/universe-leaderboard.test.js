@@ -24,9 +24,9 @@ test('universe leaderboard aggregates comparable strategy metrics across symbols
  assert.equal(report.requested,3);
  assert.deepEqual(report.rows.map(row=>row.id),['preset:ema-cross','preset:breakout']);
  assert.equal(report.rows[0].symbols,2);
- assert.equal(report.rows[0].medianTrainSharpe,1.3);
- assert.equal(report.rows[0].medianOosSharpe,.6);
+ assert.ok(Math.abs(report.rows[0].medianTrainSharpe-1.3)<1e-12);
+ assert.ok(Math.abs(report.rows[0].medianOosSharpe-.6)<1e-12);
  assert.equal(report.rows[0].positiveOos,2);
  assert.equal(report.rows[0].validatedSymbols,1);
- assert.equal(report.rows[1].medianTrainSharpe,1);
+ assert.ok(Math.abs(report.rows[1].medianTrainSharpe-1)<1e-12);
 });
