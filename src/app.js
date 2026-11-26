@@ -3171,7 +3171,7 @@ async function initApp(){
         const directoryUnavailable=error?.status===404||/invalid U\.S\. equity directory|invalid multi-symbol bars page|invalid bars object/i.test(message)||
           (!error?.status&&/failed to fetch|fetch failed|networkerror/i.test(message));
         if(!directoryUnavailable)throw error;
-        const fallbackSymbols=[...new Set([...LIVE_UNIVERSE.filter(modeSymbol),
+        const fallbackSymbols=[...new Set([...LIVE_UNIVERSE,
           ...[...S.data.keys()].filter(symbol=>modeSymbol(symbol)&&S.sources.get(symbol)==='ALPACA')])];
         if(!fallbackSymbols.length)throw error;
         const fallbackDownload=async options=>{
