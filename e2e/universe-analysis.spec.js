@@ -61,6 +61,7 @@ test('full-universe analysis streams more than the quick universe into backtests
    }))])),next_page_token:null}});
  });
  await page.goto('./');
+ await page.locator('.sidebar [data-tab="backtest"]').click();
  await expect(page.locator('.symbol-search')).toHaveAttribute('placeholder',/134 Alpaca/);
  await page.locator('.sidebar [data-tab="screener"]').click();
  await page.locator('[data-option="signal-strategy"]').selectOption('preset:ema-cross');

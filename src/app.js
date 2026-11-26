@@ -18,7 +18,6 @@ import {FIT_COLUMNS,sortUniverseFit,bestUniverseFit,fitAcrossUniverse} from './f
 import {leaderboardDisplayRows,fitDisplayRows,leaderboardRankingCsv,fitRankingCsv,portfolioRankingCsv} from './ranking-export.js';
 import {fitValidatedAcrossUniverse,NO_VALIDATED_FIT} from './fit-validated.js';
 import {analyzeFullUniverse} from './universe-analysis.js';
-import {downloadHistoricalBars} from './history-download.js';
 import {compareStrategies,sortLeaderboard,leaderboardBest,updateSymbolMemory,pruneSymbolMemory,symbolMemoryItem,compactLeaderboard,LEADERBOARD_METRICS} from './leaderboard.js';
 import {runPortfolio,runPortfolioSweep,portfolioUniverse} from './portfolio.js';
 import {windowBacktestBars,windowPortfolioData,validateBacktestRange,actualPortfolioRange,displayBacktestRange} from './date-window.js';
@@ -938,13 +937,13 @@ async function initApp(){
     if(S.sources.get(symbol)!=='ALPACA'||!S.data.get(symbol)?.length){
       notice('Loading daily bars for '+symbol+'…');
       try{
-        const end=new Date().toISOString().slice(0,10);
-        const start=new Date(Date.now()-ALPACA_SCAN_LOOKBACK_DAYS*86_400_000).toISOString().slice(0,10);
-        const downloaded=await downloadHistoricalBars({workerUrl:canonicalWorkerBase(S.apiBaseUrl),
-          symbols:[symbol],feed:S.liveFeed||'iex',timeframe:'1Day',start,end,batchSize:1});
-        const history=alpacaBars(downloaded.bars?.[symbol]||[],'1Day');
-        if(!history.length)throw new Error('No daily OHLCV bars returned for '+symbol+'.');
-        S.data.set(symbol,history);S.sources.set(symbol,'ALPACA');S.liveFeed=downloaded.feed||S.liveFeed||'iex';
+        const url=new URL('/api/stocks/bars',canonicalWorkerBase(S.apiBaseUrl));
+        url.searchParams.set('symbol',symbol);
+        const response=await fetch(url);
+        const payload=await response.json();
+        const history=alpacaBars(payload.bars,'1Day');
+        if(!response.ok||!history.length)throw new Error(payload.error||'No daily bars returned for '+symbol+'.');
+        S.data.set(symbol,history);S.sources.set(symbol,'ALPACA');S.liveFeed=payload.feed||S.liveFeed||'iex';
       }catch(error){
         if(selection===chartSelection)notice('Could not open '+symbol+': '+error.message);
         return false;
@@ -1940,13 +1939,14 @@ async function initApp(){
       'data-option="fit-validated-only" '+(validated?'checked':'')+'/> Validated only</label>';
     const status=S.fitStatus?'<div id="fit-status" role="status" class="info-strip">'+esc(S.fitStatus)+button('Cancel','cancel-universe-fit','small')+'</div>':
       S.fitError?'<div id="fit-status" role="alert" class="info-strip warning">'+esc(S.fitError)+'</div>':'';
+    const scopeWarning=S.universeAnalysis?.scope==='quick-scan-fallback'?'<div class="info-strip warning">Full directory endpoint unavailable. This run is limited to '+universeSize+' symbols already loaded by the quick scan; it is not the full 13,532-symbol universe.</div>':'';
     const header='<div class="panel-header"><h2>Fit across universe · '+mode+' · '+esc(count)+'</h2><div class="flex">'+
       controls+(report&&(!validated||report.rows.length)?
         button(validated?'Load best validated symbol':'Load best symbol','load-fit-best','primary'):'')+
         (report?button('Download CSV','export-fit','small'):'')+'</div></div>';
     const range=report?.dateRange;
     if(!report)return '<section class="panel" id="universe-fit">'+header+
-      '<div class="panel-body">'+status+'<div id="fit-validated-count" role="status">'+esc(count)+'</div>'+
+      '<div class="panel-body">'+scopeWarning+status+'<div id="fit-validated-count" role="status">'+esc(count)+'</div>'+
       '<p class="section-note">Run the selected strategy backtest for all '+universeSize+
       ' active and tradable Alpaca U.S. equities. Histories stream in 100-symbol batches; each page is capped at 10,000 total bars. The per-symbol results rank by training Sharpe. Validated mode checks presets, saved Pine strategies and built-in strategy examples against the same 70/30 and five rolling OOS windows as the leaderboard.</p></div></section>';
     const provenance='<div id="fit-source" class="info-strip">'+
@@ -1971,7 +1971,7 @@ async function initApp(){
         '<td>'+esc(row.source)+'</td>'+
         '<td>'+esc(row.barDate||'—')+'</td></tr>').join('');
       return '<section class="panel" id="universe-fit">'+header+
-        '<div class="panel-body">'+status+provenance+
+        '<div class="panel-body">'+scopeWarning+status+provenance+
         (report.rows.length?'<div class="table-wrap"><table class="data-table fit-validated-table"><thead><tr>'+
           '<th>Symbol</th><th>Validating strategy</th><th>Rolling mean OOS Sharpe</th>'+
           '<th>Rolling median OOS Sharpe</th><th>Positive windows</th>'+
@@ -2008,7 +2008,7 @@ async function initApp(){
       '<td>'+esc(row.source)+'</td><td>'+esc(row.barDate||'—')+
       (row.error?'<small class="fit-error">'+esc(row.error)+'</small>':'')+'</td></tr>').join('');
     return '<section class="panel" id="universe-fit">'+header+
-      '<div class="panel-body">'+status+provenance+
+      '<div class="panel-body">'+scopeWarning+status+provenance+
       '<p class="section-note">Default ranking uses training Sharpe, not OOS Sharpe. The 70/30 holdout and modeled costs are unchanged; no missing bars are fabricated.</p>'+
       '<div class="table-wrap"><table class="data-table fit-table"><thead><tr>'+
       headers+'</tr></thead><tbody>'+cells+'</tbody></table></div></div></section>';
@@ -3127,7 +3127,7 @@ async function initApp(){
         throw Error('Alpaca history requests are limited to ten years. Shorten the selected date range.');
       const selection=S.signalSelection==='none'?null:
         screenerStrategies().find(item=>item.id===S.signalSelection)||null;
-      const result=await analyzeFullUniverse({
+      const analysisOptions={
         workerUrl:canonicalWorkerBase(S.apiBaseUrl),feed:S.liveFeed||'iex',
         start:downloadStart,end:downloadEnd,options:cfg,dateRange:{...S.btRange},
         strategyScript:script,savedScripts:S.scriptLibrary,builtInExamples:PINE_EXAMPLES,
@@ -3162,7 +3162,44 @@ async function initApp(){
           const status=document.getElementById('fit-status');
           if(status?.firstChild)status.firstChild.textContent=S.fitStatus;
         }
-      });
+      };
+      let result;
+      try{
+        result=await analyzeFullUniverse(analysisOptions);
+      }catch(error){
+        const directoryUnavailable=error?.status===404||/invalid U\.S\. equity directory/i.test(String(error?.message||''));
+        if(!directoryUnavailable)throw error;
+        const fallbackSymbols=[...S.data.keys()].filter(modeSymbol);
+        if(!fallbackSymbols.length)throw error;
+        const fallbackDownload=async options=>{
+          const directory={id:'quick-scan-fallback',count:fallbackSymbols.length,
+            source:'quick-scan-fallback',symbols:fallbackSymbols};
+          options.onProgress?.({type:'directory',directory,requestedSymbols:fallbackSymbols.length});
+          const batchSize=100,batchCount=Math.ceil(fallbackSymbols.length/batchSize);
+          let totalBars=0,returned=0;
+          for(let offset=0;offset<fallbackSymbols.length;offset+=batchSize){
+            const symbols=fallbackSymbols.slice(offset,offset+batchSize),bars=Object.create(null);
+            for(const symbol of symbols){
+              bars[symbol]=(S.data.get(symbol)||[]).map(bar=>{
+                const rawTime=bar.time;
+                const t=typeof rawTime==='string'?
+                  (/^\d{4}-\d{2}-\d{2}$/.test(rawTime)?rawTime+'T05:00:00Z':rawTime):
+                  new Date(Number(rawTime)*1000).toISOString();
+                return {t,o:bar.open,h:bar.high,l:bar.low,c:bar.close,v:bar.volume};
+              });
+              totalBars+=bars[symbol].length;
+              if(bars[symbol].length)returned++;
+            }
+            const batchIndex=Math.floor(offset/batchSize)+1;
+            await options.onBatch?.({batchIndex,batchCount,symbols,bars,pages:0,totalPages:0,
+              totalBars,requestedSymbols:fallbackSymbols.length,returnedSymbols:returned});
+          }
+          return {source:'alpaca',feed:S.liveFeed||'iex',timeframe:'1Day',start:downloadStart,end:downloadEnd,
+            symbols:fallbackSymbols,requested:fallbackSymbols.length,returned,missing:[],
+            batches:batchCount,pages:0,retries:0,totalBars,directory,completedAt:new Date().toISOString()};
+        };
+        result=await analyzeFullUniverse({...analysisOptions,download:fallbackDownload});
+      }
       if(runId!==fitRunSerial)return;
       S.universeSymbols=result.directory?.symbols||S.universeSymbols;
       S.universeDirectory=result.directory||S.universeDirectory;
@@ -3200,7 +3237,9 @@ async function initApp(){
         signalCount:signalValues.length,signalLongCount:signalValues.filter(item=>item.status==='LONG').length,
         signalExitCount:signalValues.filter(item=>item.status==='EXIT').length,
         signalUnavailableCount:signalValues.filter(item=>item.status==='UNAVAILABLE').length,
-        leaderboardStrategies:result.universeLeaderboard.rows.length,runAt:new Date().toISOString()};
+        leaderboardStrategies:result.universeLeaderboard.rows.length,
+        scope:result.directory?.source==='quick-scan-fallback'?'quick-scan-fallback':'full-directory',
+        runAt:new Date().toISOString()};
       S.fitStatus='';S.fitError='';
       render();
     }catch(err){
