@@ -1909,15 +1909,16 @@ async function initApp(){
 
   function universeFitView(){
     const validated=S.fitValidatedOnly,report=validated?S.fitValidatedReport:S.fitReport;
+    const universeSize=universeCount();
     const mode=validated?'Validated OOS ranking':'In-sample ranking';
     const count=S.fitValidatedReport?
       S.fitValidatedReport.rows.filter(row=>validationStatus(row).validated).length+
-        ' of '+LIVE_UNIVERSE.length+
+        ' of '+universeSize+
         ' symbols have a validated strategy':
-      'Validated-strategy count pending · 0 of '+LIVE_UNIVERSE.length+' evaluated';
+      'Validated-strategy count pending · 0 of '+universeSize+' evaluated';
     const controls='<label class="inline-check"><input type="checkbox" id="fit-validated-only" '+
       'data-option="fit-validated-only" '+(validated?'checked':'')+'/> Validated only</label>';
-    const status=S.fitStatus?'<div id="fit-status" role="status" class="info-strip">'+esc(S.fitStatus)+'</div>':
+    const status=S.fitStatus?'<div id="fit-status" role="status" class="info-strip">'+esc(S.fitStatus)+button('Cancel','cancel-universe-fit','small')+'</div>':
       S.fitError?'<div id="fit-status" role="alert" class="info-strip warning">'+esc(S.fitError)+'</div>':'';
     const header='<div class="panel-header"><h2>Fit across universe · '+mode+' · '+esc(count)+'</h2><div class="flex">'+
       controls+(report&&(!validated||report.rows.length)?
@@ -1926,10 +1927,10 @@ async function initApp(){
     const range=report?.dateRange;
     if(!report)return '<section class="panel" id="universe-fit">'+header+
       '<div class="panel-body">'+status+'<div id="fit-validated-count" role="status">'+esc(count)+'</div>'+
-      '<p class="section-note">Apply the selected strategy to all '+LIVE_UNIVERSE.length+
+      '<p class="section-note">Apply the selected strategy to all '+universeSize+
       ' curated Alpaca symbols for the default training-Sharpe ranking. Validated mode checks presets, saved Pine strategies and built-in strategy examples against the same 70/30 and five rolling OOS windows as the leaderboard.</p></div></section>';
     const provenance='<div id="fit-source" class="info-strip">'+
-      (S.fitReport?.completed??report.completed)+'/'+LIVE_UNIVERSE.length+
+      (S.fitReport?.completed??report.completed)+'/'+universeSize+
       ' symbols backtested · '+mode+' · ALPACA '+esc(String(S.liveFeed).toUpperCase())+
       ' 1Day OHLCV · '+esc(report.runAt)+
       (range?.startDate||range?.endDate?
@@ -1991,6 +1992,26 @@ async function initApp(){
       '<p class="section-note">Default ranking uses training Sharpe, not OOS Sharpe. The 70/30 holdout and modeled costs are unchanged; no missing bars are fabricated.</p>'+
       '<div class="table-wrap"><table class="data-table fit-table"><thead><tr>'+
       headers+'</tr></thead><tbody>'+cells+'</tbody></table></div></div></section>';
+  }
+
+  function universeLeaderboardView(){
+    const report=S.universeLeaderboard;
+    if(!report?.rows?.length)return '';
+    const cells=report.rows.map((row,index)=>'<tr data-universe-strategy="'+esc(row.id)+'"'+
+      (index===0?' class="leaderboard-best"':'')+'><td>'+(index+1)+'. '+esc(row.name)+'</td>'+
+      '<td>'+row.symbols.toLocaleString('en-US')+'</td>'+
+      '<td>'+format(row.medianTrainSharpe,3)+'</td><td>'+format(row.medianOosSharpe,3)+'</td>'+
+      '<td>'+pct(row.positiveOosPct)+'</td><td>'+pct(row.medianReturnPct)+'</td>'+
+      '<td>'+pct(-row.medianMaxDD)+'</td><td>'+row.validatedSymbols.toLocaleString('en-US')+'</td></tr>').join('');
+    return '<section class="panel" id="universe-leaderboard"><div class="panel-header"><h2>Strategy leaderboard · full U.S. equity universe</h2>'+
+      '<span class="muted">'+report.symbolsAnalyzed.toLocaleString('en-US')+' symbols compared</span></div><div class="panel-body">'+
+      '<div class="info-strip">Ranked by median training Sharpe across symbols · '+esc(String(report.feed||'IEX').toUpperCase())+
+      ' daily OHLCV · '+report.pages.toLocaleString('en-US')+' pages · '+report.totalBars.toLocaleString('en-US')+
+      ' bars. OOS and validation columns are descriptive, not used for ranking.</div>'+
+      '<div class="table-wrap"><table class="data-table" id="universe-leaderboard-table"><thead><tr>'+
+      '<th>Strategy</th><th>Symbols</th><th>Median train Sharpe</th><th>Median OOS Sharpe</th>'+
+      '<th>Positive OOS</th><th>Median return</th><th>Median max DD</th><th>Validated symbols</th>'+
+      '</tr></thead><tbody>'+cells+'</tbody></table></div></div></section>';
   }
 
   function backtestSection(key,title,body,open=false){
@@ -2125,7 +2146,7 @@ async function initApp(){
     return head('Backtest','Signals use completed bars and next-open fills. One position at a time, long or short.',symbolSelect()+tfSelect())+
       portfolioModeControl()+provenance+(S.result?validation+performance+tradeView+equity+settings:settings+performance+equity)+
       variantComparisonView()+backtestSection('trades','Trade log',tradeTable(S.result))+
-      leaderboardView()+universeFitView();
+      leaderboardView()+universeFitView()+universeLeaderboardView();
   }
   function optimizeView(){
     if(S.portfolioMode)return portfolioOptimizeView();
@@ -3058,70 +3079,125 @@ async function initApp(){
 
 
   let fitRunSerial=0,fitEverStarted=false,fitConfig=null;
-  async function runUniverseFitCurrent({reuseData=false}={}){
+  async function runUniverseFitCurrent(){
     const runId=++fitRunSerial;
-    if(!reuseData||!fitConfig){
-      const cfg={...S.bt};
-      const script=cfg.strategy==='pine-custom'?
-        {...(S.activeStrategy||{code:S.scriptCode,settings:{...S.scriptSettings}})}:null;
-      fitConfig={cfg,script};
-    }
+    S.universeFitController?.abort();
+    const controller=new AbortController();
+    S.universeFitController=controller;
+    const cfg={...S.bt};
+    const script=cfg.strategy==='pine-custom'?
+      {...(S.activeStrategy||{code:S.scriptCode,settings:{...S.scriptSettings}})}:null;
+    fitConfig={cfg,script};
     fitEverStarted=true;
-    const {cfg,script}=fitConfig;
-    S.fitReport=null;S.fitValidatedReport=null;
-    S.fitError='';S.fitStatus=reuseData?'Recalculating both rankings for selected dates…':
-      'Fetching '+LIVE_UNIVERSE.length+' Alpaca daily OHLCV histories…';
+    S.fitReport=null;S.fitValidatedReport=null;S.universeLeaderboard=null;
+    S.fitError='';S.fitStatus='Loading Alpaca active/tradable U.S. equity directory…';
+    S.universeAnalysis={status:'loading',requested:universeCount(),processed:0,
+      feed:S.liveFeed||'iex',timeframe:'1Day',signalStrategy:S.signalSelection};
     render();
+    await new Promise(resolve=>setTimeout(resolve,0));
     try{
-      if(!reuseData){
-        const options={restoreTab:'backtest',restoreSymbol:S.mode==='live'?S.symbol:S.lastLiveSymbol};
-        const result=await fetchLiveUniverse(options);
-        if(runId!==fitRunSerial)return;
-        if(!workspaceActive('backtest')){
-          liveScanPending={result,options};
-          S.fitStatus='';
-          return;
-        }
-        applyLiveUniverse(result,options);
-      }
-      if(runId!==fitRunSerial)return;
-      S.fitStatus='Ranking '+LIVE_UNIVERSE.length+' symbols by training Sharpe…';
-      if(workspaceActive('backtest'))render();
-      await new Promise(resolve=>setTimeout(resolve,0));
-      const histories=new Map(LIVE_UNIVERSE.filter(sym=>S.sources.get(sym)==='ALPACA')
-        .map(sym=>[sym,S.data.get(sym)]));
-      const common={symbols:LIVE_UNIVERSE,data:histories,options:cfg,
-        backtest,compilePine,executePine,dateRange:{...S.btRange},
+      const today=new Date().toISOString().slice(0,10);
+      const downloadEnd=S.btRange.endDate||today;
+      const downloadStart=S.btRange.startDate||
+        new Date(Date.now()-ALPACA_SCAN_LOOKBACK_DAYS*86_400_000).toISOString().slice(0,10);
+      if(!Number.isFinite(Date.parse(downloadStart))||!Number.isFinite(Date.parse(downloadEnd))||
+        Date.parse(downloadStart)>=Date.parse(downloadEnd))
+        throw Error('Choose a valid full-universe history date range.');
+      if(Date.parse(downloadEnd)-Date.parse(downloadStart)>10*366*86_400_000)
+        throw Error('Alpaca history requests are limited to ten years. Shorten the selected date range.');
+      const selection=S.signalSelection==='none'?null:
+        screenerStrategies().find(item=>item.id===S.signalSelection)||null;
+      const result=await analyzeFullUniverse({
+        workerUrl:canonicalWorkerBase(S.apiBaseUrl),feed:S.liveFeed||'iex',
+        start:downloadStart,end:downloadEnd,options:cfg,dateRange:{...S.btRange},
+        strategyScript:script,savedScripts:S.scriptLibrary,builtInExamples:PINE_EXAMPLES,
+        selection,signalOptions:{...S.bt,side:'long'},backtest,compilePine,executePine,
         expectedBarDate:S.freshness?.expected||expectedNyseBarDate(),
-        sourceFor:sym=>histories.has(sym)?
-          'ALPACA '+String(S.liveFeed).toUpperCase()+' 1Day':'NO ALPACA BARS'};
-      S.fitReport=fitAcrossUniverse({...common,strategyScript:script});
-      S.fitSort='sharpe';S.fitDescending=true;
-      S.fitStatus='Evaluating preset and Pine strategies for validated OOS fit…';if(workspaceActive('backtest'))render();
-      const validated=await fitValidatedAcrossUniverse({...common,
-        savedScripts:S.scriptLibrary,builtInExamples:PINE_EXAMPLES,
-        isCancelled:()=>runId!==fitRunSerial,
-        onProgress:(done,passing)=>{
+        signal:controller.signal,
+        onProgress:event=>{
           if(runId!==fitRunSerial)return;
-          S.fitStatus='Validating '+done+'/'+LIVE_UNIVERSE.length+
-            ' symbols · '+passing+' currently qualify…';
-          const el=document.getElementById('fit-status');
-          if(el)el.textContent=S.fitStatus;
-        }});
+          if(event.type==='directory'&&Array.isArray(event.directory?.symbols)){
+            S.universeSymbols=event.directory.symbols;
+            S.universeDirectory={id:event.directory.id||null,count:event.directory.count||event.directory.symbols.length,
+              source:event.directory.source||'alpaca-v2-assets',refreshedAt:event.directory.refreshedAt||null};
+          }
+          if(event.type==='page'){
+            S.fitStatus='Downloading batch '+event.batchIndex+'/'+event.batchCount+
+              ' · page '+event.page+' · '+Number(event.totalBars||0).toLocaleString('en-US')+
+              ' OHLCV bars received · '+universeCount().toLocaleString('en-US')+' symbols';
+            const status=document.getElementById('fit-status');
+            if(status)status.textContent=S.fitStatus;
+          }
+        },
+        onBatch:event=>{
+          if(runId!==fitRunSerial)return;
+          S.universeAnalysis={...S.universeAnalysis,status:'loading',
+            requested:event.requested,processed:event.processed,returned:event.returned,
+            pages:event.totalPages,bars:event.totalBars,signalCount:event.signalCount};
+          S.fitStatus='Analyzed '+event.processed.toLocaleString('en-US')+'/'+
+            event.requested.toLocaleString('en-US')+' symbols · '+event.fitCompleted.toLocaleString('en-US')+
+            ' backtests · '+event.leaderboardStrategies.toLocaleString('en-US')+
+            ' strategy comparisons · '+event.signalCount.toLocaleString('en-US')+
+            ' signals · '+event.totalPages.toLocaleString('en-US')+' pages';
+          const status=document.getElementById('fit-status');
+          if(status)status.textContent=S.fitStatus;
+        }
+      });
       if(runId!==fitRunSerial)return;
-      S.fitValidatedReport=validated;S.fitStatus='';S.fitError='';if(workspaceActive('backtest'))render();
+      S.universeSymbols=result.directory?.symbols||S.universeSymbols;
+      S.universeDirectory=result.directory||S.universeDirectory;
+      S.fitReport=result.fitReport;
+      S.fitValidatedReport=result.fitValidatedReport;
+      S.universeLeaderboard=result.universeLeaderboard;
+      S.fitSort='sharpe';S.fitDescending=true;
+      if(result.signals){
+        S.signalRows=new Map(Object.entries(result.signals));
+        S.signalErrors=result.signalErrors;
+        S.signalAsOf=new Date().toISOString();
+        const chosen=screenerStrategies().find(item=>item.id===S.signalSelection);
+        if(chosen){
+          const current={};
+          for(const [symbol,signal] of S.signalRows)
+            if(['LONG','FLAT','EXIT'].includes(signal.status))current[symbol]=signal;
+          let codeHash=2166136261;
+          if(chosen.kind==='pine')for(let i=0;i<chosen.code.length;i++)
+            codeHash=Math.imul(codeHash^chosen.code.charCodeAt(i),16777619)>>>0;
+          const key=S.mode+'|'+S.signalSelection+(chosen.kind==='pine'?'|'+codeHash.toString(16):'');
+          const checked=scanSignalFlips(S.signalHistory[key]||{},current,{
+            strategyId:chosen.id,strategyName:chosen.name,checkedAt:S.signalAsOf
+          });
+          S.signalHistory[key]=checked.states;
+          persistSignalHistory(5000);
+        }
+      }
+      S.universeAnalysis={status:'complete',requested:result.requested,processed:result.processed,
+        returned:result.download.returned,missing:result.download.missing.length,
+        pages:result.download.pages,batches:result.download.batches,bars:result.download.totalBars,
+        retries:result.download.retries,feed:S.liveFeed||'iex',timeframe:'1Day',
+        start:downloadStart,end:downloadEnd,signalStrategy:selection?.name||'none',
+        signalCount:result.signals?Object.keys(result.signals).length:0,
+        leaderboardStrategies:result.universeLeaderboard.rows.length,runAt:new Date().toISOString()};
+      S.fitStatus='';S.fitError='';
+      render();
     }catch(err){
       if(runId!==fitRunSerial)return;
-      S.fitStatus='';S.fitError=String(err.message||err);if(workspaceActive('backtest'))render();
+      S.fitStatus='';
+      S.fitError=String(err.message||err);
+      S.universeAnalysis={...S.universeAnalysis,status:controller.signal.aborted?'cancelled':'error',
+        error:S.fitError};
+      render();
+    }finally{
+      if(runId===fitRunSerial)S.universeFitController=null;
     }
   }
-  function loadUniverseFitBest(){
+  async function loadUniverseFitBest(){
     const report=S.fitValidatedOnly?S.fitValidatedReport:S.fitReport;
     const best=S.fitValidatedOnly?report?.rows[0]:bestUniverseFit(report?.rows||[]);
     if(!best){notice('No eligible symbol in this fit.');return;}
     if(S.fitValidatedOnly&&!Number.isFinite(best.rollingMeanSharpe)){
       notice('No validated symbol has a numeric rolling mean OOS Sharpe.');return;
     }
+    if(!S.data.has(best.symbol)&&!await loadMarketChart(best.symbol))return;
     restoreSymbolState(best.symbol);S.bt={...S.bt,...report.settings};
     const winner=S.fitValidatedOnly?best.validatingStrategy:null;
     if(winner)S.bt.strategy=winner.strategy;
@@ -3408,6 +3484,11 @@ async function initApp(){
     },
 
     'fit-universe':()=>void runUniverseFitCurrent(),
+    'run-universe-analysis':()=>{showWorkspace('backtest');void runUniverseFitCurrent();render();},
+    'cancel-universe-fit':()=>{
+      fitRunSerial++;S.universeFitController?.abort();S.universeFitController=null;
+      S.fitStatus='';S.universeAnalysis={...S.universeAnalysis,status:'cancelled'};render();
+    },
     'load-fit-best':()=>loadUniverseFitBest(),
     'sort-fit':el=>{const key=el.dataset.key;if(!FIT_COLUMNS.includes(key))return;
       if(S.fitSort===key)S.fitDescending=!S.fitDescending;
