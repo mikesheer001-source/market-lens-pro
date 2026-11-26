@@ -415,7 +415,6 @@ export default {
             upstreamUrl.searchParams.set("limit", "10000");
             upstreamUrl.searchParams.set("adjustment", "all");
             upstreamUrl.searchParams.set("feed", feed);
-    upstreamUrl.searchParams.set("sort", "asc");
             upstreamUrl.searchParams.set("sort", "asc");
             if (pageToken) upstreamUrl.searchParams.set("page_token", pageToken);
 
@@ -596,6 +595,7 @@ export default {
     upstreamUrl.searchParams.set("limit", String(limit));
     upstreamUrl.searchParams.set("adjustment", adjustment);
     upstreamUrl.searchParams.set("feed", feed);
+    upstreamUrl.searchParams.set("sort", "asc");
     const pageToken = url.searchParams.get("page_token");
     if (pageToken) {
       if (pageToken.length > 2_000) return json({ error: "Invalid page token." }, 400, origin, env);
