@@ -18,7 +18,7 @@ export function createUniverseLeaderboardAccumulator(){
       if(!item){
         item={id:row.id,name:row.name,strategy:row.strategy,kind:row.kind||'preset',
           symbols:new Set(),trainSharpe:[],testSharpe:[],returnPct:[],maxDD:[],
-          trades:[],rollingSharpe:[],validated:0,positiveOos:0,assessableOos:0};
+          trades:[],rollingSharpe:[],validatedSymbols:new Set(),positiveOos:0,assessableOos:0};
         strategies.set(row.id,item);
       }
       item.symbols.add(symbol);
@@ -29,7 +29,7 @@ export function createUniverseLeaderboardAccumulator(){
       pushFinite(item.trades,row.metrics?.trades);
       pushFinite(item.rollingSharpe,row.rolling?.meanSharpe);
       if(row.validation?.validated===true||row.validation?.singleSplitValidated===true||
-        row.rolling?.validated===true)item.validated++;
+        row.rolling?.validated===true)item.validatedSymbols.add(symbol);
       const test=row.validation?.enoughTestBars?row.testMetrics?.sharpe:null;
       if(finite(test)){item.assessableOos++;if(test>0)item.positiveOos++;}
     }
@@ -44,7 +44,7 @@ export function createUniverseLeaderboardAccumulator(){
       positiveOosPct:item.assessableOos?100*item.positiveOos/item.assessableOos:null,
       medianReturnPct:median(item.returnPct),medianMaxDD:median(item.maxDD),
       medianTrades:median(item.trades),medianRollingOosSharpe:median(item.rollingSharpe),
-      validatedSymbols:item.validated
+      validatedSymbols:item.validatedSymbols.size
     })).sort((a,b)=>{
       const x=a.medianTrainSharpe,y=b.medianTrainSharpe;
       if(finite(x)!==finite(y))return finite(x)?-1:1;
