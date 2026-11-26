@@ -1026,6 +1026,22 @@ async function initApp(){
     if(matchMedia('(max-width: 800px)').matches)openScreenerDialog(row.dataset.symbol);
     else openScannedChart(row.dataset.symbol);
   }
+  function universeSignalResultsView(){
+    if(S.universeAnalysis?.status!=='complete'||!S.universeAnalysis.signalCount)return '';
+    const actionable=[...S.signalRows.entries()].filter(([,signal])=>signal.status==='LONG'||signal.status==='EXIT')
+      .sort((a,b)=>(a[1].status==='LONG'?0:1)-(b[1].status==='LONG'?0:1)||a[0].localeCompare(b[0]));
+    const rows=actionable.slice(0,100).map(([symbol,signal])=>'<tr data-universe-signal="'+esc(symbol)+'">'+
+      '<td>'+esc(symbol)+'</td><td><strong>'+esc(signal.status)+'</strong></td>'+
+      '<td>'+esc(signal.barDate||'—')+'</td><td>'+esc(signal.source||'ALPACA IEX')+'</td></tr>').join('');
+    return '<section class="panel" id="universe-signal-results"><div class="panel-header"><h2>Full-universe actionable signals</h2>'+
+      '<span class="muted">'+actionable.length.toLocaleString('en-US')+' LONG / EXIT signals</span></div><div class="panel-body">'+
+      (rows?'<div class="table-wrap"><table class="data-table"><thead><tr><th>Symbol</th><th>Signal</th><th>Latest bar</th><th>Source</th></tr></thead><tbody>'+rows+'</tbody></table></div>':
+      '<div class="empty">No LONG or EXIT signals on the latest completed bars for this strategy.</div>')+
+      (actionable.length>100?'<p class="section-note">Showing the first 100 of '+actionable.length.toLocaleString('en-US')+' actionable signals.</p>':'')+
+      (S.universeAnalysis.signalsStale?'<p class="info-strip warning">The selected signal strategy has changed. Rerun full-universe analysis to refresh these results.</p>':'')+
+      '</div></section>';
+  }
+
   function screenerView(includeWorkspace=true){
     const full=marketShown();
     const symbols=full?marketVisible():[...S.data.keys()].filter(isVisibleSymbol);
@@ -1072,13 +1088,17 @@ async function initApp(){
       esc(S.serverScanStatus==='loading'?'Running server-side screener…':S.serverScanStatus)+'</p>';
     const universeSignalStatus=S.universeAnalysis?.status==='complete'&&S.universeAnalysis.signalCount?
       '<div class="info-strip" id="universe-signal-status">Full-universe signals: '+
-      S.universeAnalysis.signalCount.toLocaleString('en-US')+' symbols · '+esc(S.universeAnalysis.signalStrategy||'selected strategy')+
+      S.universeAnalysis.signalCount.toLocaleString('en-US')+' evaluated · '+
+      (S.universeAnalysis.signalLongCount||0).toLocaleString('en-US')+' LONG · '+
+      (S.universeAnalysis.signalExitCount||0).toLocaleString('en-US')+' EXIT · '+
+      (S.universeAnalysis.signalUnavailableCount||0).toLocaleString('en-US')+' unavailable · '+
+      esc(S.universeAnalysis.signalStrategy||'selected strategy')+
       (S.universeAnalysis.signalsStale?' · strategy changed; rerun full-universe analysis':'')+'</div>':'';
     const fact=factBar?'<div class="market-fact" role="status"><span class="market-fact-label">'+factLabel+'</span><strong>'+esc(factSymbol)+' &nbsp; $'+format(factBar.close)+'</strong><small>Bar date: '+esc(String(factBar.time))+(S.mode==='live'?' · '+esc(String(S.liveFeed).toUpperCase())+' feed · Alpaca daily close, not a last-trade quote':' · simulated, not a market quote')+'</small></div>':S.mode==='live'?'<div class="market-fact warning" role="status">Alpaca VXX daily close unavailable — VXX was not returned by the connected feed.</div>':'';
     return '<div id="screener-intro">'+head('Screener',full?'U.S. exchange listings · Alpaca daily, weekly and monthly filters.':'Filter '+symbols.length+' '+('Alpaca or imported instruments')+' with explicit technical conditions.',marketControls()+(!full&&S.mode==='live'?button(S.serverScanStatus==='loading'?'Server scanning…':'Run server scan','server-scan','small'):'')+button('Analyze full universe','run-universe-analysis','small')+button('Open Chart Lab','view-charts','small')+
         (reviewableMatches(rows).length?button('Review matches','screener-chart','primary'):''))+'</div>'+
       '<div id="screener-facts">'+(full?'':fact)+activeAlertBanner()+activeSnapshotBanner()+'</div>'+
-      '<div id="screener-metrics" class="metrics">'+metric(S.savedScanView?'Saved rows':'Symbols loaded',S.savedScanView?rows.length:all.length,S.savedScanView?'Historical snapshot':'Alpaca and imported data')+metric('Matching filters',matched,'All visible symbols')+metric('Visible results',rows.length,'Search and match filter')+metric('Active conditions',S.rules.length,'AND logic; all must pass') +'</div><div id="screener-status">'+(full?'<p id="market-scan-status" class="info-strip" role="status">'+esc(marketMessage())+'</p><p class="section-note">Covers active U.S. exchange listings in Alpaca’s directory. Thinly traded tickers may have older or missing bars. Two-hour filters and strategy signals are available in the quick screener.</p>':scanStatus)+freshnessBadge+serverScanStatus+universeSignalStatus+'</div>'+
+      '<div id="screener-metrics" class="metrics">'+metric(S.savedScanView?'Saved rows':'Symbols loaded',S.savedScanView?rows.length:all.length,S.savedScanView?'Historical snapshot':'Alpaca and imported data')+metric('Matching filters',matched,'All visible symbols')+metric('Visible results',rows.length,'Search and match filter')+metric('Active conditions',S.rules.length,'AND logic; all must pass') +'</div><div id="screener-status">'+(full?'<p id="market-scan-status" class="info-strip" role="status">'+esc(marketMessage())+'</p><p class="section-note">Covers active U.S. exchange listings in Alpaca’s directory. Thinly traded tickers may have older or missing bars. Two-hour filters and strategy signals are available in the quick screener.</p>':scanStatus)+freshnessBadge+serverScanStatus+universeSignalStatus+'</div>'+universeSignalResultsView()+
       '<div class="panel"><div class="panel-header"><h2>Screen rules</h2><div class="flex"><label class="control">Preset '+select([['custom','Custom rules'],['trend','Trend pullback'],['original','Original strict W/D/2H'],['oversold','RSI oversold'],['momentum','Momentum'],['volatility','VXX / Volatility'],['all','Show all']],presetKey,'data-option="preset"')+'</label>'+button('+ Add rule','add-rule')+'</div></div><div class="panel-body"><div class="filters">'+(rules||'<span class="muted">No filters — showing all instruments.</span>')+'</div><div class="section-note" style="margin-top:12px">“Original strict” reproduces the weekly EMA200 and weekly/daily/two-hour RSI filter logic. RSI 5D is calculated from daily closes; daily bars cannot reconstruct true two-hour data. The VXX / Volatility preset narrows the universe to VXX, UVXY, SVXY, VIXY, VIXM, VXZ, SVIX, UVIX, SVOL and ZVOL, using daily RSI, 252-session drawdown and % versus daily EMA200.</div></div></div>'+
       '<div class="panel"><div class="panel-header"><h2>Market results</h2><div class="flex"><span id="screener-refresh">'+(full?'':button(S.scan.status==='loading'?'Scanning…':'Refresh live scan','scan-universe','small primary'))+'</span>'+button('Export screener CSV','export-screener','small')+button('Columns','screener-columns','small')+
       (full?'':'<label class="control">Strategy '+selectStrategy+'</label>'+
@@ -3170,12 +3190,15 @@ async function initApp(){
           persistSignalHistory(5000);
         }
       }
+      const signalValues=result.signals?Object.values(result.signals):[];
       S.universeAnalysis={status:'complete',requested:result.requested,processed:result.processed,
         returned:result.download.returned,missing:result.download.missing.length,
         pages:result.download.pages,batches:result.download.batches,bars:result.download.totalBars,
         retries:result.download.retries,feed:S.liveFeed||'iex',timeframe:'1Day',
         start:downloadStart,end:downloadEnd,signalStrategy:selection?.name||'none',
-        signalCount:result.signals?Object.keys(result.signals).length:0,
+        signalCount:signalValues.length,signalLongCount:signalValues.filter(item=>item.status==='LONG').length,
+        signalExitCount:signalValues.filter(item=>item.status==='EXIT').length,
+        signalUnavailableCount:signalValues.filter(item=>item.status==='UNAVAILABLE').length,
         leaderboardStrategies:result.universeLeaderboard.rows.length,runAt:new Date().toISOString()};
       S.fitStatus='';S.fitError='';
       render();
