@@ -16,7 +16,7 @@ export async function analyzeFullUniverse({
   workerUrl,feed='iex',start,end,adjustment='all',batchSize=100,requestIntervalMs=2500,
   options={},dateRange={},strategyScript=null,savedScripts=[],builtInExamples=[],
   selection=null,signalOptions=options,backtest,compilePine,executePine,
-  expectedBarDate=null,signal,onProgress=()=>{},onBatch=()=>{},
+  expectedBarDate=null,signal,onProgress=()=>{},onBatch=()=>{},compare,
   download=downloadUniverseHistory
 }={}){
   if(typeof backtest!=='function')throw new Error('Backtest engine unavailable.');
@@ -46,6 +46,7 @@ export async function analyzeFullUniverse({
       fitCompleted+=fit.completed;
       const validated=await fitValidatedAcrossUniverse({...common,
         savedScripts,builtInExamples,
+        ...(compare?{compare}:{}),
         isCancelled:()=>!!signal?.aborted,
         onComparison:(symbol,comparison)=>leaderboard.add(symbol,comparison)
       });
@@ -74,7 +75,7 @@ export async function analyzeFullUniverse({
     }
   });
   const requested=result.requested||directory?.count||processed;
-  const fitReport={version:2,settings:{...options,timeframe:'D'},dateRange,
+  const fitReport={version:2,settings:{...options,timeframe:'D'},script:strategyScript?{...strategyScript}:null,dateRange,
     expectedBarDate,runAt:new Date().toISOString(),requested,
     completed:fitCompleted,rows:sortUniverseFit(fitRows)};
   const fitValidatedReport={version:3,mode:'validated',settings:{...options,timeframe:'D'},

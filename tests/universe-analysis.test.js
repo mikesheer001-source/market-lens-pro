@@ -14,8 +14,12 @@ test('full-universe analysis processes streamed batches for Fit, leaderboard and
  const result=await analyzeFullUniverse({
   start:'2025-01-01',end:'2025-04-01',feed:'iex',options:{strategy:'ema-cross',capital:10000},
   selection:{id:'preset:ema-cross',name:'EMA crossover',kind:'preset',strategy:'ema-cross'},
-  backtest:(bars)=>({metrics:{returnPct:bars.length,sharpe:1,maxDD:2,trades:1},curve:[{time:bars[0].time,value:10000}]}),
-  compare:undefined,
+  backtest:(bars)=>({metrics:{returnPct:bars.length,sharpe:1,maxDD:2,trades:1},
+    curve:[{time:bars[0].time,value:10000}],signalState:{status:'FLAT',barDate:bars.at(-1).time,positionOpen:false}}),
+  compare:({symbol})=>({rows:[{id:'preset:ema-cross',name:'EMA crossover',kind:'preset',strategy:'ema-cross',
+    settings:{},metrics:{returnPct:2,maxDD:1,trades:2},trainMetrics:{returnPct:1,sharpe:1},
+    testMetrics:{returnPct:1,sharpe:.5},validation:{enoughTestBars:true,validated:true},
+    rolling:{meanSharpe:.4,medianSharpe:.4,positiveCount:3,assessableCount:5,totalWindows:5,validated:true}}]}),
   download:async options=>{
    options.onProgress({type:'directory',directory:{id:'dir',count:symbols.length,symbols}});
    await options.onBatch({batchIndex:1,batchCount:2,symbols:symbols.slice(0,3),

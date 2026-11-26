@@ -1927,8 +1927,8 @@ async function initApp(){
     const range=report?.dateRange;
     if(!report)return '<section class="panel" id="universe-fit">'+header+
       '<div class="panel-body">'+status+'<div id="fit-validated-count" role="status">'+esc(count)+'</div>'+
-      '<p class="section-note">Apply the selected strategy to all '+universeSize+
-      ' curated Alpaca symbols for the default training-Sharpe ranking. Validated mode checks presets, saved Pine strategies and built-in strategy examples against the same 70/30 and five rolling OOS windows as the leaderboard.</p></div></section>';
+      '<p class="section-note">Run the selected strategy backtest for all '+universeSize+
+      ' active and tradable Alpaca U.S. equities. Histories stream in 100-symbol batches; each page is capped at 10,000 total bars. The per-symbol results rank by training Sharpe. Validated mode checks presets, saved Pine strategies and built-in strategy examples against the same 70/30 and five rolling OOS windows as the leaderboard.</p></div></section>';
     const provenance='<div id="fit-source" class="info-strip">'+
       (S.fitReport?.completed??report.completed)+'/'+universeSize+
       ' symbols backtested · '+mode+' · ALPACA '+esc(String(S.liveFeed).toUpperCase())+
@@ -2127,7 +2127,7 @@ async function initApp(){
       esc(S.analysisError)+'</div>':'';
     const analysisNotice=S.result&&S.lastAnalysis?'<div class="info-strip">Saved analysis for <strong>'+esc(S.resultSymbol||S.symbol)+'</strong> · '+esc(S.resultTf||S.chart.tf)+' · '+esc(S.lastAnalysis.savedAt)+
       (S.resultSymbol!==S.symbol?' · Historical result from another symbol; select the original symbol and rerun for a matching chart.':'')+'</div>':'';
-    const settings=backtestSection('strategy','Strategy settings','<div class="panel-header"><div class="flex">'+(S.bt.strategy==='pine-custom'?'':button('Run backtest','run-backtest','primary'))+button('Compare all strategies','compare-strategies')+button('Fit across universe','fit-universe')+button('Optimize parameters','view-optimize')+'</div></div><div class="panel-body">'+btOptions()+backtestPineEditor()+backtestDateControls()+'<p class="section-note">Stop-first rule when stop and target are both hit inside the same bar. Costs are modeled on each side. Short borrow fees are approximate; the engine does not model margin calls, locate availability, dividends, partial fills, taxes, or corporate actions.</p></div>',true);
+    const settings=backtestSection('strategy','Strategy settings','<div class="panel-header"><div class="flex">'+(S.bt.strategy==='pine-custom'?'':button('Run backtest','run-backtest','primary'))+button('Compare all strategies','compare-strategies')+button('Analyze full universe','fit-universe')+button('Optimize parameters','view-optimize')+'</div></div><div class="panel-body">'+btOptions()+backtestPineEditor()+backtestDateControls()+'<p class="section-note">Stop-first rule when stop and target are both hit inside the same bar. Costs are modeled on each side. Short borrow fees are approximate; the engine does not model margin calls, locate availability, dividends, partial fills, taxes, or corporate actions.</p></div>',true);
     const performance='<div class="panel"><div class="panel-header"><h2>Performance</h2><div class="flex">'+button('Export trades CSV','export-trades','small')+button('View trade markers','view-charts','small')+'</div></div><div class="panel-body">'+resultCards(S.result)+'</div></div>';
     const tradeView=S.result?.curve?.length?'<div class="panel"><div class="panel-header"><h2>Price and trade fills</h2>'+
       '<span class="muted">'+esc(S.resultSymbol)+' · '+esc(S.resultTf)+'</span></div>'+
@@ -3099,7 +3099,7 @@ async function initApp(){
       const today=new Date().toISOString().slice(0,10);
       const downloadEnd=S.btRange.endDate||today;
       const downloadStart=S.btRange.startDate||
-        new Date(Date.now()-ALPACA_SCAN_LOOKBACK_DAYS*86_400_000).toISOString().slice(0,10);
+        new Date(Date.parse(downloadEnd)-ALPACA_SCAN_LOOKBACK_DAYS*86_400_000).toISOString().slice(0,10);
       if(!Number.isFinite(Date.parse(downloadStart))||!Number.isFinite(Date.parse(downloadEnd))||
         Date.parse(downloadStart)>=Date.parse(downloadEnd))
         throw Error('Choose a valid full-universe history date range.');
@@ -3126,7 +3126,7 @@ async function initApp(){
               ' · page '+event.page+' · '+Number(event.totalBars||0).toLocaleString('en-US')+
               ' OHLCV bars received · '+universeCount().toLocaleString('en-US')+' symbols';
             const status=document.getElementById('fit-status');
-            if(status)status.textContent=S.fitStatus;
+            if(status?.firstChild)status.firstChild.textContent=S.fitStatus;
           }
         },
         onBatch:event=>{
@@ -3140,7 +3140,7 @@ async function initApp(){
             ' strategy comparisons · '+event.signalCount.toLocaleString('en-US')+
             ' signals · '+event.totalPages.toLocaleString('en-US')+' pages';
           const status=document.getElementById('fit-status');
-          if(status)status.textContent=S.fitStatus;
+          if(status?.firstChild)status.firstChild.textContent=S.fitStatus;
         }
       });
       if(runId!==fitRunSerial)return;
