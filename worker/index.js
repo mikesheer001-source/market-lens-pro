@@ -3,6 +3,8 @@ import {optionsAuthorized,optionsRequest} from "./options.js";
 import { workspaceRequest, publicWorkspaceRequest } from "./workspace.js";
 export { Workspace } from "./workspace.js";
 import { marketScan } from "./market-scan.js";
+import { normalizeServerScanConfig, scanServerUniverse } from "./server-scan.js";
+export { ScanNotifications } from "./scan-notifications.js";
 import { assetDirectory } from "./asset-directory.js";
 import { LIVE_UNIVERSE, ALPACA_BATCH_SIZE, ALPACA_SCAN_LOOKBACK_DAYS, ALPACA_SCAN_CACHE_SECONDS } from "../src/universe.js";
 import { expectedNyseBarDate, freshnessWithUniverse } from "../src/freshness.js";
@@ -17,6 +19,7 @@ const DEFAULT_ORIGINS = [
 const FEEDS = new Set(["iex", "sip", "delayed_sip", "boats", "overnight", "otc"]);
 const TIMEFRAMES = /^(?:[1-9]|[1-5]\d)Min$|^(?:[1-9]|1\d|2[0-3])Hour$|^(?:1Day|1Week|1Month)$/;
 const rateWindows = new Map();
+const SCAN_NOTIFICATIONS_ID = "market-lens-server-scan-v1";
 
 // Credentialed Alpaca getAsset lookup, on paper or live trading endpoints.
 // An authorization failure is UNKNOWN, never interpreted as delisting.
@@ -71,6 +74,48 @@ function validDate(value) {
   return Number.isFinite(time);
 }
 
+function scanNotificationsStub(env) {
+  if (!env.SCAN_NOTIFICATIONS) {
+    throw Object.assign(new Error("Server scan storage is not configured on this Worker."), { status: 503 });
+  }
+  return env.SCAN_NOTIFICATIONS.get(env.SCAN_NOTIFICATIONS.idFromName(SCAN_NOTIFICATIONS_ID));
+}
+
+async function scanNotificationRequest(env, path, method = "GET", body) {
+  const request = new Request("https://scan-notifications.internal" + path, {
+    method,
+    headers: body === undefined ? {} : { "Content-Type": "application/json" },
+    ...(body === undefined ? {} : { body: JSON.stringify(body) })
+  });
+  const response = await scanNotificationsStub(env).fetch(request);
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    throw Object.assign(new Error(data.error || "Server scan storage request failed."), { status: response.status });
+  }
+  return data;
+}
+
+async function executeServerScan(env, scanType, config) {
+  if (!env.ALPACA_API_KEY || !env.ALPACA_API_SECRET) {
+    throw Object.assign(new Error("Alpaca credentials are not configured on the Worker."), { status: 503 });
+  }
+  const runId = crypto.randomUUID();
+  await scanNotificationRequest(env, "/run/start", "POST", { runId, scanType });
+  try {
+    const resolvedConfig = config || await scanNotificationRequest(env, "/config");
+    const result = await scanServerUniverse(env, resolvedConfig);
+    const stored = await scanNotificationRequest(env, "/run/complete", "POST", {
+      ...result, runId, scanType, matches: result.matches, scannedAt: result.scannedAt
+    });
+    return { ...result, ...stored, runId, scanType };
+  } catch (error) {
+    await scanNotificationRequest(env, "/run/fail", "POST", {
+      runId, scanType, error: String(error.message || error)
+    }).catch(() => {});
+    throw error;
+  }
+}
+
 function overRateLimit(ip, limit = 30) {
   const now = Date.now();
   const current = rateWindows.get(ip);
@@ -101,6 +146,48 @@ export default {
     if (request.method === "OPTIONS") {
       return new Response(null, { status: 204, headers: corsHeaders(origin, env) });
     }
+
+    if (url.pathname.startsWith("/api/server-scan/")) {
+      const ip = request.headers.get("CF-Connecting-IP") || "unknown";
+      try {
+        if (url.pathname === "/api/server-scan/config" && request.method === "GET") {
+          return json(await scanNotificationRequest(env, "/config"), 200, origin, env);
+        }
+        if (url.pathname === "/api/server-scan/config" && request.method === "PUT") {
+          if (overRateLimit("server-scan-config:" + ip, 10))
+            return json({ error: "Server scan settings rate limit reached." }, 429, origin, env, { "Retry-After": "60" });
+          const input = await request.json().catch(() => null);
+          const config = normalizeServerScanConfig(input, env.ALPACA_DATA_FEED || "iex");
+          await scanNotificationRequest(env, "/config", "PUT", config);
+          return json({ ok: true, config }, 200, origin, env);
+        }
+        if (url.pathname === "/api/server-scan/notifications" && request.method === "GET") {
+          if (overRateLimit("server-scan-notifications:" + ip, 60))
+            return json({ error: "Notification polling rate limit reached." }, 429, origin, env, { "Retry-After": "60" });
+          return json(await scanNotificationRequest(env, "/notifications"), 200, origin, env);
+        }
+        if (url.pathname === "/api/server-scan/notifications/ack" && request.method === "POST") {
+          if (overRateLimit("server-scan-ack:" + ip, 20))
+            return json({ error: "Notification update rate limit reached." }, 429, origin, env, { "Retry-After": "60" });
+          const body = await request.json().catch(() => null);
+          return json(await scanNotificationRequest(env, "/notifications/ack", "POST", body), 200, origin, env);
+        }
+        if (url.pathname === "/api/server-scan/run" && request.method === "POST") {
+          if (overRateLimit("server-scan-run:" + ip, 2))
+            return json({ error: "Manual server scan rate limit reached." }, 429, origin, env, { "Retry-After": "60" });
+          const input = await request.json().catch(() => null);
+          const config = normalizeServerScanConfig(input, env.ALPACA_DATA_FEED || "iex");
+          await scanNotificationRequest(env, "/config", "PUT", config);
+          return json(await executeServerScan(env, "manual", config), 200, origin, env);
+        }
+        return json({ error: "Method not allowed." }, 405, origin, env, { Allow: "GET, PUT, POST, OPTIONS" });
+      } catch (error) {
+        const status = [400, 409, 429, 503].includes(error.status) ? error.status : 502;
+        return json({ error: error.message || "Server scan request failed." }, status, origin, env,
+          status === 429 ? { "Retry-After": error.retryAfter || "60" } : {});
+      }
+    }
+
     const sharedWorkspace = url.pathname === "/api/shared-workspace";
     if ((sharedWorkspace || url.pathname === "/api/workspace") && ["GET", "PUT"].includes(request.method)) {
       const ip = request.headers.get("CF-Connecting-IP") || "unknown";
@@ -538,5 +625,23 @@ export default {
       pages,
       next_page_token:aggregateDaily?null:nextToken
     },200,origin,env);
+  },
+
+  async scheduled(controller, env, ctx) {
+    if (!env.SCAN_NOTIFICATIONS) return;
+    ctx.waitUntil((async () => {
+      try {
+        const config = await scanNotificationRequest(env, "/config");
+        const result = await executeServerScan(env, "scheduled", config);
+        console.info("[market-lens] scheduled server scan", JSON.stringify({
+          runId: result.runId, requested: result.requested, returned: result.returned,
+          matchCount: result.matchCount, newMatchCount: result.newMatchCount,
+          feed: result.feed, upstreamRequests: result.upstreamRequests,
+          scanDurationMs: result.scanDurationMs
+        }));
+      } catch (error) {
+        console.error("[market-lens] scheduled server scan failed", String(error.message || error));
+      }
+    })());
   }
 };

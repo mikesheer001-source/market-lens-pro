@@ -160,6 +160,7 @@ async function initApp(){
     apiBaseUrl:String(saved.apiBaseUrl||DEFAULT_ALPACA_WORKER),liveFeed:'iex',universeFilter:saved.universeFilter||'all',scan:{status:'idle'},data:new Map(),sources:new Map(),symbol:startupPrefs.selectedSymbol,query:saved.query||'',symbolQuery:'',watch:workspaceLists.watch,watchlists:workspaceLists.watchlists,
     watchlistId:workspaceLists.watchlistId,watchlistDraft:'',alertDraft:{symbol:startupPrefs.selectedSymbol,metric:'price',op:'>',threshold:100},
     alerts:Array.isArray(saved.alerts)?saved.alerts.slice(0,ALERT_LIMIT):[],alertHits:[],
+    serverNotifications:[],serverScanStatus:'idle',serverScanLastRun:null,
     savedScans:Array.isArray(saved.savedScans)?saved.savedScans.slice(0,SCAN_LIMIT):[],
     scanDraft:'',savedScanId:saved.savedScanId||null,
     savedScanView:saved.viewingSavedScan&&Array.isArray(saved.savedScans)?saved.savedScans.find(scan=>scan.id===saved.savedScanId)||null:null,
@@ -202,12 +203,72 @@ async function initApp(){
   restoreSymbolState(S.symbol);
   parseCurrentPine();
   let chart=null,equityChart=null,leaderboardChart=null,tradeChart=null;
+  let serverConfigSignature='',serverConfigRetryAfter=0;
+  const serverScanEndpoint=path=>canonicalWorkerBase(S.apiBaseUrl).replace(/\/+$/,'')+'/api/server-scan'+path;
   const saveSettings=()=>{try{saveLocal('settings',JSON.stringify({mode:S.preferredMode==='live'?'live':S.mode,
     tab:S.tab,lastSymbol:S.symbol,lastBacktestSymbol:S.lastBacktestSymbol,
     lastLiveSymbol:S.lastLiveSymbol,watch:[...S.watch],watchlists:S.watchlists,watchlistId:S.watchlistId,alerts:S.alerts,savedScans:S.savedScans,rules:S.rules,chart:S.chart,bt:S.bt,portfolioMode:S.portfolioMode,bestFitMode:S.bestFitMode,bestFitValidatedOnly:S.bestFitValidatedOnly,btRange:S.btRange,portfolioScope:S.portfolioScope,portfolioWatchlistId:S.portfolioWatchlistId,signalSelection:S.signalSelection,signalsOnly:S.signalsOnly,
     leaderboardValidatedOnly:S.leaderboardValidatedOnly,fitValidatedOnly:S.fitValidatedOnly,apiBaseUrl:S.apiBaseUrl,universeFilter:S.universeFilter,
     chartHeight:S.chartHeight,chartRecentSymbols:S.chartRecentSymbols,chartRecentFrames:S.chartRecentFrames,hiddenScreenColumns:S.hiddenScreenColumns,variantBaseline:S.variantBaseline,backtestPineDraft:S.backtestPineDraft,
-    activeIndicators:S.activeIndicators,chartViews:S.chartViews,backtestSections:S.backtestSections,query:S.query,sort:S.sort,ascending:S.ascending,showOnlyMatches:S.showOnlyMatches,showWatch:S.showWatch,marketShown:market.shown,savedScanId:S.savedScanId,viewingSavedScan:!!S.savedScanView}));}catch{}};
+    activeIndicators:S.activeIndicators,chartViews:S.chartViews,backtestSections:S.backtestSections,query:S.query,sort:S.sort,ascending:S.ascending,showOnlyMatches:S.showOnlyMatches,showWatch:S.showWatch,marketShown:market.shown,savedScanId:S.savedScanId,viewingSavedScan:!!S.savedScanView}));}catch{};void syncServerScanConfig();};
+  async function syncServerScanConfig(force=false){
+    const config={rules:S.rules,universeFilter:S.universeFilter,feed:S.liveFeed||'iex'};
+    const signature=JSON.stringify(config);
+    if(!force&&signature===serverConfigSignature)return true;
+    if(!force&&Date.now()<serverConfigRetryAfter)return false;
+    try{
+      const response=await fetch(serverScanEndpoint('/config'),{method:'PUT',
+        headers:{'Content-Type':'application/json'},body:JSON.stringify(config),cache:'no-store'});
+      const data=await response.json().catch(()=>({}));
+      if(!response.ok)throw Error(data.error||'Server scan settings could not be saved.');
+      serverConfigSignature=signature;serverConfigRetryAfter=0;return true;
+    }catch(error){
+      serverConfigRetryAfter=Date.now()+60_000;
+      return false;
+    }
+  }
+  async function refreshServerNotifications(shouldRender=false){
+    try{
+      const before=JSON.stringify(S.serverNotifications);
+      const response=await fetch(serverScanEndpoint('/notifications'),{cache:'no-store'});
+      if(!response.ok)return;
+      const data=await response.json();
+      S.serverNotifications=Array.isArray(data.notifications)?data.notifications:[];
+      S.serverScanLastRun=data.lastRun||null;
+      if(shouldRender&&before!==JSON.stringify(S.serverNotifications))render();
+    }catch{}
+  }
+  async function runServerScreener(){
+    if(S.serverScanStatus==='loading')return;
+    if(S.mode!=='live'){notice('Switch to Alpaca Live mode to run a server scan.');return;}
+    S.serverScanStatus='loading';render();
+    try{
+      const config={rules:S.rules,universeFilter:S.universeFilter,feed:S.liveFeed||'iex'};
+      const response=await fetch(serverScanEndpoint('/run'),{method:'POST',
+        headers:{'Content-Type':'application/json'},body:JSON.stringify(config),cache:'no-store'});
+      const data=await response.json().catch(()=>({}));
+      if(!response.ok)throw Error(data.error||'Server scan failed.');
+      const sample=(data.matches||[]).slice(0,8).map(match=>match.symbol).join(', ');
+      S.serverScanStatus='Server scan complete · '+data.requested+' checked · '+data.matchCount+
+        ' matches · '+data.newMatchCount+' new alerts'+(sample?' · '+sample:'');
+      await refreshServerNotifications(false);
+      notice(data.newMatchCount?data.newMatchCount+' new server scan alert'+(data.newMatchCount===1?'':'s')+' created.':
+        'Server scan complete: '+data.matchCount+' matches; no new alerts.');
+    }catch(error){
+      S.serverScanStatus='Server scan failed · '+error.message;
+      notice(error.message);
+    }
+    render();
+  }
+  async function acknowledgeServerNotification(id){
+    try{
+      const response=await fetch(serverScanEndpoint('/notifications/ack'),{method:'POST',
+        headers:{'Content-Type':'application/json'},body:JSON.stringify({id}),cache:'no-store'});
+      if(!response.ok)throw Error('Could not dismiss the server scan alert.');
+      await refreshServerNotifications(false);
+      render();
+    }catch(error){notice(error.message);}
+  }
   function receiveSharedSettings(prior,value){
     if(JSON.stringify(prior.savedScans)!==JSON.stringify(value.savedScans)){
       S.savedScans=Array.isArray(value.savedScans)?value.savedScans.slice(0,SCAN_LIMIT):[];
@@ -799,7 +860,15 @@ async function initApp(){
         esc(a.symbol)+' · '+esc(a.metric.toUpperCase())+' '+(a.op==='>'?'above':'below')+' '+
         format(a.threshold,2)+' · latest '+format(a.lastValue,2)+' · bar '+esc(a.lastHitBarDate||''))+
         ' '+button('Dismiss alert','alert-ack','small').replace('data-action="alert-ack"','data-action="alert-ack" data-alert-id="'+esc(a.id)+'"')+'</div>').join('')+'</div>':'';
-    return alertsBanner;
+    const serverUnread=S.serverNotifications.filter(alert=>!alert.readAt);
+    const serverAlertsBanner=serverUnread.length?'<div class="alert-banner server-alert-banner" role="alert"><strong>'+
+      serverUnread.length+' server scan notification'+(serverUnread.length===1?'':'s')+'</strong>'+
+      serverUnread.map(alert=>'<div>Server scan · '+alert.matchCount+' new match'+(alert.matchCount===1?'':'es')+
+        ': '+esc(alert.symbols.slice(0,8).join(', '))+(alert.symbols.length>8?' +' +(alert.symbols.length-8)+' more':'')+
+        (alert.barDate?' · bar '+esc(alert.barDate):'')+' '+
+        button('Dismiss server alert','server-alert-ack','small').replace('data-action="server-alert-ack"','data-action="server-alert-ack" data-alert-id="'+esc(alert.id)+'"')+
+        '</div>').join('')+'</div>':'';
+    return alertsBanner+serverAlertsBanner;
   }
   function activeSnapshotBanner(){
     const loaded=S.savedScanView;
@@ -974,11 +1043,13 @@ async function initApp(){
     const factSymbol='VXX';
     const factBar=(S.sources.get('VXX')==='ALPACA')?S.data.get(factSymbol)?.at(-1):null;
     const factLabel='ALPACA VXX DAILY CLOSE';
+    const serverScanStatus=S.serverScanStatus==='idle'?'':'<p id="server-scan-status" class="info-strip" role="status">'+
+      esc(S.serverScanStatus==='loading'?'Running server-side screener…':S.serverScanStatus)+'</p>';
     const fact=factBar?'<div class="market-fact" role="status"><span class="market-fact-label">'+factLabel+'</span><strong>'+esc(factSymbol)+' &nbsp; $'+format(factBar.close)+'</strong><small>Bar date: '+esc(String(factBar.time))+(S.mode==='live'?' · '+esc(String(S.liveFeed).toUpperCase())+' feed · Alpaca daily close, not a last-trade quote':' · simulated, not a market quote')+'</small></div>':S.mode==='live'?'<div class="market-fact warning" role="status">Alpaca VXX daily close unavailable — VXX was not returned by the connected feed.</div>':'';
-    return '<div id="screener-intro">'+head('Screener',full?'U.S. exchange listings · Alpaca daily, weekly and monthly filters.':'Filter '+symbols.length+' '+('Alpaca or imported instruments')+' with explicit technical conditions.',marketControls()+button('Open Chart Lab','view-charts','small')+
+    return '<div id="screener-intro">'+head('Screener',full?'U.S. exchange listings · Alpaca daily, weekly and monthly filters.':'Filter '+symbols.length+' '+('Alpaca or imported instruments')+' with explicit technical conditions.',marketControls()+(!full&&S.mode==='live'?button(S.serverScanStatus==='loading'?'Server scanning…':'Run server scan','server-scan','small'):'')+button('Open Chart Lab','view-charts','small')+
         (reviewableMatches(rows).length?button('Review matches','screener-chart','primary'):''))+'</div>'+
       '<div id="screener-facts">'+(full?'':fact)+activeAlertBanner()+activeSnapshotBanner()+'</div>'+
-      '<div id="screener-metrics" class="metrics">'+metric(S.savedScanView?'Saved rows':'Symbols loaded',S.savedScanView?rows.length:all.length,S.savedScanView?'Historical snapshot':'Alpaca and imported data')+metric('Matching filters',matched,'All visible symbols')+metric('Visible results',rows.length,'Search and match filter')+metric('Active conditions',S.rules.length,'AND logic; all must pass') +'</div><div id="screener-status">'+(full?'<p id="market-scan-status" class="info-strip" role="status">'+esc(marketMessage())+'</p><p class="section-note">Covers active U.S. exchange listings in Alpaca’s directory. Thinly traded tickers may have older or missing bars. Two-hour filters and strategy signals are available in the quick screener.</p>':scanStatus)+freshnessBadge+'</div>'+
+      '<div id="screener-metrics" class="metrics">'+metric(S.savedScanView?'Saved rows':'Symbols loaded',S.savedScanView?rows.length:all.length,S.savedScanView?'Historical snapshot':'Alpaca and imported data')+metric('Matching filters',matched,'All visible symbols')+metric('Visible results',rows.length,'Search and match filter')+metric('Active conditions',S.rules.length,'AND logic; all must pass') +'</div><div id="screener-status">'+(full?'<p id="market-scan-status" class="info-strip" role="status">'+esc(marketMessage())+'</p><p class="section-note">Covers active U.S. exchange listings in Alpaca’s directory. Thinly traded tickers may have older or missing bars. Two-hour filters and strategy signals are available in the quick screener.</p>':scanStatus)+freshnessBadge+serverScanStatus+'</div>'+
       '<div class="panel"><div class="panel-header"><h2>Screen rules</h2><div class="flex"><label class="control">Preset '+select([['custom','Custom rules'],['trend','Trend pullback'],['original','Original strict W/D/2H'],['oversold','RSI oversold'],['momentum','Momentum'],['volatility','VXX / Volatility'],['all','Show all']],presetKey,'data-option="preset"')+'</label>'+button('+ Add rule','add-rule')+'</div></div><div class="panel-body"><div class="filters">'+(rules||'<span class="muted">No filters — showing all instruments.</span>')+'</div><div class="section-note" style="margin-top:12px">“Original strict” reproduces the weekly EMA200 and weekly/daily/two-hour RSI filter logic. RSI 5D is calculated from daily closes; daily bars cannot reconstruct true two-hour data. The VXX / Volatility preset narrows the universe to VXX, UVXY, SVXY, VIXY, VIXM, VXZ, SVIX, UVIX, SVOL and ZVOL, using daily RSI, 252-session drawdown and % versus daily EMA200.</div></div></div>'+
       '<div class="panel"><div class="panel-header"><h2>Market results</h2><div class="flex"><span id="screener-refresh">'+(full?'':button(S.scan.status==='loading'?'Scanning…':'Refresh live scan','scan-universe','small primary'))+'</span>'+button('Export screener CSV','export-screener','small')+button('Columns','screener-columns','small')+
       (full?'':'<label class="control">Strategy '+selectStrategy+'</label>'+
@@ -998,6 +1069,12 @@ async function initApp(){
         esc(a.symbol)+' '+esc(a.metric.toUpperCase())+' '+(a.op==='>'?'above':'below')+' '+format(a.threshold,2))+
         ' <small>'+(a.type==='signal'?'At '+esc(a.lastHitBarDate||''):a.active?'Condition met':'Not triggered')+
         '</small></span>'+button('Remove alert','alert-delete','small').replace('data-action="alert-delete"','data-action="alert-delete" data-alert-id="'+esc(a.id)+'"')+'</div>').join(''):'<p class="section-note">No local alerts. They check only when you scan or refresh while this page is running.</p>';
+    const serverAlertRows=S.serverNotifications.length?S.serverNotifications.map(alert=>'<div class="data-item"><span>Server scan · '+
+      alert.matchCount+' new match'+(alert.matchCount===1?'':'es')+' · '+esc(alert.symbols.slice(0,8).join(', '))+
+      (alert.symbols.length>8?' +'+(alert.symbols.length-8)+' more':'')+
+      ' <small>'+esc(alert.createdAt)+' · '+(alert.readAt?'Read':'Unread')+'</small></span>'+
+      (alert.readAt?'':button('Dismiss server alert','server-alert-ack','small').replace('data-action="server-alert-ack"','data-action="server-alert-ack" data-alert-id="'+esc(alert.id)+'"'))+
+      '</div>').join(''):'<p class="section-note">No server scan notifications yet. Scheduled scans run weekdays at 23:00 UTC.</p>';
     const savedChoices=S.savedScans.map(x=>[x.id,x.name+' · '+x.rows.length+' rows']);
     const section=(key,title,note)=>collapsible?
       workspaceStart(key,title)+'<div class="panel-body"><p class="section-note">'+note+'</p>':
@@ -1015,13 +1092,13 @@ async function initApp(){
         '<label class="control">Saved scan '+select([['','Choose saved scan'],...savedChoices],S.savedScanId||'','data-option="saved-scan-select"')+'</label>'+
         button('Load saved scan','load-scan','small')+button('Delete saved scan','delete-scan','small')+'</div>'+
         '<p class="section-note">Snapshots preserve displayed rows and filter conditions. Historical prices are not automatically refreshed when loaded.</p>'+end+
-      section('alerts','In-app alerts','No email · checks on Scan/Refresh')+'<div class="workspace-actions">'+
+      section('alerts','In-app alerts','Local alerts check on refresh · server scan weekdays 23:00 UTC')+'<div class="workspace-actions">'+
         '<label class="control">Symbol '+select(alertSymbols.map(sym=>[sym,sym]),alertSymbol,'data-alert-field="symbol"')+'</label>'+
         '<label class="control">Indicator '+select([['price','Daily close'],['rsi','Daily RSI(14)']],S.alertDraft.metric,'data-alert-field="metric"')+'</label>'+
         '<label class="control">Condition '+select([['>','Above'],['<','Below']],S.alertDraft.op,'data-alert-field="op"')+'</label>'+
         '<label class="control">Level <input type="number" class="textinput" data-alert-field="threshold" value="'+esc(S.alertDraft.threshold)+'" step="any"/></label>'+
         button('Add alert','alert-create','small primary')+
-        '</div><div class="data-list">'+alertRows+'</div>'+end;
+        '</div><div class="data-list">'+alertRows+'</div><h3>Server scan notifications</h3><div class="data-list">'+serverAlertRows+'</div>'+end;
   }
   function preserveChartViewport(){
     try{S.pendingChartRange=chart?.timeScale().getVisibleLogicalRange()||null;}
@@ -3137,6 +3214,7 @@ async function initApp(){
     'alert-create':()=>addLocalAlert(),
     'alert-delete':el=>{S.alerts=S.alerts.filter(a=>a.id!==el.dataset.alertId);saveSettings();render();},
     'alert-ack':el=>{const a=S.alerts.find(a=>a.id===el.dataset.alertId);if(a)a.unread=false;saveSettings();render();},
+    'server-alert-ack':el=>acknowledgeServerNotification(el.dataset.alertId),
     'pine-check':()=>{parseCurrentPine();S.scriptOutput=S.scriptError?null:'Pine syntax OK — '+S.scriptParsed.mode+' script with '+S.scriptParsed.inputs.length+' inputs.';render();},
     'pine-example':el=>{const ex=PINE_EXAMPLES.find(x=>x.id===el.dataset.example);if(ex)loadPineSource(ex.code,ex.label);},
     'pine-run':()=>executeCurrentPine(),
@@ -3154,6 +3232,7 @@ async function initApp(){
     import:()=>$('#csv-file')?.click(),
     'mode-live':()=>{market.shown=false;market.controller?.abort();clearSavedScanView();return switchToLive({restoreSymbol:S.lastLiveSymbol,chartRefresh:S.tab==='charts'});},
     'scan-universe':()=>{if(liveScanActive)return;clearSavedScanView();return switchToLive({chartRefresh:S.tab==='charts'});},
+    'server-scan':()=>runServerScreener(),
     'test-live':()=>testLiveBackend().catch(err=>notice('Backend test failed: '+err.message)),
     'view-charts':()=>{S.tab='charts';render();},
     'refresh-intraday':()=>{if(S.mode==='live')void loadLiveIntraday(S.symbol,true).catch(()=>{});
@@ -3552,6 +3631,8 @@ async function initApp(){
   await loadStored();
   workspaceReady=true;
   await switchToLive({restoreTab:S.tab,restoreSymbol:startupPrefs.selectedSymbol});
+  void refreshServerNotifications(true);
+  setInterval(()=>{if(document.visibilityState==='visible')void refreshServerNotifications(true);},60_000);
   if(syncEnabled){
     function refreshSharedWorkspace(){
       if(document.visibilityState==='visible')return workspace.flush();

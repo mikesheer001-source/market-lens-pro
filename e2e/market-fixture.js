@@ -11,6 +11,10 @@ export async function mockMarket(context){
   await context.route('**/api/stocks/scan?**',route=>route.fulfill({json:payload}));
   await context.route('**/api/stocks/intraday?**',route=>route.fulfill({status:503,json:{error:'No intraday fixture'}}));
   await context.route('**/api/stocks/bars?**',route=>route.fulfill({json:{bars:[],feed:'iex'}}));
+  await context.route('**/api/server-scan/config',route=>route.fulfill({json:{ok:true}}));
+  await context.route('**/api/server-scan/notifications',route=>route.fulfill({json:{notifications:[],lastRun:null}}));
+  await context.route('**/api/server-scan/run',route=>route.fulfill({json:{requested:133,returned:133,matchCount:0,newMatchCount:0,newMatches:[],matches:[]}}));
+  await context.route('**/api/server-scan/notifications/ack',route=>route.fulfill({json:{ok:true}}));
   await context.addInitScript(()=>{
     const key='market-lens-pro-settings';
     if(!localStorage.getItem(key))localStorage.setItem(key,JSON.stringify({lastSymbol:'SPY',lastLiveSymbol:'SPY'}));

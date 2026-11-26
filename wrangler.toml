@@ -3,6 +3,9 @@ main = "worker/index.js"
 compatibility_date = "2026-11-16"
 workers_dev = true
 
+[triggers]
+crons = ["0 23 * * 1-5"]
+
 [vars]
 ALPACA_DATA_FEED = "iex"
 ALLOWED_ORIGINS = "https://mikesheer001-source.github.io,http://localhost:5173,http://127.0.0.1:5173"
@@ -11,6 +14,14 @@ ALLOWED_ORIGINS = "https://mikesheer001-source.github.io,http://localhost:5173,h
 name = "WORKSPACES"
 class_name = "Workspace"
 
+[[durable_objects.bindings]]
+name = "SCAN_NOTIFICATIONS"
+class_name = "ScanNotifications"
+
 [[migrations]]
 tag = "workspace-v1"
 new_sqlite_classes = ["Workspace"]
+
+[[migrations]]
+tag = "scan-notifications-v1"
+new_sqlite_classes = ["ScanNotifications"]

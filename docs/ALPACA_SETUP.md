@@ -88,3 +88,15 @@ The public calculator accepts manual premiums. Open the Options Builder quote li
 Select **Real-time OPRA** to check the account's OPRA entitlement, or **Indicative** for the modified-quote feed. The Worker deployment's **Alpaca options entitlement** summary reports whether the configured key returned SPY quotes for each feed and omits prices and credentials. For SPX and XSP, enter the underlying index reference price separately and use listed contracts to verify settlement. The public app uses the production Worker. A local dev server can use a local Worker via Data Center.
 
 Public quote distribution requires the relevant market data permissions.
+
+
+## Server-side screener and in-app notifications
+
+- The Worker runs a scheduled scan at **23:00 UTC Monday–Friday**, after the U.S. cash-market close. It also exposes an on-demand **Run server scan** button in the Screener.
+- The background scan evaluates the current Screener rules against the bundled **133-symbol Live universe** (or the 10 live volatility symbols when the Volatility filter is selected). It uses five years of daily bars from the configured Alpaca feed, in batches of 15 symbols.
+- Server scans support daily, weekly, and monthly rules. Two-hour rules continue to work in the client-side screener but are rejected by the background scan rather than silently evaluated with missing data.
+- The last Screener rules, universe filter, and feed are stored as the site's shared server-scan profile. This is consistent with the existing public shared workspace: the profile and its notifications are shared by visitors, and the most recent settings update becomes the scheduled profile.
+- A notification is created only when a symbol newly enters the match set; persistent matches do not generate a new alert on every run. The last 50 notifications and their read/dismiss state are stored in a Cloudflare SQLite Durable Object. The browser polls the Worker while open and displays unread notifications in the existing in-app alert area.
+- Notifications are in-app only. **No email, SMS, or new external notification service is used.** The scan is read-only and never places trades.
+- A scan makes nine initial Alpaca requests for the 133-symbol universe and can make up to nine additional requests to retry stale symbols. The 15-symbol batches and one stale-bar retry are bounded; Alpaca HTTP 429 responses are surfaced as rate limits. The production Alpaca subscription and Cloudflare account quotas remain account-dependent.
+- The scan-notifications-v1 Durable Object migration and Cron trigger are applied by the existing Worker deployment workflow. No extra credentials are required beyond the existing Alpaca and Cloudflare deployment secrets.
