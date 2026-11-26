@@ -27,7 +27,13 @@ function parseCsv(text, fallback='IMPORT') {
   return {groups,skipped,synthetic,rows:rows.length-1};
 }
 
-function stamp(t){return typeof t==='number'?t:Math.floor(Date.parse(t+'T00:00:00Z')/1000);}
+function stamp(t){
+  if(typeof t==='number')return t;
+  // Lightweight Charts reports daily crosshair times as BusinessDay objects.
+  if(t&&typeof t==='object'&&Number.isInteger(t.year)&&Number.isInteger(t.month)&&Number.isInteger(t.day))
+    return Math.floor(Date.UTC(t.year,t.month-1,t.day)/1000);
+  return Math.floor(Date.parse(t+'T00:00:00Z')/1000);
+}
 
 function normalizeBars(bars){
   const map=new Map();for(const b of bars){if(!b||!Number.isFinite(b.close)||b.close<=0)continue;const time=stamp(b.time);if(Number.isFinite(time))map.set(time,b);}

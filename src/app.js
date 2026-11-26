@@ -2115,9 +2115,9 @@ async function initApp(){
     const key=section.dataset.workspaceSection,body=section.querySelector(':scope > .workspace-content');
     if(!body)return;
     if(!body.dataset.mounted){
-      mountedWorkspaceKeys.add(key);body.dataset.mounted='true';
       if(key==='options')mountOptionsIn(body);
       else body.innerHTML=key==='screener'?screenerView(false):views[key]();
+      body.dataset.mounted='true';mountedWorkspaceKeys.add(key);
     }
     if(key==='backtest'&&section.open)mountBacktestCharts();
   }
@@ -2131,7 +2131,7 @@ async function initApp(){
         const fragment=document.createElement('template');
         fragment.innerHTML=workspaceStart(key,workspaceTitles[key])+'<div class="workspace-content"></div></details>';
         const section=fragment.content.firstElementChild;container.append(section);
-        if(section.open||key==='options'&&retainedOptionsHost)mountWorkspaceContent(section);
+        if(section.open||mountedWorkspaceKeys.has(key)||key==='options'&&retainedOptionsHost)mountWorkspaceContent(section);
         else mountedWorkspaceKeys.delete(key);
       }
     }

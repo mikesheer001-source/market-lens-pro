@@ -1,9 +1,14 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {parseCsv,ema,rsi,aggregate,backtest,parameterSweep,sampleData,screenSymbol,statsFor,alpacaBars} from '../src/engine.js';
+import {parseCsv,stamp,ema,rsi,aggregate,backtest,parameterSweep,sampleData,screenSymbol,statsFor,alpacaBars} from '../src/engine.js';
 
 const day = i => new Date(Date.UTC(2024,0,1+i)).toISOString().slice(0,10);
 const bar = (i,open=100,high=101,low=99,close=100) => ({time:day(i),open,high,low,close,volume:100});
+
+test('Lightweight Charts BusinessDay crosshair times normalize to daily bar keys',()=>{
+ assert.equal(stamp({year:2026,month:11,day:25}),stamp('2026-11-25'));
+ assert.equal(stamp({year:2026,month:11,day:20}),stamp('2026-11-20'));
+});
 
 test('CSV handles quoted symbol, mixed records and invalid rows',()=>{
  const text='Date,Symbol,Open,High,Low,Close,Volume\n2024-01-01,"TEST",100,105,99,103,200\n2024-01-02,TEST,103,105,101,104,220\n2024-01-03,TEST,103,99,101,104,220\n';
