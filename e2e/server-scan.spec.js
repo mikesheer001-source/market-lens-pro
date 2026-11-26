@@ -35,5 +35,5 @@ test('server scan produces a persistent in-app alert that can be dismissed', asy
     response.url().includes('/api/server-scan/notifications/ack')&&response.request().method()==='POST');
   await page.locator('#screener-facts').getByRole('button', {name:'Dismiss server alert'}).click();
   await ackResponse;
-  await expect(page.locator('.alert-banner')).not.toContainText('AAPL');
+  await expect(page.locator('#screener-facts .server-alert-banner')).toHaveCount(0);
 });

@@ -261,15 +261,16 @@ async function initApp(){
     render();
   }
   async function acknowledgeServerNotification(id){
+    const previous=S.serverNotifications,readAt=new Date().toISOString();
+    S.serverNotifications=previous.map(alert=>alert.id===id?{...alert,readAt,unread:false}:alert);
+    render();
     try{
       const response=await fetch(serverScanEndpoint('/notifications/ack'),{method:'POST',
         headers:{'Content-Type':'application/json'},body:JSON.stringify({id}),cache:'no-store'});
       if(!response.ok)throw Error('Could not dismiss the server scan alert.');
-      const data=await response.json().catch(()=>({}));
-      S.serverNotifications=S.serverNotifications.map(alert=>alert.id===id?
-        {...alert,readAt:data.readAt||new Date().toISOString(),unread:false}:alert);
-      render();
-    }catch(error){notice(error.message);}
+    }catch(error){
+      S.serverNotifications=previous;render();notice(error.message);
+    }
   }
   function receiveSharedSettings(prior,value){
     if(JSON.stringify(prior.savedScans)!==JSON.stringify(value.savedScans)){
