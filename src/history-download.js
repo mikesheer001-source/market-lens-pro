@@ -75,7 +75,7 @@ function normalizeConfig(options,requireSymbols){
   if(!Number.isFinite(retryBaseDelayMs)||retryBaseDelayMs<0||!Number.isFinite(maxRetryDelayMs)||maxRetryDelayMs<0)
     throw new Error('Retry delays must be zero or greater.');
   if(!Number.isInteger(maxPagesPerBatch)||maxPagesPerBatch<1)throw new Error('maxPagesPerBatch must be a positive integer.');
-  const fetchImpl=options.fetchImpl||globalThis.fetch;
+  const fetchImpl=options.fetchImpl||globalThis.fetch?.bind(globalThis);
   if(typeof fetchImpl!=='function')throw new Error('Fetch is unavailable in this environment.');
   const config={workerBase,start,end,feed,timeframe,adjustment,batchSize,limit,requestIntervalMs,
     maxRetries,retryBaseDelayMs,maxRetryDelayMs,maxPagesPerBatch,fetchImpl,signal:options.signal,
