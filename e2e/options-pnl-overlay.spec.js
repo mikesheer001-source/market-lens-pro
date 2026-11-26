@@ -28,13 +28,13 @@ test('draws quote-verified green/red expiration P&L and breakevens, then recalcu
     const url=new URL(route.request().url());
     if(url.pathname.endsWith('/device'))return route.fulfill({status:204});
     if(url.pathname.endsWith('/expirations'))return route.fulfill({json:{
-      feed:'opra',expirations:[expiry],underlying:{value:100,time:quoteTime,feed:'IEX'}
+      feed:'indicative',expirations:[expiry],underlying:{value:100,time:quoteTime,feed:'IEX'}
     }});
-    if(url.pathname.endsWith('/chain'))return route.fulfill({json:{feed:'opra',contracts:[
+    if(url.pathname.endsWith('/chain'))return route.fulfill({json:{feed:'indicative',contracts:[
       {symbol:symbols[0],root:'SPY',type:'call',expiry,strike:100,multiplier:100,quote:{bid:2,ask:3,time:quoteTime}},
       {symbol:symbols[1],root:'SPY',type:'call',expiry,strike:105,multiplier:100,quote:{bid:1,ask:2,time:quoteTime}}
     ]}});
-    if(url.pathname.endsWith('/snapshots'))return route.fulfill({json:{feed:'opra',quotes:{
+    if(url.pathname.endsWith('/snapshots'))return route.fulfill({json:{feed:'indicative',quotes:{
       [symbols[0]]:{bid:2,ask:3,time:quoteTime},[symbols[1]]:{bid:1,ask:2,time:quoteTime}
     }}});
     return route.fulfill({status:404,json:{error:'Unexpected options request'}});
