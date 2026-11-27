@@ -1,6 +1,7 @@
 import {MAX_LEGS, PRESETS, boxRate, expirationTime, expiryPnl, expiryStats, initialDebit,
   netGreeks, quoteEstimates, scenarioPnl} from './options-payoff.js';
 import {nearestStrike, strikeDomain, strikeTargets, groupStrikeTargets} from './options-strike-ruler.js';
+import {verticalSpreadMetrics} from './options-vertical.js';
 import {OPTIONS_DEVICE_KEY, getOptionsDevice, optionsApiUrl, requestOptions} from './options-api.js';
 
 const DAY = 86_400_000;
@@ -92,7 +93,9 @@ export function createOptionsBuilder({onPositionsChange=()=>{}}={}) {
   const chains = new Map();
   const state = {
     symbol:'SPY', price:'', width:'0.15', expiry:'', legs:[], fee:'0', package:'', preset:'',
-    iv:'25', shift:'0', rate:'4', dividend:'0', focus:50, time:100, chartRange:18, view:'graph'
+    iv:'25', shift:'0', rate:'4', dividend:'0', focus:50, time:100, chartRange:18, view:'graph',
+    vertical:{type:'call',structure:'debit',side1:'buy',side2:'sell',strike1:'',strike2:'',
+      entry1:'',entry2:'',quantity:'1',expiry:''}
   };
   const $ = name => root.querySelector('[data-ob="'+name+'"]');
   const manualExpiry = days => localDate(Date.now()+DAY*days);
@@ -233,7 +236,8 @@ export function createOptionsBuilder({onPositionsChange=()=>{}}={}) {
   }
   async function poll(force = false) {
     if (!active() || !ownerToken || pending || document.hidden || Date.now() < nextPoll) return;
-    const symbols = [...new Set(state.legs.map(leg => leg.symbol).filter(Boolean))];
+    const verticalSymbols=[verticalRow(state.vertical.strike1)?.symbol,verticalRow(state.vertical.strike2)?.symbol].filter(Boolean);
+    const symbols = [...new Set([...state.legs.map(leg => leg.symbol).filter(Boolean),...verticalSymbols])];
     if (!symbols.length || !feedVerified) {
       if (force) await refreshChain({discover:!expirations.length});
       return;
@@ -243,7 +247,15 @@ export function createOptionsBuilder({onPositionsChange=()=>{}}={}) {
     try {
       const data = await request('snapshots',{symbols:symbols.join(',')},pending.signal);
       if (current !== generation) return;
-      setLegQuotes(data.quotes || {},true);
+      const quotes=data.quotes||{};
+      setLegQuotes(quotes,true);
+      if(chain.length){
+        chain=chain.map(row=>row.symbol&&symbols.includes(row.symbol)?
+          {...row,quote:quotes[row.symbol]??null}:row);
+        chains.set(state.expiry,chain);
+        renderChain();
+      }
+      renderVertical();
       refreshMarks();
       if (force) setMessage(feedName(feed)+' · selected leg quotes refreshed');
     } catch (error) {
@@ -259,6 +271,7 @@ export function createOptionsBuilder({onPositionsChange=()=>{}}={}) {
     chain = [];
     renderExpiry();
     renderChain();
+    renderVertical();
     renderRuler();
     void refreshChain();
   }
@@ -304,6 +317,7 @@ export function createOptionsBuilder({onPositionsChange=()=>{}}={}) {
         '" aria-pressed="'+(date===state.expiry)+'">'+esc(Number(date.slice(-2)))+'</button>').join('')+'</div></div>').join('') :
       '<span class="muted">Expirations appear when quotes load. Manual dates are available in Positions.</span>';
     strip.scrollLeft = left;
+    renderVertical();
     const selected = strip.querySelector('[aria-pressed="true"]');
     if (selected) {
       if (hadFocus) selected.focus({preventScroll:true});
@@ -524,6 +538,142 @@ export function createOptionsBuilder({onPositionsChange=()=>{}}={}) {
     if (row) commitStrike(i,row,true);
   }
 
+  function verticalQuoteFresh(quote) {
+    const bid=numeric(quote?.bid),ask=numeric(quote?.ask),time=Date.parse(quote?.time);
+    return bid!=null&&bid>=0&&ask!=null&&ask>0&&ask>=bid&&Number.isFinite(time)&&
+      time<=Date.now()+60_000&&Date.now()-time<=120_000;
+  }
+  function verticalRoot() {
+    return index(state.symbol)&&chain.some(row=>row.root==='SPXW')?'SPXW':
+      chain.find(row=>row.expiry===state.expiry)?.root||state.symbol;
+  }
+  function verticalRows() {
+    const rootSymbol=verticalRoot();
+    return chain.filter(row=>row.expiry===state.expiry&&row.type===state.vertical.type&&
+      row.root===rootSymbol&&row.symbol&&verticalQuoteFresh(row.quote))
+      .sort((a,b)=>a.strike-b.strike);
+  }
+  function verticalRow(strike) {
+    return chain.find(row=>row.expiry===state.expiry&&row.type===state.vertical.type&&
+      row.root===verticalRoot()&&row.symbol&&Number(row.strike)===Number(strike))||null;
+  }
+  function verticalDefaults(rows) {
+    const strikes=[...new Set(rows.map(row=>Number(row.strike)))].sort((a,b)=>a-b);
+    if(strikes.length<2){state.vertical.strike1='';state.vertical.strike2='';state.vertical.entry1='';state.vertical.entry2='';return;}
+    const spot=numeric(state.price);
+    let lowIndex=0,highIndex=1;
+    if(spot>0){
+      const below=strikes.findLastIndex(value=>value<=spot);
+      const above=strikes.findIndex(value=>value>=spot);
+      if(below<0){lowIndex=0;highIndex=1;}
+      else if(above<0){lowIndex=strikes.length-2;highIndex=strikes.length-1;}
+      else if(below===above){
+        if(state.vertical.type==='call'){
+          lowIndex=below;highIndex=Math.min(strikes.length-1,below+1);
+          if(lowIndex===highIndex)lowIndex=Math.max(0,highIndex-1);
+        }else{
+          highIndex=above;lowIndex=Math.max(0,above-1);
+          if(lowIndex===highIndex)highIndex=Math.min(strikes.length-1,lowIndex+1);
+        }
+      }else{lowIndex=below;highIndex=above;}
+    }
+    const low=strikes[lowIndex],high=strikes[highIndex];
+    state.vertical.strike1=String(state.vertical.type==='call'?low:high);
+    state.vertical.strike2=String(state.vertical.type==='call'?high:low);
+    state.vertical.entry1='';state.vertical.entry2='';
+  }
+  function verticalMid(row) {
+    return row?.quote?String(Number(((Number(row.quote.bid)+Number(row.quote.ask))/2).toFixed(4))):'';
+  }
+  function verticalOptions(rows,selected,exclude) {
+    const choices=rows.filter(row=>Number(row.strike)!==Number(exclude));
+    return choices.length?choices.map(row=>option(String(row.strike),
+      dollars(row.strike)+' · '+dollars(row.quote.bid)+' / '+dollars(row.quote.ask),
+      Number(row.strike)===Number(selected))).join(''):option('','No other fresh listed strike');
+  }
+  function renderVerticalSummary() {
+    const summary=$('vertical-summary'),status=$('vertical-status');
+    if(!summary||!status)return;
+    const rows=[verticalRow(state.vertical.strike1),verticalRow(state.vertical.strike2)];
+    const quantity=numeric(state.vertical.quantity),entries=[numeric(state.vertical.entry1),numeric(state.vertical.entry2)];
+    if(!rows.every(Boolean)){
+      summary.innerHTML='';
+      status.textContent='Load fresh live option quotes for at least two strikes at the selected expiration.';
+      return;
+    }
+    const legs=rows.map((row,i)=>({...marketLeg(row,state.vertical['side'+(i+1)],quantity||1),
+      quantity,entry:entries[i],expiry:state.expiry}));
+    const metrics=verticalSpreadMetrics(legs,numeric(state.fee)??0);
+    if(!metrics.valid){summary.innerHTML='';status.textContent=metrics.reason;return;}
+    const entry=metrics.netEntry>1e-8?dollars(metrics.netEntry)+' debit':
+      metrics.netEntry< -1e-8?dollars(-metrics.netEntry)+' credit':'$0.00 net entry';
+    const roots=metrics.breakevens.map(dollars).join(', ')||'None';
+    const riskReward=metrics.riskReward==null?'—':num(metrics.riskReward,2)+' : 1';
+    const rowsToShow=[['Net entry incl. fees',entry],['Max profit',dollars(metrics.maxProfit)],
+      ['Max loss',dollars(metrics.maxLoss)],['Breakeven',roots],['Risk / reward',riskReward]];
+    summary.innerHTML=rowsToShow.map(([label,value])=>
+      '<div><small>'+esc(label)+'</small><strong>'+esc(value)+'</strong></div>').join('');
+    const expected=state.vertical.structure,actual=metrics.entryType;
+    status.textContent=(actual===expected?'Valid '+expected:'Selected legs produce a '+actual+', not the chosen '+expected)+
+      ' · '+feedName(feed)+' quotes · latest leg quote '+usTime(metrics.quoteTime)+
+      ' · expiration risk includes entry fees.';
+  }
+  function renderVertical() {
+    const expiryControl=$('vertical-expiry');
+    if(!expiryControl)return;
+    expiryControl.innerHTML=expirations.length?expirations.map(date=>option(date,date,date===state.expiry)).join(''):
+      option('','No live expirations loaded');
+    expiryControl.value=state.expiry||'';
+    if(state.vertical.expiry!==state.expiry){
+      state.vertical.expiry=state.expiry;
+      state.vertical.strike1='';state.vertical.strike2='';
+      state.vertical.entry1='';state.vertical.entry2='';
+    }
+    const rows=verticalRows();
+    if(rows.length&&(!chain.some(row=>row.expiry===state.expiry&&row.type===state.vertical.type&&
+      Number(row.strike)===Number(state.vertical.strike1))||
+      !chain.some(row=>row.expiry===state.expiry&&row.type===state.vertical.type&&
+      Number(row.strike)===Number(state.vertical.strike2))||
+      Number(state.vertical.strike1)===Number(state.vertical.strike2)))verticalDefaults(rows);
+    const first=verticalRow(state.vertical.strike1),second=verticalRow(state.vertical.strike2);
+    if(first&&!state.vertical.entry1)state.vertical.entry1=verticalMid(first);
+    if(second&&!state.vertical.entry2)state.vertical.entry2=verticalMid(second);
+    $('vertical-type').value=state.vertical.type;
+    $('vertical-structure').value=state.vertical.structure;
+    $('vertical-side1').value=state.vertical.side1;
+    $('vertical-side2').value=state.vertical.side2;
+    $('vertical-strike1').innerHTML=verticalOptions(rows,state.vertical.strike1,state.vertical.strike2);
+    $('vertical-strike2').innerHTML=verticalOptions(rows,state.vertical.strike2,state.vertical.strike1);
+    $('vertical-strike1').value=state.vertical.strike1;
+    $('vertical-strike2').value=state.vertical.strike2;
+    $('vertical-entry1').value=state.vertical.entry1;
+    $('vertical-entry2').value=state.vertical.entry2;
+    $('vertical-quantity').value=state.vertical.quantity;
+    $('vertical-quote1').textContent=first?'Live bid / ask: '+dollars(first.quote.bid)+' / '+dollars(first.quote.ask)+' · '+quoteAge(first.quote):'No fresh live quote';
+    $('vertical-quote2').textContent=second?'Live bid / ask: '+dollars(second.quote.bid)+' / '+dollars(second.quote.ask)+' · '+quoteAge(second.quote):'No fresh live quote';
+    renderVerticalSummary();
+  }
+  function resetVerticalTemplate() {
+    state.vertical.side1=state.vertical.structure==='debit'?'buy':'sell';
+    state.vertical.side2=state.vertical.structure==='debit'?'sell':'buy';
+  }
+  function applyVerticalSpread() {
+    const rows=[verticalRow(state.vertical.strike1),verticalRow(state.vertical.strike2)];
+    const quantity=numeric(state.vertical.quantity),entries=[numeric(state.vertical.entry1),numeric(state.vertical.entry2)];
+    if(!rows.every(Boolean))return setMessage('Choose two strikes with fresh live quotes from the selected expiration.');
+    if(!Number.isInteger(quantity)||quantity<1||quantity>10000)
+      return setMessage('Enter a whole-number quantity from 1 to 10,000.');
+    if(entries.some(value=>value==null||value<0||value>1e6))
+      return setMessage('Enter a valid premium for each vertical leg.');
+    const legs=rows.map((row,i)=>({...marketLeg(row,state.vertical['side'+(i+1)],quantity),
+      quantity,entry:entries[i],expiry:state.expiry}));
+    const metrics=verticalSpreadMetrics(legs,numeric(state.fee)??0);
+    if(!metrics.valid)return setMessage(metrics.reason);
+    groupAnchor=null;state.legs=legs;state.package='';$('package').value='';
+    updatePositions();$('positions').open=true;
+    setMessage('Applied '+(state.vertical.type==='call'?'call':'put')+' '+metrics.entryType+
+      ' vertical · '+feedName(feed)+' quotes · Chart Lab P&L now uses these two selected legs.');
+  }
   function renderChain() {
     const body = $('chain');
     body.innerHTML = chain.length ? chain.map((row,i) => {
@@ -536,6 +686,7 @@ export function createOptionsBuilder({onPositionsChange=()=>{}}={}) {
         '</td><td><button type="button" class="btn small" data-chain="'+i+'" data-side="buy">Buy</button> '+
         '<button type="button" class="btn small" data-chain="'+i+'" data-side="sell">Sell</button></td></tr>';
     }).join('') : '<tr><td colspan="7" class="muted">No chain loaded.</td></tr>';
+    renderVertical();
   }
   function addLeg(leg) {
     if (state.legs.length >= MAX_LEGS) return setMessage(maxLegMessage);
@@ -727,6 +878,14 @@ export function createOptionsBuilder({onPositionsChange=()=>{}}={}) {
     const flip = event.target.closest('[data-flip]');
     if (flip) return flipLeg(Number(flip.dataset.flip));
     const {ob,remove,chain:chainIndex,side,expiryDay,scenarioView,quickType} = button.dataset;
+    if(button.dataset.verticalAction==='apply')applyVerticalSpread();
+    if(button.dataset.verticalAction==='midpoints'){
+      const first=verticalRow(state.vertical.strike1),second=verticalRow(state.vertical.strike2);
+      state.vertical.entry1=verticalMid(first);state.vertical.entry2=verticalMid(second);
+      $('vertical-entry1').value=state.vertical.entry1;$('vertical-entry2').value=state.vertical.entry2;
+      renderVerticalSummary();
+    }
+    if(button.dataset.verticalAction==='refresh')void refreshChain({discover:!expirations.length});
     if (expiryDay) selectExpiry(expiryDay);
     if (scenarioView) {
       state.view = scenarioView;
@@ -766,6 +925,32 @@ export function createOptionsBuilder({onPositionsChange=()=>{}}={}) {
   function control(event) {
     const el = event.target;
     const {ob,field,leg:row} = el.dataset;
+    const verticalField=el.dataset.vertical;
+    if(verticalField){
+      const value=el.value;
+      if(verticalField==='expiry'&&event.type==='change'){selectExpiry(value);return;}
+      if(verticalField==='type'&&event.type==='change'){
+        state.vertical.type=value;verticalDefaults(verticalRows());renderVertical();return;
+      }
+      if(verticalField==='structure'&&event.type==='change'){
+        state.vertical.structure=value;resetVerticalTemplate();renderVertical();return;
+      }
+      if(verticalField==='side1'||verticalField==='side2'){
+        state.vertical[verticalField]=value;renderVerticalSummary();return;
+      }
+      if(verticalField==='strike1'||verticalField==='strike2'){
+        state.vertical[verticalField]=value;
+        const row=verticalRow(value),legNumber=verticalField.slice(-1);
+        state.vertical['entry'+legNumber]=verticalMid(row);
+        $('vertical-entry'+legNumber).value=state.vertical['entry'+legNumber];
+        $('vertical-quote'+legNumber).textContent=row?
+          'Live bid / ask: '+dollars(row.quote.bid)+' / '+dollars(row.quote.ask)+' · '+quoteAge(row.quote):'No fresh live quote';
+        renderVerticalSummary();return;
+      }
+      if(verticalField==='entry1'||verticalField==='entry2'||verticalField==='quantity'){
+        state.vertical[verticalField]=value;renderVerticalSummary();return;
+      }
+    }
     if (field && state.legs[row]) {
       const leg = state.legs[row];
       if (leg[field] === el.value) return;
@@ -789,6 +974,8 @@ export function createOptionsBuilder({onPositionsChange=()=>{}}={}) {
         return setMessage('Enter a valid U.S. ticker.');
       }
       state.symbol = next;
+      state.vertical.strike1='';state.vertical.strike2='';
+      state.vertical.entry1='';state.vertical.entry2='';state.vertical.expiry='';
       groupAnchor=null;
       state.price = $('price').value = '';
       $('spot-source').textContent = spotSource = '';
@@ -807,6 +994,7 @@ export function createOptionsBuilder({onPositionsChange=()=>{}}={}) {
       renderLegs();
       renderChain();
       renderExpiry();
+      renderVertical();
       refreshMarks();
       if (ownerToken) void refreshChain({discover:true});
     }
@@ -844,6 +1032,28 @@ export function createOptionsBuilder({onPositionsChange=()=>{}}={}) {
       Object.keys(PRESETS).map(name=>option(name,name,state.preset===name)).join('')+'</select></label>'+
       '<button type="button" class="btn" data-ob="preset-apply">Apply preset</button></div>'+
       '<div class="options-expirations"><h2>Expiration</h2><div class="options-date-strip" data-ob="expiry-strip" role="group" aria-label="Available expirations"></div></div>'+
+      '<section class="panel options-vertical" aria-label="Vertical spread builder"><div class="panel-header"><div><h2>Vertical spread builder</h2><p class="section-note">Two listed legs · same expiration · equal contract quantity</p></div><button type="button" class="btn small" data-vertical-action="refresh">Refresh live strikes</button></div>'+
+      '<div class="panel-body"><div class="options-vertical-settings">'+
+      '<label class="field">Expiration<select data-vertical="expiry" id="vertical-expiry" aria-label="Vertical expiration"></select></label>'+
+      '<label class="field">Option type<select data-vertical="type" id="vertical-type" aria-label="Vertical option type">'+option('call','Call',true)+option('put','Put')+'</select></label>'+
+      '<label class="field">Spread structure<select data-vertical="structure" id="vertical-structure" aria-label="Vertical spread structure">'+option('debit','Debit',true)+option('credit','Credit')+'</select></label>'+
+      '<label class="field">Contracts per leg<input data-vertical="quantity" id="vertical-quantity" type="number" min="1" max="10000" step="1" value="1"></label></div>'+
+      '<div class="options-vertical-legs">'+
+      '<article class="options-vertical-leg"><header><h3>Leg 1</h3><span>First contract</span></header>'+
+      '<label class="field">Action<select data-vertical="side1" id="vertical-side1" aria-label="Vertical leg 1 action">'+option('buy','Buy',true)+option('sell','Sell')+'</select></label>'+
+      '<label class="field">Strike<select data-vertical="strike1" id="vertical-strike1" aria-label="Vertical leg 1 strike">'+option('','Load live quotes')+'</select></label>'+
+      '<label class="field">Entry premium per share<input data-vertical="entry1" id="vertical-entry1" type="number" min="0" max="1000000" step="any" aria-label="Vertical leg 1 entry premium"></label>'+
+      '<p class="options-vertical-quote" data-ob="vertical-quote1" id="vertical-quote1">No fresh live quote</p></article>'+
+      '<article class="options-vertical-leg"><header><h3>Leg 2</h3><span>Second contract</span></header>'+
+      '<label class="field">Action<select data-vertical="side2" id="vertical-side2" aria-label="Vertical leg 2 action">'+option('sell','Sell',true)+option('buy','Buy')+'</select></label>'+
+      '<label class="field">Strike<select data-vertical="strike2" id="vertical-strike2" aria-label="Vertical leg 2 strike">'+option('','Load live quotes')+'</select></label>'+
+      '<label class="field">Entry premium per share<input data-vertical="entry2" id="vertical-entry2" type="number" min="0" max="1000000" step="any" aria-label="Vertical leg 2 entry premium"></label>'+
+      '<p class="options-vertical-quote" data-ob="vertical-quote2" id="vertical-quote2">No fresh live quote</p></article></div>'+
+      '<div class="options-vertical-summary options-metrics" data-ob="vertical-summary" aria-live="polite"></div>'+
+      '<p class="options-vertical-status" data-ob="vertical-status" role="status">Load fresh live option quotes to build a vertical spread.</p>'+
+      '<div class="options-vertical-actions"><button type="button" class="btn small" data-vertical-action="midpoints">Use live quote midpoints</button>'+
+      '<button type="button" class="btn primary" data-vertical-action="apply">Replace positions with this spread</button></div>'+
+      '<p class="section-note">Entry premiums start at the live bid/ask midpoint and remain editable. Max profit, max loss, breakeven and risk/reward use exact expiration intrinsic value and selected entry premiums, including fees. Applying replaces the current Options Builder position and updates the existing Chart Lab P&amp;L overlay.</p></div></section>'+
       '<div class="options-ruler-head"><h2>Strikes</h2><p>Drag the gold price handle to shift all legs · Drag individual legs sideways · Swipe buys up or sells down to remove · Tap B/S to flip</p></div>'+
       '<div class="options-quick-add buy" role="group" aria-label="Add buy legs"><button type="button" class="btn small" data-quick-type="call" data-quick-side="buy">+ Buy Call</button>'+
       '<button type="button" class="btn small" data-quick-type="put" data-quick-side="buy">+ Buy Put</button></div>'+

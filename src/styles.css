@@ -786,3 +786,33 @@ tr[data-vol-symbol] td:nth-child(3){min-width:138px}
 @media(max-width:760px) {
   .chart-options-pnl-readout { flex-basis:100%; margin-inline-start:0; }
 }
+
+
+/* Dedicated two-leg vertical spread builder; cards intentionally stack top-to-bottom. */
+.options-vertical { margin-top:12px; }
+.options-vertical .panel-header { align-items:center; }
+.options-vertical .panel-header h2 { margin:0; font-size:15px; }
+.options-vertical .panel-header .section-note { margin:3px 0 0; }
+.options-vertical-settings { display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:10px; }
+.options-vertical-settings .field,.options-vertical-leg .field { min-width:0; display:grid; gap:5px; font-size:12px; color:var(--muted); }
+.options-vertical-settings input,.options-vertical-settings select,
+.options-vertical-leg input,.options-vertical-leg select {
+  width:100%; min-width:0; min-height:38px; padding:7px 9px;
+  border:1px solid var(--border); border-radius:7px; background:var(--bg); color:var(--text);
+}
+.options-vertical-legs { display:grid; grid-template-columns:minmax(0,1fr); gap:9px; margin-top:12px; }
+.options-vertical-leg { display:grid; grid-template-columns:minmax(85px,.55fr) repeat(3,minmax(0,1fr)); gap:10px; align-items:end;
+  padding:11px; border:1px solid var(--border); border-radius:9px; background:var(--bg); }
+.options-vertical-leg header { align-self:center; display:grid; gap:3px; }
+.options-vertical-leg header h3 { margin:0; font-size:13px; color:var(--text); }
+.options-vertical-leg header span,.options-vertical-quote { color:var(--muted); font-size:11px; }
+.options-vertical-quote { grid-column:2/-1; margin:0; font-variant-numeric:tabular-nums; }
+.options-vertical-summary { margin-top:12px; }
+.options-vertical-status { margin:8px 0; color:var(--muted); font-size:12px; }
+.options-vertical-actions { display:flex; flex-wrap:wrap; gap:8px; margin-top:10px; }
+@media(max-width:680px) {
+  .options-vertical-settings { grid-template-columns:repeat(2,minmax(0,1fr)); }
+  .options-vertical-leg { grid-template-columns:repeat(2,minmax(0,1fr)); }
+  .options-vertical-leg header { grid-column:1/-1; }
+  .options-vertical-quote { grid-column:1/-1; }
+}
