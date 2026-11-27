@@ -55,9 +55,9 @@ test('builds call debit and put credit verticals from live contracts and updates
  await expect(builder.getByLabel('Second vertical contract strike')).toHaveValue('95');
  await expect(builder.getByLabel('First vertical contract action')).toHaveValue('sell');
  await expect(builder.getByLabel('Second vertical contract action')).toHaveValue('buy');
+ await builder.getByLabel('Contracts per leg').fill('1');
  await expect(builder.locator('[data-ob=vertical-summary]')).toContainText('$200.00 credit');
  await expect(builder.locator('[data-ob=vertical-summary]')).toContainText('$300.00');
- await builder.getByLabel('Contracts per leg').fill('1');
  await builder.getByRole('button',{name:'Replace positions with this spread'}).click();
  await expect(builder.getByLabel('Leg 1 side')).toHaveValue('sell');
  await expect(builder.getByLabel('Leg 2 side')).toHaveValue('buy');
