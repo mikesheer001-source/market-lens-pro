@@ -21,7 +21,9 @@ test('builds call debit and put credit verticals from live contracts and updates
     {symbol:'SPY'+expiry+'C'+strike,root:'SPY',type:'call',expiry,strike,multiplier:100,quote:{bid:calls[strike][0],ask:calls[strike][1],time:quoteTime}},
     {symbol:'SPY'+expiry+'P'+strike,root:'SPY',type:'put',expiry,strike,multiplier:100,quote:{bid:puts[strike][0],ask:puts[strike][1],time:quoteTime}}
   ])}});
-  if(url.pathname.endsWith('/snapshots'))return route.fulfill({json:{feed:'indicative',quotes:{}}});
+  if(url.pathname.endsWith('/snapshots'))return route.fulfill({json:{feed:'indicative',quotes:Object.fromEntries(strikes.flatMap(strike=>[
+    ['C',calls[strike]],['P',puts[strike]]
+  ].map(([type,[bid,ask]])=>['SPY'+expiry+type+strike,{bid,ask,time:quoteTime}])))}});
   return route.fulfill({status:404,json:{error:'Unexpected options request'}});
  });
  const errors=[];page.on('pageerror',error=>errors.push(error.message));
