@@ -39,8 +39,8 @@ test('rejects mismatched, naked, stale or unquoted vertical legs',()=>{
  assert.match(verticalSpreadMetrics([legs[0]],0,now).reason,/exactly two/);
  assert.match(verticalSpreadMetrics(legs.map(x=>({...x,side:'buy'})),0,now).reason,/one buy/);
  assert.match(verticalSpreadMetrics(legs.map((x,i)=>({...x,expiry:i?'2026-12-19':expiry})),0,now).reason,/expiration/);
- assert.match(verticalSpreadMetrics(legs.map(x=>({...x,type:'put'})),0,now).reason,/same option type/);
- assert.match(verticalSpreadMetrics(legs.map(x=>({...x,quantity:2})),0,now).reason,/same valid whole-number/);
+ assert.match(verticalSpreadMetrics(legs.map((x,i)=>({...x,type:i?'put':'call'})),0,now).reason,/same option type/);
+ assert.match(verticalSpreadMetrics(legs.map((x,i)=>({...x,quantity:i?2:1})),0,now).reason,/same valid whole-number/);
  assert.match(verticalSpreadMetrics(legs.map(x=>({...x,quote:null})),0,now).reason,/Fresh live bid/);
  assert.match(verticalSpreadMetrics(legs.map(x=>({...x,quote:quote(1,2)})),0,now+120_001).reason,/Fresh live bid/);
  assert.match(verticalSpreadMetrics(legs,-1,now).reason,/valid fee/);
