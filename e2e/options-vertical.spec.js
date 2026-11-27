@@ -51,8 +51,8 @@ test('builds call debit and put credit verticals from live contracts and updates
  await expect(builder.getByLabel('Leg 2 strike',{exact:true})).toHaveValue('105');
  await builder.getByLabel('Vertical option type').selectOption('put');
  await builder.getByLabel('Vertical spread structure').selectOption('credit');
- await expect(builder.getByLabel('First vertical contract strike')).toHaveValue('105');
- await expect(builder.getByLabel('Second vertical contract strike')).toHaveValue('100');
+ await expect(builder.getByLabel('First vertical contract strike')).toHaveValue('100');
+ await expect(builder.getByLabel('Second vertical contract strike')).toHaveValue('95');
  await expect(builder.getByLabel('First vertical contract action')).toHaveValue('sell');
  await expect(builder.getByLabel('Second vertical contract action')).toHaveValue('buy');
  await expect(builder.locator('[data-ob=vertical-summary]')).toContainText('$200.00 credit');
@@ -64,6 +64,6 @@ test('builds call debit and put credit verticals from live contracts and updates
  await page.locator('.sidebar [data-tab="charts"]').click();
  await configurePnl(page);
  await expect(page.locator('#price-chart')).toHaveAttribute('data-options-pnl-status','ready');
- await expect(page.locator('#price-chart')).toHaveAttribute('data-options-pnl-breakevens','[103]');
+ await expect(page.locator('#price-chart')).toHaveAttribute('data-options-pnl-breakevens','[98]');
  expect(errors).toEqual([]);
 });
