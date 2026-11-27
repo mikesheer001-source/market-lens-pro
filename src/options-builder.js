@@ -98,6 +98,7 @@ export function createOptionsBuilder({onPositionsChange=()=>{}}={}) {
       entry1:'',entry2:'',quantity:'1',expiry:''}
   };
   const $ = name => root.querySelector('[data-ob="'+name+'"]');
+  const v = name => root.querySelector('#vertical-'+name);
   const manualExpiry = days => localDate(Date.now()+DAY*days);
   const active = () => root?.isConnected;
   // Share only the active position inputs and timestamped quote marks with Chart Lab.
@@ -622,7 +623,7 @@ export function createOptionsBuilder({onPositionsChange=()=>{}}={}) {
       ' · expiration risk includes entry fees.';
   }
   function renderVertical() {
-    const expiryControl=$('vertical-expiry');
+    const expiryControl=v('expiry');
     if(!expiryControl)return;
     expiryControl.innerHTML=expirations.length?expirations.map(date=>option(date,date,date===state.expiry)).join(''):
       option('','No live expirations loaded');
@@ -641,19 +642,19 @@ export function createOptionsBuilder({onPositionsChange=()=>{}}={}) {
     const first=verticalRow(state.vertical.strike1),second=verticalRow(state.vertical.strike2);
     if(first&&!state.vertical.entry1)state.vertical.entry1=verticalMid(first);
     if(second&&!state.vertical.entry2)state.vertical.entry2=verticalMid(second);
-    $('vertical-type').value=state.vertical.type;
-    $('vertical-structure').value=state.vertical.structure;
-    $('vertical-side1').value=state.vertical.side1;
-    $('vertical-side2').value=state.vertical.side2;
-    $('vertical-strike1').innerHTML=verticalOptions(rows,state.vertical.strike1,state.vertical.strike2);
-    $('vertical-strike2').innerHTML=verticalOptions(rows,state.vertical.strike2,state.vertical.strike1);
-    $('vertical-strike1').value=state.vertical.strike1;
-    $('vertical-strike2').value=state.vertical.strike2;
-    $('vertical-entry1').value=state.vertical.entry1;
-    $('vertical-entry2').value=state.vertical.entry2;
-    $('vertical-quantity').value=state.vertical.quantity;
-    $('vertical-quote1').textContent=first?'Live bid / ask: '+dollars(first.quote.bid)+' / '+dollars(first.quote.ask)+' · '+quoteAge(first.quote):'No fresh live quote';
-    $('vertical-quote2').textContent=second?'Live bid / ask: '+dollars(second.quote.bid)+' / '+dollars(second.quote.ask)+' · '+quoteAge(second.quote):'No fresh live quote';
+    v('type').value=state.vertical.type;
+    v('structure').value=state.vertical.structure;
+    v('side1').value=state.vertical.side1;
+    v('side2').value=state.vertical.side2;
+    v('strike1').innerHTML=verticalOptions(rows,state.vertical.strike1,state.vertical.strike2);
+    v('strike2').innerHTML=verticalOptions(rows,state.vertical.strike2,state.vertical.strike1);
+    v('strike1').value=state.vertical.strike1;
+    v('strike2').value=state.vertical.strike2;
+    v('entry1').value=state.vertical.entry1;
+    v('entry2').value=state.vertical.entry2;
+    v('quantity').value=state.vertical.quantity;
+    v('quote1').textContent=first?'Live bid / ask: '+dollars(first.quote.bid)+' / '+dollars(first.quote.ask)+' · '+quoteAge(first.quote):'No fresh live quote';
+    v('quote2').textContent=second?'Live bid / ask: '+dollars(second.quote.bid)+' / '+dollars(second.quote.ask)+' · '+quoteAge(second.quote):'No fresh live quote';
     renderVerticalSummary();
   }
   function resetVerticalTemplate() {
@@ -885,7 +886,7 @@ export function createOptionsBuilder({onPositionsChange=()=>{}}={}) {
     if(button.dataset.verticalAction==='midpoints'){
       const first=verticalRow(state.vertical.strike1),second=verticalRow(state.vertical.strike2);
       state.vertical.entry1=verticalMid(first);state.vertical.entry2=verticalMid(second);
-      $('vertical-entry1').value=state.vertical.entry1;$('vertical-entry2').value=state.vertical.entry2;
+      v('entry1').value=state.vertical.entry1;v('entry2').value=state.vertical.entry2;
       renderVerticalSummary();
     }
     if(button.dataset.verticalAction==='refresh')void refreshChain({discover:!expirations.length});
@@ -945,8 +946,8 @@ export function createOptionsBuilder({onPositionsChange=()=>{}}={}) {
         state.vertical[verticalField]=value;
         const row=verticalRow(value),legNumber=verticalField.slice(-1);
         state.vertical['entry'+legNumber]=verticalMid(row);
-        $('vertical-entry'+legNumber).value=state.vertical['entry'+legNumber];
-        $('vertical-quote'+legNumber).textContent=row?
+        v('entry'+legNumber).value=state.vertical['entry'+legNumber];
+        v('quote'+legNumber).textContent=row?
           'Live bid / ask: '+dollars(row.quote.bid)+' / '+dollars(row.quote.ask)+' · '+quoteAge(row.quote):'No fresh live quote';
         renderVerticalSummary();return;
       }
