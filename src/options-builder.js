@@ -1044,14 +1044,14 @@ export function createOptionsBuilder({onPositionsChange=()=>{}}={}) {
       '<label class="field">Contracts per leg<input data-vertical="quantity" id="vertical-quantity" type="number" min="1" max="10000" step="1" value="1"></label></div>'+
       '<div class="options-vertical-legs">'+
       '<article class="options-vertical-leg"><header><h3>Leg 1</h3><span>First contract</span></header>'+
-      '<label class="field">Action<select data-vertical="side1" id="vertical-side1" aria-label="Vertical leg 1 action">'+option('buy','Buy',true)+option('sell','Sell')+'</select></label>'+
-      '<label class="field">Strike<select data-vertical="strike1" id="vertical-strike1" aria-label="Vertical leg 1 strike">'+option('','Load live quotes')+'</select></label>'+
-      '<label class="field">Entry premium per share<input data-vertical="entry1" id="vertical-entry1" type="number" min="0" max="1000000" step="any" aria-label="Vertical leg 1 entry premium"></label>'+
+      '<label class="field">Action<select data-vertical="side1" id="vertical-side1" aria-label="First vertical contract action">'+option('buy','Buy',true)+option('sell','Sell')+'</select></label>'+
+      '<label class="field">Strike<select data-vertical="strike1" id="vertical-strike1" aria-label="First vertical contract strike">'+option('','Load live quotes')+'</select></label>'+
+      '<label class="field">Entry premium per share<input data-vertical="entry1" id="vertical-entry1" type="number" min="0" max="1000000" step="any" aria-label="First vertical contract entry premium"></label>'+
       '<p class="options-vertical-quote" data-ob="vertical-quote1" id="vertical-quote1">No fresh live quote</p></article>'+
       '<article class="options-vertical-leg"><header><h3>Leg 2</h3><span>Second contract</span></header>'+
-      '<label class="field">Action<select data-vertical="side2" id="vertical-side2" aria-label="Vertical leg 2 action">'+option('sell','Sell',true)+option('buy','Buy')+'</select></label>'+
-      '<label class="field">Strike<select data-vertical="strike2" id="vertical-strike2" aria-label="Vertical leg 2 strike">'+option('','Load live quotes')+'</select></label>'+
-      '<label class="field">Entry premium per share<input data-vertical="entry2" id="vertical-entry2" type="number" min="0" max="1000000" step="any" aria-label="Vertical leg 2 entry premium"></label>'+
+      '<label class="field">Action<select data-vertical="side2" id="vertical-side2" aria-label="Second vertical contract action">'+option('sell','Sell',true)+option('buy','Buy')+'</select></label>'+
+      '<label class="field">Strike<select data-vertical="strike2" id="vertical-strike2" aria-label="Second vertical contract strike">'+option('','Load live quotes')+'</select></label>'+
+      '<label class="field">Entry premium per share<input data-vertical="entry2" id="vertical-entry2" type="number" min="0" max="1000000" step="any" aria-label="Second vertical contract entry premium"></label>'+
       '<p class="options-vertical-quote" data-ob="vertical-quote2" id="vertical-quote2">No fresh live quote</p></article></div>'+
       '<div class="options-vertical-summary options-metrics" data-ob="vertical-summary" aria-live="polite"></div>'+
       '<p class="options-vertical-status" data-ob="vertical-status" role="status">Load fresh live option quotes to build a vertical spread.</p>'+
