@@ -601,9 +601,12 @@ export function createOptionsBuilder({onPositionsChange=()=>{}}={}) {
       status.textContent='Load fresh live option quotes for at least two strikes at the selected expiration.';
       return;
     }
-    const legs=rows.map((row,i)=>({...marketLeg(row,state.vertical['side'+(i+1)],quantity||1),
+    if(!Number.isInteger(quantity)||quantity<1||quantity>10000){
+      summary.innerHTML='';status.textContent='Enter a whole-number quantity from 1 to 10,000.';return;
+    }
+    const legs=rows.map((row,i)=>({...marketLeg(row,state.vertical['side'+(i+1)],quantity),
       quantity,entry:entries[i],expiry:state.expiry}));
-    const metrics=verticalSpreadMetrics(legs,numeric(state.fee)??0);
+    const metrics=verticalSpreadMetrics(legs,numeric(state.fee));
     if(!metrics.valid){summary.innerHTML='';status.textContent=metrics.reason;return;}
     const entry=metrics.netEntry>1e-8?dollars(metrics.netEntry)+' debit':
       metrics.netEntry< -1e-8?dollars(-metrics.netEntry)+' credit':'$0.00 net entry';
@@ -667,7 +670,7 @@ export function createOptionsBuilder({onPositionsChange=()=>{}}={}) {
       return setMessage('Enter a valid premium for each vertical leg.');
     const legs=rows.map((row,i)=>({...marketLeg(row,state.vertical['side'+(i+1)],quantity),
       quantity,entry:entries[i],expiry:state.expiry}));
-    const metrics=verticalSpreadMetrics(legs,numeric(state.fee)??0);
+    const metrics=verticalSpreadMetrics(legs,numeric(state.fee));
     if(!metrics.valid)return setMessage(metrics.reason);
     groupAnchor=null;state.legs=legs;state.package='';$('package').value='';
     updatePositions();$('positions').open=true;
@@ -1007,6 +1010,7 @@ export function createOptionsBuilder({onPositionsChange=()=>{}}={}) {
         renderRuler();
       }
       if (ob==='shift') $('scenario-iv').value = el.value;
+      if(ob==='fee')renderVerticalSummary();
       if (ob!=='preset') refreshMarks();
     }
     if (ob==='chart-range' || ob==='scenario-iv') {
