@@ -29,6 +29,7 @@ jobs:
       - run: npx playwright test e2e/server-scan.spec.js
       - run: npx playwright test e2e/options-pnl-overlay.spec.js
       - run: npx playwright test e2e/options-vertical.spec.js
+      - run: npx playwright test e2e/chart-history.spec.js
       - run: npm run test:e2e
       - uses: actions/configure-pages@v5
       - uses: actions/upload-pages-artifact@v4

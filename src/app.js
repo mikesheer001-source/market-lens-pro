@@ -629,7 +629,7 @@ async function initApp(){
           const cached=await readCachedIntraday(key);
           if(intradayCacheFresh(cached,{symbol,feed,expected:expectedNyseBarDate(),now:Date.now()})){
             S.intraday.set(key,cached);
-            S.intradayStatus.set(key,{status:'ready',bars:cached.bars.length,cached:true});
+            S.intradayStatus.set(key,{status:'ready',bars:cached.bars.length,cached:true,checkedAt:Date.now()});
             return cached;
           }
         }
@@ -664,7 +664,7 @@ async function initApp(){
         const record={symbol,bars:received,source:'ALPACA',feed:payload.feed||feed,
           fetchedAt:Date.now(),resolution,start:payload.start,end:payload.end};
         S.intraday.set(key,record);
-        S.intradayStatus.set(key,{status:'ready',bars:received.length,cached:false});
+        S.intradayStatus.set(key,{status:'ready',bars:received.length,cached:false,checkedAt:Date.now()});
         await persistIntraday(key,record);
         return record;
       }catch(err){
@@ -2377,10 +2377,19 @@ async function initApp(){
       }
       mountChartResize();mountPriceChart();populateChartWorkspaces();
     }
-    if(['charts','backtest','optimize'].includes(S.tab)&&intradayTf(S.chart.tf)&&S.mode==='live'&&
-      S.sources.get(S.symbol)==='ALPACA'&&!S.intraday.get(intradayKey(S.symbol))&&
-      !S.intradayStatus.get(intradayKey(S.symbol)))
-      void Promise.resolve().then(()=>loadLiveIntraday(S.symbol)).catch(()=>{});
+    if(['charts','backtest','optimize'].includes(S.tab)&&intradayTf(S.chart.tf)&&
+      S.mode==='live'&&S.sources.get(S.symbol)==='ALPACA'){
+      const key=intradayKey(S.symbol),entry=S.intraday.get(key),state=S.intradayStatus.get(key);
+      const fresh=intradayCacheFresh(entry,{symbol:S.symbol,feed:S.liveFeed,
+        expected:expectedNyseBarDate(),now:Date.now()});
+      // A chart can outlive its five-minute cache window while a newer daily
+      // scan updates the header. Recheck stale in-memory bars on the next
+      // render, but back off for five minutes after an unsuccessful refresh.
+      const retryDue=!state||(state.status==='ready'&&
+        Date.now()-Number(state.checkedAt||0)>=300_000);
+      if(!fresh&&retryDue)
+        void Promise.resolve().then(()=>loadLiveIntraday(S.symbol)).catch(()=>{});
+    }
     if(S.tab==='backtest')mountBacktestCharts();
     saveSettings();
   }
