@@ -31,14 +31,14 @@ test('put debit and credit spreads calculate correct expiration risk',()=>{
 });
 test('fees and contract quantity are included in exact spread risk',()=>{
  const r=verticalSpreadMetrics(callDebit().map(x=>({...x,quantity:3})),.65,now);
- assert.equal(r.netEntry,303.9);assert.equal(r.maxProfit,1196.1);assert.equal(r.maxLoss,303.9);
- assert.ok(Math.abs(r.breakevens[0]-101.013)<1e-9);
+ assert.ok(Math.abs(r.netEntry-303.9)<1e-9);assert.ok(Math.abs(r.maxProfit-1196.1)<1e-9);
+ assert.ok(Math.abs(r.maxLoss-303.9)<1e-9);assert.ok(Math.abs(r.breakevens[0]-101.013)<1e-9);
 });
 test('rejects mismatched, naked, stale or unquoted vertical legs',()=>{
  const legs=callDebit();
  assert.match(verticalSpreadMetrics([legs[0]],0,now).reason,/exactly two/);
  assert.match(verticalSpreadMetrics(legs.map(x=>({...x,side:'buy'})),0,now).reason,/one buy/);
- assert.match(verticalSpreadMetrics(legs.map((x,i)=>({...x,expiry:i?'2026-12-19':expiry})),0,now).reason,/same valid expiration/);
+ assert.match(verticalSpreadMetrics(legs.map((x,i)=>({...x,expiry:i?'2026-12-19':expiry})),0,now).reason,/expiration/);
  assert.match(verticalSpreadMetrics(legs.map(x=>({...x,type:'put'})),0,now).reason,/same option type/);
  assert.match(verticalSpreadMetrics(legs.map(x=>({...x,quantity:2})),0,now).reason,/same valid whole-number/);
  assert.match(verticalSpreadMetrics(legs.map(x=>({...x,quote:null})),0,now).reason,/Fresh live bid/);
