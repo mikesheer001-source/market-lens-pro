@@ -14,7 +14,7 @@ export function medianChartPoints(levels,intraday=false){
 // These are whitespace dates, not price bars. Use weekday slots on daily/intraday
 // charts and period starts on weekly/monthly charts, plus the exact contract dates.
 // Intraday future spacing is intentionally condensed to days, not invented minute bars.
-export function medianProjectionTimeline(lastTime,tf,points){
+export function medianProjectionTimeline(lastTime,tf,points,tailSlots=0){
   if(!points.length)return [];
   const intraday=!['D','W','M'].includes(tf),last=dateMs(lastTime);
   const firstDay=Math.floor(last/dayMs)*dayMs;
@@ -28,6 +28,14 @@ export function medianProjectionTimeline(lastTime,tf,points){
     if(dateMs(time)>last)times.set(dateMs(time),time);
   }
   for(const point of points)times.set(dateMs(point.time),point.time);
+  // Extend with whitespace dates, never synthetic candles.
+  for(let ms=end+dayMs,remaining=tailSlots;remaining>0;ms+=dayMs){
+    const day=new Date(ms),weekday=day.getUTCDay();
+    if(tf==='W'?weekday!==1:tf==='M'?day.getUTCDate()!==1:weekday===0||weekday===6)continue;
+    const time=projectionTime(ms,intraday);
+    times.set(dateMs(time),time);
+    remaining--;
+  }
   return [...times].sort(([a],[b])=>a-b).map(([,time])=>({time}));
 }
 
@@ -126,8 +134,39 @@ export function createMedianDotLayer({chart,base,lineSeries,lastTime,tf,onInitia
     refresh(){dotPrimitive.refresh();linePrimitive.refresh();}
   };
   base.attachPrimitive(primitive);
-  let first=true,queued=false,disposed=false;
+  let first=true,queued=false,disposed=false,tailSlots=0,tailQueued=false;
   const timeScale=chart.timeScale();
+  function renderDates(){
+    const dates=medianProjectionTimeline(lastTime,tf,all().map(({point})=>point),tailSlots);
+    for(const item of instances.values()){
+      const values=new Map(item.points.map(point=>[point.time,point.price]));
+      item.series.setData(dates.map(({time})=>values.has(time)?{time,value:values.get(time)}:{time}));
+    }
+  }
+  function ensureFutureDates(range){
+    if(disposed||!range||!Number.isFinite(range.to))return;
+    const points=all().map(({point})=>point);
+    if(!points.length)return;
+    const end=Math.max(...points.map(p=>timeScale.timeToIndex(p.time)??-1));
+    if(end<0)return;
+    // Keep native crosshair dates available past the right edge.
+    const needed=Math.min(20000,Math.max(0,Math.ceil(range.to-end)+2));
+    if(needed<=tailSlots)return;
+    tailSlots=needed;
+    const prior=timeScale.getVisibleLogicalRange();
+    renderDates();
+    if(prior)timeScale.setVisibleLogicalRange(prior);
+    primitive.refresh();
+  }
+  function onVisibleRange(){
+    if(disposed||tailQueued)return;
+    tailQueued=true;
+    queueMicrotask(()=>{
+      tailQueued=false;
+      if(!disposed)ensureFutureDates(timeScale.getVisibleLogicalRange());
+    });
+  }
+  timeScale.subscribeVisibleLogicalRangeChange?.(onVisibleRange);
   function show(){
     const points=all().map(({point})=>point);
     if(!points.length)return false;
@@ -135,7 +174,9 @@ export function createMedianDotLayer({chart,base,lineSeries,lastTime,tf,onInitia
     const last=timeScale.timeToIndex(lastTime);
     if(last==null||end<0)return false;
     // Keep recent candles beside the projected dates and enough space for a label.
-    timeScale.setVisibleLogicalRange({from:Math.max(0,last-60),to:end+Math.max(3,Math.ceil((end-last+60)*.08))});
+    const range={from:Math.max(0,last-60),to:end+Math.max(3,Math.ceil((end-last+60)*.08))};
+    ensureFutureDates(range);
+    timeScale.setVisibleLogicalRange(range);
     // A persisted manual price range can clip both the latest candle and dots.
     // Explicitly fit the shared price scale whenever the projection is revealed.
     base.priceScale().setAutoScale(true);
@@ -154,12 +195,11 @@ export function createMedianDotLayer({chart,base,lineSeries,lastTime,tf,onInitia
     if(unchanged)return;
     const priorRange=timeScale.getVisibleLogicalRange();
     entry.points=points;
-    const dates=medianProjectionTimeline(lastTime,tf,all().map(({point})=>point));
-    for(const item of instances.values()){
-      const values=new Map(item.points.map(point=>[point.time,point.price]));
-      item.series.setData(dates.map(({time})=>values.has(time)?{time,value:values.get(time)}:{time}));
+    renderDates();
+    if(priorRange){
+      ensureFutureDates(priorRange);
+      timeScale.setVisibleLogicalRange(priorRange);
     }
-    if(priorRange)timeScale.setVisibleLogicalRange(priorRange);
     linePrimitive.refresh();primitive.refresh();
     if(first&&!queued&&all().length){
       queued=true;
@@ -172,6 +212,7 @@ export function createMedianDotLayer({chart,base,lineSeries,lastTime,tf,onInitia
   return {set,show,dispose(){
     if(disposed)return;
     disposed=true;
+    timeScale.unsubscribeVisibleLogicalRangeChange?.(onVisibleRange);
     base.detachPrimitive(primitive);
     for(const {series} of instances.values())chart.removeSeries(series);
     instances.clear();
