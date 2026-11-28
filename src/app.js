@@ -62,7 +62,7 @@ async function initApp(){
     volatility:[{metric:'rsi',tf:'D',op:'<',value:60},{metric:'drawdown',tf:'D',op:'<',value:-5},{metric:'emaDist',tf:'D',op:'<',value:0}],
     all:[]
   };
-  const defaultSettings={tf:'D',sliderFrames:CHART_FRAMES.map(([id])=>id),style:'candles',log:false,ema20:true,ema50:false,ema200:true,sma20:false,movingAverages:[],indicatorCopies:[],bollinger:false,volume:true,rsi:true,macd:false,rsiPeriod:14,bollPeriod:20,optionsMedian:false,optionsMedianRate:4,optionsProbability:false,optionsProbabilityRate:4,ema20Len:20,ema50Len:50,ema200Len:200,sma20Len:20,volumeHeight:17,macdFast:12,macdSlow:26,macdSignal:9,lines:{}};
+  const defaultSettings={duplicatePricePane:false,tf:'D',sliderFrames:CHART_FRAMES.map(([id])=>id),style:'candles',log:false,ema20:true,ema50:false,ema200:true,sma20:false,movingAverages:[],indicatorCopies:[],bollinger:false,volume:true,rsi:true,macd:false,rsiPeriod:14,bollPeriod:20,optionsMedian:false,optionsMedianRate:4,optionsProbability:false,optionsProbabilityRate:4,ema20Len:20,ema50Len:50,ema200Len:200,sma20Len:20,volumeHeight:17,macdFast:12,macdSlow:26,macdSignal:9,lines:{}};
   const defaultBacktest={strategy:'ema-cross',side:'long',borrowAnnualPct:0,fast:20,slow:100,rsiPeriod:14,buyLevel:30,sellLevel:65,period:20,multiplier:2,capital:10000,allocation:100,feeBps:1,slipBps:2,stopPct:0,targetPct:0};
   const workspaceKeys={
     settings:'market-lens-pro-settings',library:'market-lens-pro-pine-library-v1',
@@ -1351,6 +1351,7 @@ async function initApp(){
       '<details class="chart-tools"><summary class="chart-icon" aria-label="Chart tools" title="Chart tools">'+
       chartIcon('<circle cx="5" cy="12" r="1"/><circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/>')+
       '</summary><div class="chart-tools-menu">'+
+      button(S.chart.duplicatePricePane?'Remove duplicate chart':'Duplicate chart','duplicate-price-chart','small')+
       button(S.drawLine?'Cancel price line':'Horizontal line','draw-line','small')+
       button(indicatorInstances().some(item=>item.type==='optionsMedian')?'Hide options 50/50':'Show options 50/50','options-median-toggle','small')+
       button('View 50/50 dots','options-median-view','small')+
@@ -2433,7 +2434,7 @@ async function initApp(){
     handle.addEventListener('pointerup',finish);
     handle.addEventListener('pointercancel',finish);
     handle.addEventListener('lostpointercapture',finish);
-    const reset=()=>{S.chartHeight=null;area.style.height='';handle.setAttribute('aria-label','Resize chart height');saveSettings();};
+    const reset=()=>{S.chartHeight=null;area.style.height=S.chart.duplicatePricePane&&!S.chartFullscreen?'650px':'';handle.setAttribute('aria-label','Resize chart height');saveSettings();};
     handle.addEventListener('dblclick',reset);
     handle.addEventListener('keydown',event=>{
       if(!['ArrowUp','ArrowDown','Home'].includes(event.key))return;
@@ -2446,6 +2447,7 @@ async function initApp(){
     const b=chartBars(),el=$('#price-chart');if(!b.length){const state=S.intradayStatus.get(intradayKey(S.symbol));
       el.innerHTML='<div class="empty"><strong>'+ (state?.status==='loading'?'Loading real Alpaca intraday bars':state?.status==='error'?'Live intraday unavailable':'No genuine '+esc(S.chart.tf)+' bars available')+
         '</strong>'+esc(state?.error||'Select a daily timeframe or import timestamped intraday OHLCV. We do not simulate market data.')+'</div>';return;}
+    if(S.chart.duplicatePricePane&&!S.chartFullscreen&&S.chartHeight==null)el.style.height='650px';
     chart=newChart(el);
     chart.timeScale().applyOptions({timeVisible:intradayTf(S.chart.tf),secondsVisible:false});
     mountPriceAxisTouch(el,chart);
@@ -2455,6 +2457,31 @@ async function initApp(){
     const base=chart.addSeries(type,{...baseOptions,...style});
     const datapoints=b.map(x=>S.chart.style==='line'||S.chart.style==='area'?{time:x.time,value:x.close}:{time:x.time,open:x.open,high:x.high,low:x.low,close:x.close});
     base.setData(datapoints);
+    // Both price panes share one native chart time scale and crosshair.
+    const duplicateBase=S.chart.duplicatePricePane?chart.addSeries(type,{...baseOptions,...style},1):null;
+    duplicateBase?.setData(datapoints);
+    el.dataset.duplicatePriceChart=String(!!duplicateBase);
+    const mirrorSeries=new Map();
+    function addPriceOverlay(seriesType,options,data,paneIndex=0){
+      const series=chart.addSeries(seriesType,options,paneIndex);
+      series.setData(data);
+      if(duplicateBase&&paneIndex===0){
+        const mirror=chart.addSeries(seriesType,options,1);
+        mirror.setData(data);mirrorSeries.set(series,mirror);
+      }
+      return series;
+    }
+    function removePriceOverlay(series){
+      const mirror=mirrorSeries.get(series);
+      if(mirror){chart.removeSeries(mirror);mirrorSeries.delete(series);}
+      chart.removeSeries(series);
+    }
+    function addPriceLine(options){
+      return [base.createPriceLine(options),duplicateBase?.createPriceLine(options)];
+    }
+    function removePriceLine([primary,mirror]){
+      base.removePriceLine(primary);if(mirror)duplicateBase.removePriceLine(mirror);
+    }
     let workspaceLines=[],lastWorkspaceLevels='',optionsPnlSeries=[],lastOptionsPnlKey='';
     let activeOptionsPnl=null,displayedIndex=b.length-1;
     const updateOptionsPnlReadout=(index=displayedIndex)=>{
@@ -2495,7 +2522,7 @@ async function initApp(){
         pnl?.status,pnl?.debit,pnl?.quoteTime,pnl?.breakevens]);
       if(lastOptionsPnlKey!==optionKey){
         lastOptionsPnlKey=optionKey;
-        for(const series of optionsPnlSeries)chart.removeSeries(series);
+        for(const series of optionsPnlSeries)removePriceOverlay(series);
         optionsPnlSeries=[];
         if(chartTools.optionsPnl&&pnl?.available){
           const profitData=pnl.points.map(point=>point.pnl>=0?
@@ -2503,16 +2530,16 @@ async function initApp(){
           const lossData=pnl.points.map(point=>point.pnl<0?
             {time:point.time,value:point.price}:{time:point.time});
           if(profitData.some(point=>Number.isFinite(point.value))){
-            const series=chart.addSeries(LineSeries,{color:'#49d79d',lineWidth:3,
+            const series=addPriceOverlay(LineSeries,{color:'#49d79d',lineWidth:3,
               priceLineVisible:false,lastValueVisible:false,crosshairMarkerVisible:false,
-              title:'Options expiration P&L · profit'},0);
-            series.setData(profitData);optionsPnlSeries.push(series);
+              title:'Options expiration P&L · profit'},profitData);
+            optionsPnlSeries.push(series);
           }
           if(lossData.some(point=>Number.isFinite(point.value))){
-            const series=chart.addSeries(LineSeries,{color:'#f08b82',lineWidth:3,
+            const series=addPriceOverlay(LineSeries,{color:'#f08b82',lineWidth:3,
               priceLineVisible:false,lastValueVisible:false,crosshairMarkerVisible:false,
-              title:'Options expiration P&L · loss'},0);
-            series.setData(lossData);optionsPnlSeries.push(series);
+              title:'Options expiration P&L · loss'},lossData);
+            optionsPnlSeries.push(series);
           }
         }
         const roots=pnl?.available?pnl.breakevens:[];
@@ -2525,11 +2552,11 @@ async function initApp(){
       const key=JSON.stringify([alerts,strikes,breakevens]);
       if(lastWorkspaceLevels!==key){
         lastWorkspaceLevels=key;
-        for(const line of workspaceLines)base.removePriceLine(line);
+        for(const line of workspaceLines)removePriceLine(line);
         workspaceLines=[
-          ...alerts.map(level=>base.createPriceLine({price:level.price,title:level.label,color:level.active?'#e9bd68':'#d69c65',lineWidth:1,lineStyle:2,axisLabelVisible:true})),
-          ...strikes.map(level=>base.createPriceLine({price:level.price,title:level.label,color:'#71b8b3',lineWidth:1,lineStyle:3,axisLabelVisible:true})),
-          ...breakevens.map(level=>base.createPriceLine({price:level.price,title:level.label,color:'#e8bb72',lineWidth:2,lineStyle:2,axisLabelVisible:true}))
+          ...alerts.map(level=>addPriceLine({price:level.price,title:level.label,color:level.active?'#e9bd68':'#d69c65',lineWidth:1,lineStyle:2,axisLabelVisible:true})),
+          ...strikes.map(level=>addPriceLine({price:level.price,title:level.label,color:'#71b8b3',lineWidth:1,lineStyle:3,axisLabelVisible:true})),
+          ...breakevens.map(level=>addPriceLine({price:level.price,title:level.label,color:'#e8bb72',lineWidth:2,lineStyle:2,axisLabelVisible:true}))
         ];
         el.dataset.workspaceAlertLevels=String(alerts.length);
         el.dataset.workspaceStrikeLevels=String(strikes.length);
@@ -2547,15 +2574,12 @@ async function initApp(){
     for(const {id,type,length,color} of movingAverages(S.chart)){
       const vals=(type==='ema'?ema:sma)(c,length);
       indicatorData.set(id,[vals]);
-      const series=chart.addSeries(LineSeries,{color,lineWidth:1,priceLineVisible:false,lastValueVisible:true});
-      series.setData(vals.flatMap((v,i)=>v==null?[]:[{time:b[i].time,value:v}]));
+      addPriceOverlay(LineSeries,{color,lineWidth:1,priceLineVisible:false,lastValueVisible:true},vals.flatMap((v,i)=>v==null?[]:[{time:b[i].time,value:v}]));
     }
     const plot=(values,options,pane=0)=>{
-      const series=chart.addSeries(LineSeries,{lineWidth:1,priceLineVisible:false,...options},pane);
-      series.setData(values.flatMap((value,i)=>value==null?[]:[{time:b[i].time,value}]));
-      return series;
+      return addPriceOverlay(LineSeries,{lineWidth:1,priceLineVisible:false,...options},values.flatMap((value,i)=>value==null?[]:[{time:b[i].time,value}]),pane);
     };
-    let pane=1;
+    let pane=duplicateBase?2:1;
     for(const {id,type,settings} of instances){
       if(type==='bollinger'){
         const {basis,upper,lower}=bollingerSeries(c,settings.bollPeriod);
@@ -2564,9 +2588,10 @@ async function initApp(){
       }
       if(type==='volume'){
         indicatorData.set(id,[b.map(bar=>bar.volume??null)]);
-        const vol=chart.addSeries(HistogramSeries,{priceScaleId:id,priceLineVisible:false,lastValueVisible:false,priceFormat:{type:'volume'}});
-        vol.setData(b.map(x=>({time:x.time,value:x.volume||0,color:x.close>=x.open?'#317c6c88':'#8a3c5388'})));
-        vol.priceScale().applyOptions({scaleMargins:{top:1-settings.volumeHeight/100,bottom:0}});
+        const vol=addPriceOverlay(HistogramSeries,{priceScaleId:id,priceLineVisible:false,lastValueVisible:false,priceFormat:{type:'volume'}},b.map(x=>({time:x.time,value:x.volume||0,color:x.close>=x.open?'#317c6c88':'#8a3c5388'})));
+        const volumeScaleOptions={scaleMargins:{top:1-settings.volumeHeight/100,bottom:0}};
+        vol.priceScale().applyOptions(volumeScaleOptions);
+        mirrorSeries.get(vol)?.priceScale().applyOptions(volumeScaleOptions);
       }
       if(type==='rsi'){
         indicatorPanes.set(id,pane);
@@ -2583,8 +2608,8 @@ async function initApp(){
         plot(signal,{color:colors.yellow},pane++);
       }
     }
-    if(S.chart.log)base.priceScale().applyOptions({mode:PriceScaleMode.Logarithmic});
-    for(const p of S.chart.lines[S.symbol]||[])base.createPriceLine({price:p,color:'#e4b766',lineWidth:1,lineStyle:2,axisLabelVisible:true,title:'Level'});
+    if(S.chart.log){base.priceScale().applyOptions({mode:PriceScaleMode.Logarithmic});duplicateBase?.priceScale().applyOptions({mode:PriceScaleMode.Logarithmic});}
+    for(const p of S.chart.lines[S.symbol]||[])addPriceLine({price:p,color:'#e4b766',lineWidth:1,lineStyle:2,axisLabelVisible:true,title:'Level'});
     const pineMarkers=[];
     const tradeMarkers=chartTools.trades&&S.result&&S.resultSymbol===S.symbol&&S.resultTf===S.chart.tf?
       matchingTradeMarkers(tradeFillMarkers(S.result.trades),b):[];
@@ -2602,8 +2627,8 @@ async function initApp(){
         for(const p of evaluated.plots){
           const data=p.values.flatMap((v,k)=>Number.isFinite(v)?[{time:pineBars[k].time,value:v}]:[]);
           if(!data.length)continue;
-          const series=chart.addSeries(LineSeries,{color:p.color,lineWidth:2,priceLineVisible:false,lastValueVisible:false,title:String(item.name||program.title)+' · '+p.title},paneIndex);
-          series.setData(data);firstScriptSeries ||= series;
+          const series=addPriceOverlay(LineSeries,{color:p.color,lineWidth:2,priceLineVisible:false,lastValueVisible:false,title:String(item.name||program.title)+' · '+p.title},data,paneIndex);
+          firstScriptSeries ||= series;
         }
         const scriptMarkers=[];
         for(const shape of evaluated.shapes){
@@ -2620,11 +2645,22 @@ async function initApp(){
     el.dataset.workspacePineScripts=String(renderedPineScripts);
     const panes=chart.panes();
     if(panes.length>1)panes[0].setStretchFactor(3);
+    if(duplicateBase)panes[1].setStretchFactor(3);
     const legend=$('#chart-indicator-legend');
     const valuesByIndicator=new Map([...legend.querySelectorAll('[data-indicator-row]')].map(row=>
       [row.dataset.indicatorRow,row.querySelector('.chart-indicator-value')]));
     requestAnimationFrame(()=>{
       if(!el.isConnected)return;
+      if(duplicateBase){
+        const cell=panes[1]?.getHTMLElement()?.children[1];
+        if(cell){
+          const label=document.createElement('div');
+          label.className='chart-indicator-legend chart-pane-legend';
+          label.textContent=S.symbol+' · Duplicate chart · Linked time axis';
+          label.setAttribute('aria-label','Duplicate price chart');
+          cell.append(label);
+        }
+      }
       for(const [key,index] of indicatorPanes){
         const cell=panes[index]?.getHTMLElement()?.children[1];
         const row=legend.querySelector('[data-indicator-row="'+key+'"]');
@@ -2638,11 +2674,11 @@ async function initApp(){
         }
       }
     });
-    if(pineMarkers.length)createSeriesMarkers(base,pineMarkers.sort((a,b)=>stamp(a.time)-stamp(b.time)));
+    if(pineMarkers.length){const markers=pineMarkers.sort((a,b)=>stamp(a.time)-stamp(b.time));createSeriesMarkers(base,markers);if(duplicateBase)createSeriesMarkers(duplicateBase,markers);}
     const errorBox=$('#pine-chart-error');
     if(errorBox&&pineErrors.length){errorBox.className='pine-error';errorBox.textContent=pineErrors.join(' | ');}
 
-    chart.subscribeClick(param=>{if(!S.drawLine||!param.point)return;const p=base.coordinateToPrice(param.point.y);if(p==null||!Number.isFinite(p))return;const price=Number(p.toFixed(4));(S.chart.lines[S.symbol]??=[]).push(price);base.createPriceLine({price,color:'#e4b766',lineWidth:1,lineStyle:2,axisLabelVisible:true,title:'Level'});S.drawLine=false;saveSettings();notice('Added horizontal price level at '+format(price,4));});
+    chart.subscribeClick(param=>{if(!S.drawLine||!param.point)return;const target=param.paneIndex===1&&duplicateBase?duplicateBase:base;const p=target.coordinateToPrice(param.point.y);if(p==null||!Number.isFinite(p))return;const price=Number(p.toFixed(4));(S.chart.lines[S.symbol]??=[]).push(price);addPriceLine({price,color:'#e4b766',lineWidth:1,lineStyle:2,axisLabelVisible:true,title:'Level'});S.drawLine=false;saveSettings();notice('Added horizontal price level at '+format(price,4));});
     const barIndices=new Map(b.map((bar,index)=>[stamp(bar.time),index]));
     const readout=$('#readout');
     const indicatorTypes=new Map(instances.map(item=>[item.id,item.type]));
@@ -2700,7 +2736,7 @@ async function initApp(){
       for(const row of template.content.querySelectorAll('[data-indicator-row]')){
         if(row.querySelector('.chart-options-median-result'))legend.append(row);
       }
-      dotLayer=createMedianDotLayer({chart,base,lineSeries:LineSeries,lastTime:b.at(-1).time,tf:S.chart.tf,
+      dotLayer=createMedianDotLayer({chart,base,mirrorBase:duplicateBase,lineSeries:LineSeries,lastTime:b.at(-1).time,tf:S.chart.tf,
         onView:()=>{if(S.chartViews[viewKey]?.price){S.chartViews[viewKey].price=null;saveSettings();}}});
       viewMedianDots=()=>dotLayer?.show()||false;
       for(const instance of medians)medianStops.push(mountOptionsMedian(dotLayer,instance));
@@ -3519,8 +3555,9 @@ async function initApp(){
     'load-older-chart':()=>void loadOlderChart(true),
     'range-fit':()=>showRange(180),
     'reset-price-scale':()=>{
-      if(resetPriceScale(chart))$('#chart-axis-hint').textContent='Price scale reset';
+      if(resetPriceScale(chart)){if(S.chart.duplicatePricePane)chart.priceScale('right',1).applyOptions({autoScale:true});$('#chart-axis-hint').textContent='Price scale reset';}
     },
+    'duplicate-price-chart':()=>{preserveChartViewport();S.chart.duplicatePricePane=!S.chart.duplicatePricePane;render();$('[data-action="duplicate-price-chart"]')?.closest('details')?.querySelector('summary')?.focus({preventScroll:true});},
     'chart-fullscreen':()=>setChartFullscreen(true),
     'chart-exit-fullscreen':()=>setChartFullscreen(false),
     'indicator-picker':()=>openIndicatorDialog(),
