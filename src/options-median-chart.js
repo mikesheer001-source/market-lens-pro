@@ -122,25 +122,32 @@ export function probabilityLinePrimitive(chart,readPoints){
     paneViews:()=>views,refresh:()=>requestUpdate()};
 }
 
-export function createMedianDotLayer({chart,base,lineSeries,lastTime,tf,onInitialView,onView}){
+export function createMedianDotLayer({chart,base,lineSeries,lastTime,tf,onInitialView,onView,mirrorBase=null,mirrorPane=1}){
   const instances=new Map();
   const all=()=>[...instances.values()].flatMap(({series,points})=>points.map(point=>({series,point})));
-  const dotPrimitive=medianDotPrimitive(chart,all);
-  const linePrimitive=probabilityLinePrimitive(chart,all);
-  const primitive={
-    attached({requestUpdate}){dotPrimitive.attached({requestUpdate});linePrimitive.attached({requestUpdate});},
-    detached(){dotPrimitive.detached();linePrimitive.detached();},
-    paneViews(){return [...dotPrimitive.paneViews(),...linePrimitive.paneViews()];},
-    refresh(){dotPrimitive.refresh();linePrimitive.refresh();}
-  };
+  function makePrimitive(readPoints){
+    const dotPrimitive=medianDotPrimitive(chart,readPoints);
+    const linePrimitive=probabilityLinePrimitive(chart,readPoints);
+    return {
+      attached({requestUpdate}){dotPrimitive.attached({requestUpdate});linePrimitive.attached({requestUpdate});},
+      detached(){dotPrimitive.detached();linePrimitive.detached();},
+      paneViews(){return [...dotPrimitive.paneViews(),...linePrimitive.paneViews()];},
+      refresh(){dotPrimitive.refresh();linePrimitive.refresh();}
+    };
+  }
+  const primitive=makePrimitive(all);
+  const mirrorPrimitive=mirrorBase?makePrimitive(()=>[...instances.values()].flatMap(({mirror,points})=>mirror?points.map(point=>({series:mirror,point})):[])):null;
   base.attachPrimitive(primitive);
+  if(mirrorPrimitive)mirrorBase.attachPrimitive(mirrorPrimitive);
+  const refresh=()=>{primitive.refresh();mirrorPrimitive?.refresh();};
   let first=true,queued=false,disposed=false,tailSlots=0,tailQueued=false;
   const timeScale=chart.timeScale();
   function renderDates(){
     const dates=medianProjectionTimeline(lastTime,tf,all().map(({point})=>point),tailSlots);
     for(const item of instances.values()){
       const values=new Map(item.points.map(point=>[point.time,point.price]));
-      item.series.setData(dates.map(({time})=>values.has(time)?{time,value:values.get(time)}:{time}));
+      const data=dates.map(({time})=>values.has(time)?{time,value:values.get(time)}:{time});
+      item.series.setData(data);item.mirror?.setData(data);
     }
   }
   function ensureFutureDates(range){
@@ -156,7 +163,7 @@ export function createMedianDotLayer({chart,base,lineSeries,lastTime,tf,onInitia
     const prior=timeScale.getVisibleLogicalRange();
     renderDates();
     if(prior)timeScale.setVisibleLogicalRange(prior);
-    primitive.refresh();
+    refresh();
   }
   function onVisibleRange(){
     if(disposed||tailQueued)return;
@@ -180,8 +187,9 @@ export function createMedianDotLayer({chart,base,lineSeries,lastTime,tf,onInitia
     // A persisted manual price range can clip both the latest candle and dots.
     // Explicitly fit the shared price scale whenever the projection is revealed.
     base.priceScale().setAutoScale(true);
+    mirrorBase?.priceScale().setAutoScale(true);
     onView?.();
-    primitive.refresh();
+    refresh();
     return true;
   }
   function set(id,levels){
@@ -189,7 +197,11 @@ export function createMedianDotLayer({chart,base,lineSeries,lastTime,tf,onInitia
     const points=medianChartPoints(levels,!['D','W','M'].includes(tf)).map(p=>p.probability==null?p:{...p,projectionGroup:id});
     let entry=instances.get(id);
     if(!entry&&!points.length)return;
-    if(!entry){entry={series:chart.addSeries(lineSeries,{...medianDotSeriesOptions,color:'#7bdac6'}),points:[]};instances.set(id,entry);}
+    if(!entry){
+      const options={...medianDotSeriesOptions,color:'#7bdac6'};
+      entry={series:chart.addSeries(lineSeries,options),mirror:mirrorBase?chart.addSeries(lineSeries,options,mirrorPane):null,points:[]};
+      instances.set(id,entry);
+    }
     // Don't reset the time scale on periodic quote refreshes with the same dates.
     const unchanged=JSON.stringify(entry.points)===JSON.stringify(points);
     if(unchanged)return;
@@ -200,7 +212,7 @@ export function createMedianDotLayer({chart,base,lineSeries,lastTime,tf,onInitia
       ensureFutureDates(priorRange);
       timeScale.setVisibleLogicalRange(priorRange);
     }
-    linePrimitive.refresh();primitive.refresh();
+    refresh();
     if(first&&!queued&&all().length){
       queued=true;
       queueMicrotask(()=>{
@@ -214,7 +226,8 @@ export function createMedianDotLayer({chart,base,lineSeries,lastTime,tf,onInitia
     disposed=true;
     timeScale.unsubscribeVisibleLogicalRangeChange?.(onVisibleRange);
     base.detachPrimitive(primitive);
-    for(const {series} of instances.values())chart.removeSeries(series);
+    if(mirrorPrimitive)mirrorBase.detachPrimitive(mirrorPrimitive);
+    for(const {series,mirror} of instances.values()){chart.removeSeries(series);if(mirror)chart.removeSeries(mirror);}
     instances.clear();
   },hasPoints:()=>all().length>0};
 }
